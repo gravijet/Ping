@@ -1,0 +1,11 @@
+node_modules/
+*.db
+*.db-shm
+*.db-wal
+.env
+.dart_tool/
+build/
+.gradle/
+*.iml
+.idea/
+local.properties
