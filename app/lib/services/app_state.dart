@@ -296,6 +296,22 @@ class AppState extends ChangeNotifier {
     return chat;
   }
 
+  Future<List<PingUser>> addGroupMembers(
+      String chatId, List<String> memberIds) async {
+    final res = await _api.post('/chats/$chatId/members', {
+      'memberIds': memberIds,
+    });
+    // Refetch the chat so the member list and title reflect the new people.
+    final chatRes = await _api.get('/chats/$chatId');
+    final chat = Chat.fromJson(chatRes['chat'] as Map<String, dynamic>);
+    _upsertChat(chat);
+    _cacheChatUsers(chat);
+    notifyListeners();
+    return (res['added'] as List)
+        .map((e) => PingUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> leaveGroup(String chatId) async {
     await _api.post('/chats/$chatId/leave');
     chats.removeWhere((c) => c.id == chatId);

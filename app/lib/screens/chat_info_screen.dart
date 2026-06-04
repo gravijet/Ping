@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
 import '../utils/format.dart';
+import 'add_members_screen.dart';
 
 class ChatInfoScreen extends StatelessWidget {
   final String chatId;
@@ -90,6 +91,23 @@ class ChatInfoScreen extends StatelessWidget {
                       .textTheme
                       .titleSmall
                       ?.copyWith(color: scheme.onSurfaceVariant)),
+            ),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: scheme.primaryContainer,
+                child: Icon(Icons.person_add_alt_1_rounded,
+                    color: scheme.onPrimaryContainer),
+              ),
+              title: const Text('Mitglieder hinzufügen',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AddMembersScreen(
+                    chatId: chat.id,
+                    existingMemberIds: chat.memberIds.toSet(),
+                  ),
+                ),
+              ),
             ),
             ...chat.members.map((m) {
               final isMe = m.id == state.me?.id;

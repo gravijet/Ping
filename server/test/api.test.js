@@ -217,6 +217,40 @@ test('group chat creation and messaging', async () => {
   assert.ok(judyChats.json.chats.find((c) => c.id === group.json.chat.id));
 });
 
+test('group owner can add a new member who then sees the chat', async () => {
+  const owner = await register('kim');
+  const first = await register('lars');
+  const group = await api('/api/chats/group', {
+    method: 'POST',
+    token: owner.token,
+    body: { name: 'Projektgruppe', memberIds: [first.user.id] },
+  });
+  const chatId = group.json.chat.id;
+
+  const newbie = await register('mona');
+  const add = await api(`/api/chats/${chatId}/members`, {
+    method: 'POST',
+    token: owner.token,
+    body: { memberIds: [newbie.user.id] },
+  });
+  assert.equal(add.status, 200);
+  assert.equal(add.json.added.length, 1);
+  assert.equal(add.json.added[0].username, 'mona');
+
+  // Mona now sees the group in her list.
+  const monaChats = await api('/api/chats', { token: newbie.token });
+  assert.ok(monaChats.json.chats.find((c) => c.id === chatId));
+
+  // A non-member cannot add people.
+  const outsider = await register('nina');
+  const denied = await api(`/api/chats/${chatId}/members`, {
+    method: 'POST',
+    token: outsider.token,
+    body: { memberIds: [outsider.user.id] },
+  });
+  assert.equal(denied.status, 403);
+});
+
 test('unauthorized requests are blocked', async () => {
   const r = await api('/api/chats');
   assert.equal(r.status, 401);
