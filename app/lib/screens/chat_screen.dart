@@ -284,17 +284,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return _EmptyConversation(chat: chat);
     }
 
-    // Build a flat list of items (messages + day dividers), newest first for
-    // the reversed ListView.
+    // Build a flat list of items in chronological order: a day divider sits
+    // directly *above* the first message of each day. The list is then reversed
+    // for the bottom-anchored (reverse: true) ListView.
     final items = <_ListItem>[];
     for (var i = 0; i < messages.length; i++) {
       final m = messages[i];
-      items.add(_ListItem.message(m));
       final prev = i > 0 ? messages[i - 1] : null;
-      if (prev == null ||
-          !_sameDay(prev.time, m.time)) {
+      if (prev == null || !_sameDay(prev.time, m.time)) {
         items.add(_ListItem.divider(m.time));
       }
+      items.add(_ListItem.message(m));
     }
     final reversed = items.reversed.toList();
 

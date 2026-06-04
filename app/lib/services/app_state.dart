@@ -238,10 +238,10 @@ class AppState extends ChangeNotifier {
       });
       final real = Message.fromJson(res['message'] as Map<String, dynamic>);
       final list = _messages[chatId]!;
-      final i = list.indexWhere((m) => m.id == temp.id);
-      if (i != -1) {
-        list[i] = real;
-      }
+      // Drop the optimistic bubble and add the real one — unless the socket
+      // already delivered it to us first (the server echoes our own messages).
+      list.removeWhere((m) => m.id == temp.id);
+      if (!list.any((m) => m.id == real.id)) list.add(real);
       _bumpChat(chatId, real);
       notifyListeners();
     } on ApiException {
@@ -412,6 +412,12 @@ class AppState extends ChangeNotifier {
   }
 
   void _onIncomingMessage(Message msg) {
+    // If this is our own message echoed back, retire any still-pending
+    // optimistic bubble for it so we don't show it twice.
+    if (msg.senderId == me?.id) {
+      _messages[msg.chatId]
+          ?.removeWhere((m) => m.id.startsWith('tmp-') && m.body == msg.body);
+    }
     _appendMessage(msg);
     _bumpChat(msg.chatId, msg);
 
