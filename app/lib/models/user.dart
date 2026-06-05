@@ -95,3 +95,20 @@ class PingUser {
         hasPassword: (json['hasPassword'] ?? false) as bool,
       );
 }
+
+/// A registered Ping user that matched one of the device-contact identifiers we
+/// uploaded. [phone]/[email] echo back whichever of *our own* identifiers hit,
+/// so the UI can label the match with the local contact it came from.
+class ContactMatch {
+  final PingUser user;
+  final String? phone;
+  final String? email;
+
+  const ContactMatch({required this.user, this.phone, this.email});
+
+  factory ContactMatch.fromJson(Map<String, dynamic> json) => ContactMatch(
+        user: PingUser.fromJson(json['user'] as Map<String, dynamic>),
+        phone: json['phone'] as String?,
+        email: json['email'] as String?,
+      );
+}

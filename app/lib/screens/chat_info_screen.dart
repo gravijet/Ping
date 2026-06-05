@@ -60,19 +60,14 @@ class ChatInfoScreen extends StatelessWidget {
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
           ),
-          if (!chat.isGroup && chat.otherUser != null) ...[
-            const SizedBox(height: 4),
-            Center(
-              child: Text(chat.otherUser!.phone,
-                  style: TextStyle(color: scheme.onSurfaceVariant)),
+          if (!chat.isGroup &&
+              chat.otherUser != null &&
+              chat.otherUser!.about.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            _Section(
+              title: 'Über',
+              child: Text(chat.otherUser!.about),
             ),
-            if (chat.otherUser!.about.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _Section(
-                title: 'Über',
-                child: Text(chat.otherUser!.about),
-              ),
-            ],
           ],
           const SizedBox(height: 20),
           SwitchListTile(
@@ -126,7 +121,9 @@ class ChatInfoScreen extends StatelessWidget {
                   imageHeaders: state.authHeaders,
                 ),
                 title: Text(isMe ? '${m.label} (Du)' : m.label),
-                subtitle: Text(m.phone),
+                subtitle: Text(m.about.isNotEmpty
+                    ? m.about
+                    : (state.isOnline(m.id) ? 'online' : 'Auf Ping')),
                 trailing: isOwner
                     ? Chip(
                         label: const Text('Admin'),

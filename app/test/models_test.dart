@@ -47,6 +47,24 @@ void main() {
     });
   });
 
+  group('ContactMatch', () {
+    test('wraps the matched user and echoes the identifier', () {
+      final m = ContactMatch.fromJson({
+        'user': {
+          'id': '9',
+          'displayName': 'Mara',
+          'avatarColor': '#7E57C2',
+        },
+        'phone': '+491701112233',
+        'email': null,
+      });
+      expect(m.user.id, '9');
+      expect(m.user.label, 'Mara');
+      expect(m.phone, '+491701112233');
+      expect(m.email, isNull);
+    });
+  });
+
   group('Message', () {
     test('round-trips status and edited flag', () {
       final m = Message.fromJson({

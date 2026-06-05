@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/profile_setup_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/app_state.dart';
 import 'theme.dart';
@@ -46,14 +45,10 @@ class _Root extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = context.select<AppState, AuthStatus>((s) => s.status);
-    final needsSetup =
-        context.select<AppState, bool>((s) => s.needsProfileSetup);
     final (key, child) = switch (status) {
       AuthStatus.unknown => ('splash', const SplashScreen()),
       AuthStatus.signedOut => ('login', const LoginScreen()),
-      AuthStatus.signedIn => needsSetup
-          ? ('setup', const ProfileSetupScreen())
-          : ('home', const HomeScreen()),
+      AuthStatus.signedIn => ('home', const HomeScreen()),
     };
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 350),

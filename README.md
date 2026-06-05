@@ -1,36 +1,61 @@
 # Ping ⚡
 
-Ein schneller, bunter Messenger – mit **Anmeldung über die Handynummer**, so wie
-man es von modernen Messengern kennt. **Ping** besteht aus zwei Teilen:
+Ein schneller, bunter Messenger – mit **Registrierung über Handynummer, E-Mail
+und Passwort** und **Chats über das eigene Adressbuch**. **Ping** besteht aus
+zwei Teilen:
 
 - **`app/`** – die mobile App (Flutter, Material 3). Zielplattform ist Android,
   Windows-Desktop ist als zweite Plattform vorbereitet.
 - **`server/`** – ein Realtime-Backend (Node.js, Express + WebSocket + SQLite),
   das ohne externe Dienste auskommt.
 
-Beide Teile reden über eine REST-API (Login, Verlauf, Profile, Profilbilder) und
-einen WebSocket (neue Nachrichten, Tippen, Online-Status, Lesebestätigungen).
+Beide Teile reden über eine REST-API (Konto, Verlauf, Profile, Profilbilder,
+Kontaktabgleich, Admin) und einen WebSocket (neue Nachrichten, Tippen,
+Online-Status, Lesebestätigungen).
 
 ---
 
 ## Features
 
-- **Anmeldung per Handynummer** – kein Benutzername, kein Passwort nötig. Nummer
-  eingeben, Bestätigungscode erhalten, fertig. Neue Konten richten einmalig ihr
-  Profil ein (Name, Bild, Farbe, „Über mich").
-- **Backup mit E-Mail & Passwort** – optional in den Einstellungen hinterlegbar,
-  um sich auch ohne SMS-Code anmelden zu können.
-- **Schreiben an Telefonnummern** – einfach eine Nummer eingeben und losschreiben,
-  oder Leute über Name/Nummer suchen. Dazu Gruppen mit mehreren Personen.
+- **Registrierung in einem Schritt** – Handynummer, E-Mail und Passwort eingeben,
+  fertig. **Keine Bestätigung per SMS oder E-Mail.** Für ein Konto braucht man
+  immer alle drei: Nummer, E-Mail und Passwort.
+- **Anmeldung** – mit Handynummer **oder** E-Mail plus Passwort.
+- **Chats über Kontakte** – Ping gleicht das Adressbuch ab und zeigt, wer davon
+  schon bei Ping ist. Mit einem Tipp ist der Chat gestartet. Alternativ direkt
+  eine Handynummer oder E-Mail eingeben.
+- **Gruppen** – mehrere Kontakte auswählen, Gruppe benennen, später weitere
+  Mitglieder hinzufügen.
 - **Profile** – Profilbild (aus Galerie oder Kamera), Anzeigename, Avatarfarbe und
   „Über mich". Bilder erscheinen überall: Chatliste, Chat, Gruppen, Infos.
 - **Echtzeit** – Nachrichten kommen sofort an, inklusive Tippanzeige („tippt …"),
   Online-/Zuletzt-online-Status und ✓✓-Lesebestätigungen.
 - **Nachrichten verwalten** – antworten (mit Zitat), bearbeiten, löschen,
   kopieren. Optimistisches Senden mit Wiederholung bei Fehlern.
+- **Admin-Portal** – einfache Web-Oberfläche zum Verwalten und Anlegen von
+  Nutzern (`/admin`), abgesichert über ein geheimes Token.
 - **Komfort** – Ungelesen-Zähler, Chats stummschalten, Gruppen verlassen,
   Hell-/Dunkel-/System-Design.
 - **Benachrichtigungen** – lokale Hinweise bei neuen Nachrichten (Android).
+
+---
+
+## Datenschutz
+
+Datenschutz ist eingebaut, nicht nachgerüstet:
+
+- **Keine Fremd-Daten preisgegeben.** Telefonnummer und E-Mail einer Person
+  werden **niemals** an andere Nutzer ausgeliefert – öffentliche Profile
+  enthalten nur Name, Farbe, Bild und „Über mich".
+- **Kein Adressbuch auf dem Server.** Beim Kontaktabgleich werden die Nummern/
+  E-Mails nur für die Dauer der Anfrage im Arbeitsspeicher verglichen und sofort
+  verworfen – es wird **nichts gespeichert** und keine „wer-kennt-wen"-Liste
+  aufgebaut.
+- **Keine Namenssuche.** Es gibt bewusst keine Volltext-/Nutzersuche; man findet
+  andere nur über die exakte Nummer/E-Mail oder über die eigenen Kontakte. So
+  kann niemand das Verzeichnis nach Fremden durchforsten.
+- **Admin-Zugriff ist getrennt.** Personenbezogene Daten (Nummer, E-Mail) sind
+  nur über das tokengeschützte Admin-Portal sichtbar, nie über die normale API.
 
 ---
 
@@ -49,21 +74,15 @@ Linux-Ephemeral-Bereichs – er kollidiert also nicht mit anderen Diensten auf
 einem schon genutzten Server.
 
 Für die Entwicklung reicht das so – ohne `JWT_SECRET` wird in Nicht-Produktion
-ein zufälliges Secret pro Start erzeugt. Für den Produktivbetrieb `.env.example`
-nach `.env` kopieren und ein festes `JWT_SECRET` setzen.
-
-> **SMS-Versand:** Ping bringt keinen SMS-Anbieter mit. Standardmäßig wird der
-> Bestätigungscode deshalb direkt in der API-Antwort zurückgegeben (und ins
-> Server-Log geschrieben) – so funktioniert die Anmeldung sofort, und die App
-> trägt den Code automatisch ein. Für den echten Betrieb einen SMS-Dienst
-> davorschalten und `OTP_RETURN_IN_RESPONSE=false` setzen
-> (siehe `server/src/otp.js`, `deliver()`).
+ein zufälliges Secret pro Start erzeugt, und das Admin-Token ist `ping-admin-dev`.
+Für den Produktivbetrieb `.env.example` nach `.env` kopieren und feste Werte für
+`JWT_SECRET` **und** `ADMIN_TOKEN` setzen.
 
 Tests:
 
 ```bash
 cd server
-npm test           # 14 End-to-End-Tests (Auth, Avatare, Messaging, Rechte …)
+npm test           # 16 End-to-End-Tests (Konto, Kontakte, Avatare, Messaging, Admin …)
 ```
 
 ### 2. App starten
@@ -100,17 +119,32 @@ unter **Server-Adresse** ändern.
 
 ---
 
-## Anmeldung – wie es funktioniert
+## Konto & Chats – wie es funktioniert
 
-1. **Nummer eingeben.** Nummern ohne Ländervorwahl werden als deutsche Nummer
-   (`+49`) behandelt; mit `+<Ländercode>` lässt sich das überschreiben
-   (konfigurierbar über `DEFAULT_COUNTRY_CODE`).
-2. **Code bestätigen.** Der Server schickt einen 6-stelligen Code. Im Demo-Modus
-   (ohne SMS-Anbieter) ist er schon eingetragen.
-3. **Profil einrichten.** Beim ersten Mal: Name, Profilbild, Farbe, „Über mich".
-4. **Backup hinterlegen (optional).** In *Einstellungen → Profil → Sicherung &
-   Login* eine E-Mail und ein Passwort setzen, um sich später auch per
-   Passwort anmelden zu können.
+1. **Registrieren.** Name, Handynummer, E-Mail und Passwort eingeben. Nummern
+   ohne Ländervorwahl werden als deutsche Nummer (`+49`) behandelt; mit
+   `+<Ländercode>` lässt sich das überschreiben (`DEFAULT_COUNTRY_CODE`). Es gibt
+   **keinen** Bestätigungsschritt – das Konto ist sofort aktiv.
+2. **Anmelden.** Später genügt Handynummer **oder** E-Mail plus Passwort.
+3. **Kontakte freigeben.** Beim ersten „Neuer Chat → Aus Kontakten wählen" fragt
+   die App nach Zugriff auf die Kontakte (`READ_CONTACTS`). Sie zeigt dann nur die
+   Kontakte, die schon ein Ping-Konto haben.
+4. **Direkt per Nummer/E-Mail.** Alternativ unter „Neuer Chat → Per Nummer oder
+   E-Mail" jemanden direkt anschreiben, sofern die Person registriert ist.
+
+---
+
+## Admin-Portal
+
+Unter **`/admin`** (z. B. `http://192.0.2.1:61337/admin`) gibt es eine
+schlanke Web-Oberfläche zum Verwalten der Nutzer:
+
+- Nutzer anlegen (Nummer, E-Mail, Passwort, optional Admin-Flag),
+- Liste durchsuchen, Namen/Passwörter ändern, Admin-Rechte setzen, Nutzer löschen.
+
+Der Zugang ist über das **`ADMIN_TOKEN`** geschützt (Header `X-Admin-Token`,
+timing-sicher verglichen). In Produktion ohne gesetztes Token bleibt das Portal
+deaktiviert (`503`). In der Entwicklung lautet das Token `ping-admin-dev`.
 
 ---
 
@@ -124,10 +158,12 @@ cd server && npm test
 cd app && flutter analyze && flutter test
 ```
 
-- **Backend:** 14 Tests decken Telefon-Login (Code anfordern/prüfen, Normalisierung),
-  Konto-Anlage, Direktnachrichten per Telefonnummer mit Lesebestätigung über echte
-  WebSockets, Gruppen, Bearbeiten/Löschen, Zugriffsschutz, Profilbild-Upload und
-  das E-Mail/Passwort-Backup ab.
+- **Backend:** 16 Tests decken Registrierung (Nummer + E-Mail + Passwort,
+  Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
+  schonenden Kontaktabgleich, Direktnachrichten per Nummer/E-Mail/ID mit
+  Lesebestätigung über echte WebSockets, Gruppen, Bearbeiten/Löschen,
+  Zugriffsschutz, Profilbild-Upload sowie das tokengeschützte Admin-Portal ab.
+  Geprüft wird außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
 - **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt.
 
 ---
@@ -137,14 +173,15 @@ cd app && flutter analyze && flutter test
 ```
 ping/
 ├── server/
+│   ├── public/
+│   │   └── admin.html    # Admin-Portal (statische Seite, tokengeschützt)
 │   └── src/
-│       ├── index.js      # HTTP + WS Server, Security-Middleware
-│       ├── routes.js     # REST-Endpunkte
+│       ├── index.js      # HTTP + WS Server, Security-Middleware, /admin
+│       ├── routes.js     # REST-Endpunkte (inkl. Kontaktabgleich, Admin)
 │       ├── hub.js        # WebSocket-Hub: Präsenz, Tippen, Zustellung
 │       ├── chatRepo.js   # Chats & Nachrichten (SQLite)
-│       ├── repo.js       # Nutzer (Telefon), Avatare, Kontakte
-│       ├── auth.js       # JWT + bcrypt (Backup-Passwort)
-│       ├── otp.js        # Einmal-Login-Codes
+│       ├── repo.js       # Nutzer, Avatare, Kontaktabgleich, Serialisierung
+│       ├── auth.js       # JWT + bcrypt + Admin-Token-Middleware
 │       ├── phone.js      # Telefonnummer-Normalisierung (E.164)
 │       ├── avatars.js    # Profilbilder auf der Platte
 │       └── validation.js # Eingabeprüfung (zod)
@@ -152,9 +189,9 @@ ping/
     └── lib/
         ├── main.dart
         ├── theme.dart
-        ├── models/       # PingUser (Telefon), Chat, Message
-        ├── services/     # ApiClient, SocketService, AppState, Notifications
-        ├── screens/      # Telefon-Login, Code, Profil-Setup, Home, Chat …
+        ├── models/       # PingUser, ContactMatch, Chat, Message
+        ├── services/     # ApiClient, SocketService, AppState, Contacts, Notifications
+        ├── screens/      # Login/Registrierung, Home, Chat, Kontaktauswahl …
         └── widgets/      # Avatar (mit Foto), MessageBubble, ChatTile, Ticks
 ```
 
@@ -166,14 +203,18 @@ REST und Socket und benachrichtigt die Oberfläche.
 
 ## Sicherheit
 
-- Identität ist die Telefonnummer; Anmeldung über zeitlich begrenzte Einmal-Codes
-  (gehasht und an Nummer + Server-Secret gebunden, mit Versuchslimit).
-- Optionales Backup-Passwort mit bcrypt gehasht, nie im Klartext gespeichert.
+- Konto = Handynummer + E-Mail + Passwort. Passwörter werden mit bcrypt gehasht,
+  nie im Klartext gespeichert.
 - JWT-Authentifizierung für REST und WebSocket; Profilbilder sind ebenfalls
   zugriffsgeschützt.
-- Passwort-Login mit konstanter Antwortzeit (kein Aufzählen gültiger Konten).
-- Rate-Limiting (strenger auf Auth-Endpunkten), `helmet`, CORS-Konfiguration.
+- Anmeldung mit konstanter Antwortzeit (kein Aufzählen gültiger Konten).
+- Rate-Limiting (strenger auf Auth- und Admin-Endpunkten), `helmet`,
+  CORS-Konfiguration.
 - Eingabevalidierung mit zod; alle SQL-Zugriffe sind parametrisiert.
 - Zugriffsschutz: Nur Mitglieder eines Chats sehen dessen Nachrichten; nur der
-  Autor kann seine Nachrichten bearbeiten oder löschen; E-Mail wird nie an
-  andere Nutzer ausgeliefert.
+  Autor kann seine Nachrichten bearbeiten oder löschen.
+- Datenschutz: Nummer/E-Mail werden nie an andere Nutzer ausgeliefert, das
+  Adressbuch wird nur flüchtig abgeglichen und nie gespeichert, und Personendaten
+  sind ausschließlich über das tokengeschützte Admin-Portal einsehbar.
+- Das Admin-Token wird timing-sicher verglichen; ohne gesetztes Token ist das
+  Portal in Produktion deaktiviert.

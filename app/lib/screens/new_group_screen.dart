@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
 import 'chat_screen.dart';
+import 'contact_picker_screen.dart';
 
 class NewGroupScreen extends StatefulWidget {
   const NewGroupScreen({super.key});
@@ -18,53 +17,34 @@ class NewGroupScreen extends StatefulWidget {
 
 class _NewGroupScreenState extends State<NewGroupScreen> {
   final _name = TextEditingController();
-  final _search = TextEditingController();
-  Timer? _debounce;
-  List<PingUser> _results = [];
   final Map<String, PingUser> _selected = {};
-  bool _searching = false;
   bool _creating = false;
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _name.dispose();
-    _search.dispose();
     super.dispose();
   }
 
-  void _onSearch(String value) {
-    final q = value.trim();
-    _debounce?.cancel();
-    if (q.length < 2) {
-      setState(() => _results = []);
-      return;
-    }
-    setState(() => _searching = true);
-    _debounce = Timer(const Duration(milliseconds: 350), () async {
-      try {
-        final users = await context.read<AppState>().searchUsers(q);
-        if (mounted) {
-          setState(() {
-            _results = users;
-            _searching = false;
-          });
-        }
-      } on ApiException {
-        if (mounted) setState(() => _searching = false);
-      }
-    });
-  }
-
-  void _toggle(PingUser u) {
+  Future<void> _pickMembers() async {
+    final chosen = await Navigator.of(context).push<List<PingUser>>(
+      MaterialPageRoute(
+        builder: (_) => ContactPickerScreen(
+          multiSelect: true,
+          title: 'Mitglieder wählen',
+          excludeIds: _selected.keys.toSet(),
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
     setState(() {
-      if (_selected.containsKey(u.id)) {
-        _selected.remove(u.id);
-      } else {
+      for (final u in chosen) {
         _selected[u.id] = u;
       }
     });
   }
+
+  void _remove(PingUser u) => setState(() => _selected.remove(u.id));
 
   Future<void> _create() async {
     final name = _name.text.trim();
@@ -95,6 +75,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final state = context.read<AppState>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Neue Gruppe'),
@@ -113,7 +94,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
               controller: _name,
               textCapitalization: TextCapitalization.sentences,
@@ -126,80 +107,55 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
           ),
           if (_selected.isNotEmpty)
             SizedBox(
-              height: 88,
+              height: 96,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: _selected.values
                     .map((u) => _SelectedChip(
                           user: u,
-                          imageUrl: context.read<AppState>().avatarUrl(u),
-                          imageHeaders: context.read<AppState>().authHeaders,
-                          onRemove: () => _toggle(u),
+                          imageUrl: state.avatarUrl(u),
+                          imageHeaders: state.authHeaders,
+                          onRemove: () => _remove(u),
                         ))
                     .toList(),
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: TextField(
-              controller: _search,
-              onChanged: _onSearch,
-              decoration: const InputDecoration(
-                hintText: 'Mitglieder suchen …',
-                prefixIcon: Icon(Icons.search_rounded),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: scheme.primaryContainer,
+              child: Icon(Icons.person_add_rounded,
+                  color: scheme.onPrimaryContainer),
+            ),
+            title: const Text('Mitglieder aus Kontakten hinzufügen',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(_selected.isEmpty
+                ? 'Wähle Leute, die schon bei Ping sind'
+                : '${_selected.length} ausgewählt'),
+            onTap: _pickMembers,
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40),
+                child: Text(
+                  _selected.isEmpty
+                      ? 'Du kannst die Gruppe auch ohne Mitglieder starten und '
+                          'später Leute hinzufügen.'
+                      : 'Tipp oben rechts auf „Erstellen", wenn alle dabei sind.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: scheme.onSurfaceVariant),
+                ),
               ),
             ),
           ),
-          const Divider(height: 1),
-          Expanded(child: _buildResults(scheme)),
         ],
       ),
-    );
-  }
-
-  Widget _buildResults(ColorScheme scheme) {
-    if (_searching) return const Center(child: CircularProgressIndicator());
-    if (_results.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(40),
-          child: Text(
-            _selected.isEmpty
-                ? 'Such nach Leuten, um sie zur Gruppe hinzuzufügen. Du kannst '
-                    'auch ohne Mitglieder starten und später welche einladen.'
-                : 'Such nach weiteren Leuten oder tipp oben rechts auf '
-                    '„Erstellen".',
-            textAlign: TextAlign.center,
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ),
-      );
-    }
-    final state = context.read<AppState>();
-    return ListView.builder(
-      itemCount: _results.length,
-      itemBuilder: (context, i) {
-        final u = _results[i];
-        final selected = _selected.containsKey(u.id);
-        return ListTile(
-          leading: PingAvatar(
-            initials: u.initials,
-            color: u.color,
-            size: 46,
-            imageUrl: state.avatarUrl(u),
-            imageHeaders: state.authHeaders,
-          ),
-          title: Text(u.label,
-              style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(u.hasName ? u.phone : 'Auf Ping'),
-          trailing: Checkbox(value: selected, onChanged: (_) => _toggle(u)),
-          onTap: () => _toggle(u),
-        );
-      },
     );
   }
 }

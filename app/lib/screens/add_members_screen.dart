@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,8 +5,9 @@ import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
+import 'contact_picker_screen.dart';
 
-/// Search for people and add them to an existing group.
+/// Pick people from your contacts and add them to an existing group.
 class AddMembersScreen extends StatefulWidget {
   final String chatId;
   final Set<String> existingMemberIds;
@@ -23,55 +22,28 @@ class AddMembersScreen extends StatefulWidget {
 }
 
 class _AddMembersScreenState extends State<AddMembersScreen> {
-  final _search = TextEditingController();
-  Timer? _debounce;
-  List<PingUser> _results = [];
   final Map<String, PingUser> _selected = {};
-  bool _searching = false;
   bool _saving = false;
 
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _search.dispose();
-    super.dispose();
-  }
-
-  void _onSearch(String value) {
-    final q = value.trim();
-    _debounce?.cancel();
-    if (q.length < 2) {
-      setState(() => _results = []);
-      return;
-    }
-    setState(() => _searching = true);
-    _debounce = Timer(const Duration(milliseconds: 350), () async {
-      try {
-        final users = await context.read<AppState>().searchUsers(q);
-        if (mounted) {
-          setState(() {
-            // Hide people who are already in the group.
-            _results = users
-                .where((u) => !widget.existingMemberIds.contains(u.id))
-                .toList();
-            _searching = false;
-          });
-        }
-      } on ApiException {
-        if (mounted) setState(() => _searching = false);
-      }
-    });
-  }
-
-  void _toggle(PingUser u) {
+  Future<void> _pick() async {
+    final chosen = await Navigator.of(context).push<List<PingUser>>(
+      MaterialPageRoute(
+        builder: (_) => ContactPickerScreen(
+          multiSelect: true,
+          title: 'Mitglieder wählen',
+          excludeIds: {...widget.existingMemberIds, ..._selected.keys},
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
     setState(() {
-      if (_selected.containsKey(u.id)) {
-        _selected.remove(u.id);
-      } else {
+      for (final u in chosen) {
         _selected[u.id] = u;
       }
     });
   }
+
+  void _remove(PingUser u) => setState(() => _selected.remove(u.id));
 
   Future<void> _add() async {
     if (_selected.isEmpty) {
@@ -104,6 +76,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final state = context.read<AppState>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mitglieder hinzufügen'),
@@ -123,58 +96,114 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: TextField(
-              controller: _search,
-              autofocus: true,
-              onChanged: _onSearch,
-              decoration: const InputDecoration(
-                hintText: 'Name oder Nummer suchen …',
-                prefixIcon: Icon(Icons.search_rounded),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: scheme.primaryContainer,
+              child: Icon(Icons.person_add_rounded,
+                  color: scheme.onPrimaryContainer),
+            ),
+            title: const Text('Aus Kontakten wählen',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(_selected.isEmpty
+                ? 'Leute, die schon bei Ping sind'
+                : '${_selected.length} ausgewählt'),
+            onTap: _pick,
+          ),
+          if (_selected.isNotEmpty)
+            SizedBox(
+              height: 96,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: _selected.values
+                    .map((u) => _SelectedChip(
+                          user: u,
+                          imageUrl: state.avatarUrl(u),
+                          imageHeaders: state.authHeaders,
+                          onRemove: () => _remove(u),
+                        ))
+                    .toList(),
+              ),
+            ),
+          const Divider(height: 1),
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40),
+                child: Text(
+                  _selected.isEmpty
+                      ? 'Wähle Kontakte aus, die du in die Gruppe einladen '
+                          'möchtest.'
+                      : 'Tipp oben rechts auf „Hinzufügen", wenn alle dabei sind.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
               ),
             ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: _searching
-                ? const Center(child: CircularProgressIndicator())
-                : _results.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(40),
-                          child: Text(
-                            'Such nach Leuten, die du in die Gruppe einladen '
-                            'möchtest.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: scheme.onSurfaceVariant),
-                          ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _results.length,
-                        itemBuilder: (context, i) {
-                          final u = _results[i];
-                          final selected = _selected.containsKey(u.id);
-                          final state = context.read<AppState>();
-                          return ListTile(
-                            leading: PingAvatar(
-                              initials: u.initials,
-                              color: u.color,
-                              size: 46,
-                              imageUrl: state.avatarUrl(u),
-                              imageHeaders: state.authHeaders,
-                            ),
-                            title: Text(u.label,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600)),
-                            subtitle: Text(u.hasName ? u.phone : 'Auf Ping'),
-                            trailing: Checkbox(
-                                value: selected, onChanged: (_) => _toggle(u)),
-                            onTap: () => _toggle(u),
-                          );
-                        },
-                      ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedChip extends StatelessWidget {
+  final PingUser user;
+  final VoidCallback onRemove;
+  final String? imageUrl;
+  final Map<String, String>? imageHeaders;
+  const _SelectedChip({
+    required this.user,
+    required this.onRemove,
+    this.imageUrl,
+    this.imageHeaders,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      child: Column(
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              PingAvatar(
+                initials: user.initials,
+                color: user.color,
+                size: 50,
+                imageUrl: imageUrl,
+                imageHeaders: imageHeaders,
+              ),
+              Positioned(
+                right: -4,
+                top: -4,
+                child: GestureDetector(
+                  onTap: onRemove,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.cancel_rounded,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: 56,
+            child: Text(
+              user.label.split(' ').first,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+            ),
           ),
         ],
       ),

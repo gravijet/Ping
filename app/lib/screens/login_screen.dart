@@ -5,10 +5,10 @@ import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
-import 'code_verify_screen.dart';
-import 'password_login_screen.dart';
 
-/// First screen: enter a phone number to receive a login code.
+/// The entry screen. Two modes:
+///  - Register: name, phone, email and password (all required, no verification).
+///  - Login: phone or email + password.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -18,31 +18,43 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _name = TextEditingController();
   final _phone = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  final _login = TextEditingController(); // phone-or-email for sign-in
+
+  bool _register = true; // start on the registration form
   bool _busy = false;
+  bool _showPassword = false;
 
   @override
   void dispose() {
+    _name.dispose();
     _phone.dispose();
+    _email.dispose();
+    _password.dispose();
+    _login.dispose();
     super.dispose();
   }
 
-  Future<void> _requestCode() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => _busy = true);
     final state = context.read<AppState>();
     try {
-      final res = await state.requestCode(_phone.text.trim());
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => CodeVerifyScreen(
-            phone: (res['phone'] ?? _phone.text.trim()) as String,
-            devCode: res['devCode'] as String?,
-          ),
-        ),
-      );
+      if (_register) {
+        await state.register(
+          _phone.text.trim(),
+          _email.text.trim(),
+          _password.text,
+          _name.text.trim(),
+        );
+      } else {
+        await state.login(_login.text.trim(), _password.text);
+      }
+      // On success the root widget swaps to the home screen automatically.
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -69,41 +81,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _header(scheme),
-                    const SizedBox(height: 36),
-                    TextFormField(
-                      controller: _phone,
-                      autofocus: true,
-                      keyboardType: TextInputType.phone,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _requestCode(),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                      ],
-                      decoration: const InputDecoration(
-                        labelText: 'Handynummer',
-                        hintText: '+49 170 1234567',
-                        prefixIcon: Icon(Icons.phone_rounded),
-                      ),
-                      validator: (v) {
-                        final digits =
-                            (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
-                        if (digits.length < 5) {
-                          return 'Bitte gib eine gültige Handynummer ein.';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Wir schicken dir einen Bestätigungscode. Nummern ohne '
-                      'Ländervorwahl behandeln wir als deutsche Nummer (+49).',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                    ),
+                    const SizedBox(height: 32),
+                    _modeToggle(scheme),
+                    const SizedBox(height: 24),
+                    if (_register) ..._registerFields() else ..._loginFields(),
                     const SizedBox(height: 22),
                     FilledButton(
-                      onPressed: _busy ? null : _requestCode,
+                      onPressed: _busy ? null : _submit,
                       child: _busy
                           ? const SizedBox(
                               width: 22,
@@ -111,19 +95,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(
                                   strokeWidth: 2.4, color: Colors.white),
                             )
-                          : const Text('Code anfordern'),
+                          : Text(_register ? 'Konto erstellen' : 'Anmelden'),
                     ),
                     const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: _busy
-                          ? null
-                          : () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => const PasswordLoginScreen()),
-                              ),
-                      icon: const Icon(Icons.password_rounded, size: 18),
-                      label: const Text('Mit E-Mail & Passwort anmelden'),
-                    ),
                     TextButton.icon(
                       onPressed: _busy ? null : _editServer,
                       icon: const Icon(Icons.dns_outlined, size: 18),
@@ -138,6 +112,143 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
+  // ---- Form fields ---------------------------------------------------------
+
+  List<Widget> _registerFields() => [
+        TextFormField(
+          controller: _name,
+          textInputAction: TextInputAction.next,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Name',
+            hintText: 'Wie du angezeigt wirst',
+            prefixIcon: Icon(Icons.person_rounded),
+          ),
+          validator: (v) => (v ?? '').trim().isEmpty
+              ? 'Bitte gib einen Namen ein.'
+              : null,
+        ),
+        const SizedBox(height: 14),
+        _phoneField(),
+        const SizedBox(height: 14),
+        _emailField(),
+        const SizedBox(height: 14),
+        _passwordField(),
+        const SizedBox(height: 10),
+        _hint(
+          'Telefonnummer, E-Mail und Passwort sind nötig. Nummern ohne '
+          'Ländervorwahl behandeln wir als deutsche Nummer (+49). Wir '
+          'verschicken keinen Bestätigungscode.',
+        ),
+      ];
+
+  List<Widget> _loginFields() => [
+        TextFormField(
+          controller: _login,
+          autofocus: true,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          textInputAction: TextInputAction.next,
+          decoration: const InputDecoration(
+            labelText: 'Handynummer oder E-Mail',
+            prefixIcon: Icon(Icons.alternate_email_rounded),
+          ),
+          validator: (v) => (v ?? '').trim().isEmpty
+              ? 'Bitte gib deine Nummer oder E-Mail ein.'
+              : null,
+        ),
+        const SizedBox(height: 14),
+        _passwordField(),
+      ];
+
+  Widget _phoneField() => TextFormField(
+        controller: _phone,
+        keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.next,
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+        ],
+        decoration: const InputDecoration(
+          labelText: 'Handynummer',
+          hintText: '+49 170 1234567',
+          prefixIcon: Icon(Icons.phone_rounded),
+        ),
+        validator: (v) {
+          final digits = (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+          if (digits.length < 5) {
+            return 'Bitte gib eine gültige Handynummer ein.';
+          }
+          return null;
+        },
+      );
+
+  Widget _emailField() => TextFormField(
+        controller: _email,
+        keyboardType: TextInputType.emailAddress,
+        autocorrect: false,
+        textInputAction: TextInputAction.next,
+        decoration: const InputDecoration(
+          labelText: 'E-Mail',
+          hintText: 'user@example.invalid',
+          prefixIcon: Icon(Icons.mail_rounded),
+        ),
+        validator: (v) {
+          final s = (v ?? '').trim();
+          if (!s.contains('@') || !s.contains('.')) {
+            return 'Bitte gib eine gültige E-Mail-Adresse ein.';
+          }
+          return null;
+        },
+      );
+
+  Widget _passwordField() => TextFormField(
+        controller: _password,
+        obscureText: !_showPassword,
+        textInputAction: TextInputAction.done,
+        onFieldSubmitted: (_) => _submit(),
+        decoration: InputDecoration(
+          labelText: 'Passwort',
+          prefixIcon: const Icon(Icons.lock_rounded),
+          suffixIcon: IconButton(
+            icon: Icon(_showPassword
+                ? Icons.visibility_off_rounded
+                : Icons.visibility_rounded),
+            onPressed: () => setState(() => _showPassword = !_showPassword),
+          ),
+        ),
+        validator: (v) {
+          if ((v ?? '').length < 6) {
+            return 'Mindestens 6 Zeichen.';
+          }
+          return null;
+        },
+      );
+
+  // ---- Chrome --------------------------------------------------------------
+
+  Widget _modeToggle(ColorScheme scheme) {
+    return SegmentedButton<bool>(
+      segments: const [
+        ButtonSegment(value: true, label: Text('Registrieren')),
+        ButtonSegment(value: false, label: Text('Anmelden')),
+      ],
+      selected: {_register},
+      onSelectionChanged: _busy
+          ? null
+          : (s) => setState(() {
+                _register = s.first;
+                _formKey.currentState?.reset();
+              }),
+    );
+  }
+
+  Widget _hint(String text) => Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      );
 
   Widget _header(ColorScheme scheme) {
     return Column(
@@ -163,7 +274,8 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Melde dich mit deiner Handynummer an und schreib deinen Leuten.',
+          'Registriere dich mit Handynummer, E-Mail und Passwort — '
+          'und schreib deinen Leuten.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,

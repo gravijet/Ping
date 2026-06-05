@@ -322,10 +322,13 @@ class AppState extends ChangeNotifier {
     return chat;
   }
 
-  /// Open (or create) a direct chat with whoever owns [phone]. Throws an
-  /// [ApiException] with a friendly message if that number isn't on Ping yet.
-  Future<Chat> openDirectChatByPhone(String phone) async {
-    final res = await _api.post('/chats/by-phone', {'phone': phone});
+  /// Open (or create) a direct chat with whoever owns [phone] or [email]. Throws
+  /// an [ApiException] with a friendly message if that person isn't on Ping yet.
+  Future<Chat> startDirectByIdentifier({String? phone, String? email}) async {
+    final res = await _api.post('/chats/direct', {
+      if (phone != null) 'phone': phone,
+      if (email != null) 'email': email,
+    });
     final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
     _upsertChat(chat);
     _cacheChatUsers(chat);
@@ -379,15 +382,42 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<PingUser>> searchUsers(String query) async {
-    final res = await _api.get('/users/search', {'q': query});
-    final users = (res['users'] as List)
-        .map((e) => PingUser.fromJson(e as Map<String, dynamic>))
-        .toList();
-    for (final u in users) {
-      _userCache[u.id] = u;
+  /// Look up a single registered user by an exact phone number or email. Returns
+  /// null if nobody on Ping matches. Used by the "start chat by number/email"
+  /// flow; we never expose fuzzy search to protect everyone's privacy.
+  Future<PingUser?> lookupUser({String? phone, String? email}) async {
+    try {
+      final res = await _api.post('/users/lookup', {
+        if (phone != null) 'phone': phone,
+        if (email != null) 'email': email,
+      });
+      final parsed = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+      _userCache[parsed.id] = parsed;
+      return parsed;
+    } on ApiException catch (e) {
+      if (e.status == 404) return null; // nobody on Ping with that identifier
+      rethrow;
     }
-    return users;
+  }
+
+  /// Privacy-preserving contact matching: send the phone numbers / emails from
+  /// the device address book and get back only those that already have a Ping
+  /// account. Nothing is stored server-side; unmatched contacts are discarded.
+  /// Each match echoes the identifier we sent so the UI can show which local
+  /// contact it belongs to.
+  Future<List<ContactMatch>> matchContacts(
+      List<String> phones, List<String> emails) async {
+    final res = await _api.post('/contacts/match', {
+      'phones': phones,
+      'emails': emails,
+    });
+    final matches = (res['users'] as List)
+        .map((e) => ContactMatch.fromJson(e as Map<String, dynamic>))
+        .toList();
+    for (final m in matches) {
+      _userCache[m.user.id] = m.user;
+    }
+    return matches;
   }
 
   // ---- Active chat tracking ------------------------------------------------

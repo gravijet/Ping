@@ -2,6 +2,9 @@
     <!-- Talk to the Ping server and show message notifications. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Read the address book to find which of your contacts already use Ping.
+         Contacts are matched on the server and never stored there. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
 
     <application
         android:label="Ping"
