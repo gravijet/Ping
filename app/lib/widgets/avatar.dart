@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 
-/// A circular gradient avatar showing initials, with an optional online dot.
+/// A circular gradient avatar. Shows an uploaded photo when [imageUrl] is set,
+/// otherwise initials, otherwise an [icon] (defaulting to a person), with an
+/// optional online dot.
 class PingAvatar extends StatelessWidget {
   final String initials;
   final Color color;
   final double size;
   final bool? online; // null = don't show a presence dot
   final IconData? icon;
+  final String? imageUrl;
+  final Map<String, String>? imageHeaders;
 
   const PingAvatar({
     super.key,
@@ -15,6 +19,8 @@ class PingAvatar extends StatelessWidget {
     this.size = 48,
     this.online,
     this.icon,
+    this.imageUrl,
+    this.imageHeaders,
   });
 
   @override
@@ -40,17 +46,9 @@ class PingAvatar extends StatelessWidget {
                 ],
               ),
             ),
+            clipBehavior: Clip.antiAlias,
             alignment: Alignment.center,
-            child: icon != null
-                ? Icon(icon, color: Colors.white, size: size * 0.5)
-                : Text(
-                    initials,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: size * 0.36,
-                    ),
-                  ),
+            child: _content(),
           ),
           if (online != null && online!)
             Positioned(
@@ -67,6 +65,40 @@ class PingAvatar extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _content() {
+    if (imageUrl != null) {
+      return Image.network(
+        imageUrl!,
+        headers: imageHeaders,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        // While loading or if it fails, fall back to the initials/icon.
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : _fallback(),
+        errorBuilder: (context, error, stackTrace) => _fallback(),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() {
+    if (icon != null) {
+      return Icon(icon, color: Colors.white, size: size * 0.5);
+    }
+    if (initials.isEmpty) {
+      return Icon(Icons.person_rounded, color: Colors.white, size: size * 0.56);
+    }
+    return Text(
+      initials,
+      style: TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.w700,
+        fontSize: size * 0.36,
       ),
     );
   }

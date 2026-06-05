@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/user.dart';
@@ -80,6 +81,62 @@ class _NewChatScreenState extends State<NewChatScreen> {
     }
   }
 
+  Future<void> _startByPhone() async {
+    final controller = TextEditingController(text: _query.startsWith('+') ? _query : '');
+    final phone = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Per Telefonnummer schreiben'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Gib die Handynummer ein, der du schreiben möchtest. Sie muss '
+                'bei Ping registriert sein.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Handynummer',
+                hintText: '+49 170 1234567',
+                prefixIcon: Icon(Icons.phone_rounded),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Chat starten'),
+          ),
+        ],
+      ),
+    );
+    if (phone == null || phone.isEmpty || !mounted) return;
+    final state = context.read<AppState>();
+    try {
+      final chat = await state.openDirectChatByPhone(phone);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => ChatScreen(chatId: chat.id)),
+      );
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -94,7 +151,7 @@ class _NewChatScreenState extends State<NewChatScreen> {
               autofocus: true,
               onChanged: _onChanged,
               decoration: InputDecoration(
-                hintText: 'Benutzername suchen …',
+                hintText: 'Name oder Nummer suchen …',
                 prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _search.text.isEmpty
                     ? null
@@ -107,6 +164,17 @@ class _NewChatScreenState extends State<NewChatScreen> {
                       ),
               ),
             ),
+          ),
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: scheme.primaryContainer,
+              child: Icon(Icons.dialpad_rounded,
+                  color: scheme.onPrimaryContainer),
+            ),
+            title: const Text('Per Telefonnummer schreiben',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text('Einer bestimmten Nummer schreiben'),
+            onTap: _startByPhone,
           ),
           ListTile(
             leading: CircleAvatar(
@@ -137,8 +205,8 @@ class _NewChatScreenState extends State<NewChatScreen> {
         scheme,
         Icons.person_search_rounded,
         'Jemanden finden',
-        'Gib mindestens zwei Zeichen eines Benutzernamens ein, um Leute zu '
-            'finden und einen Chat zu starten.',
+        'Such nach Namen oder einer Nummer, oder tipp oben auf „Per '
+            'Telefonnummer schreiben", um direkt loszulegen.',
       );
     }
     if (_results.isEmpty) {
@@ -146,20 +214,27 @@ class _NewChatScreenState extends State<NewChatScreen> {
         scheme,
         Icons.search_off_rounded,
         'Niemanden gefunden',
-        'Zu „$_query" gibt es keinen Treffer. Prüf die Schreibweise oder '
-            'frag nach dem genauen Benutzernamen.',
+        'Zu „$_query" gibt es keinen Treffer. Probier die genaue Nummer über '
+            '„Per Telefonnummer schreiben".',
       );
     }
+    final state = context.read<AppState>();
     return ListView.builder(
       itemCount: _results.length,
       itemBuilder: (context, i) {
         final u = _results[i];
         return ListTile(
           leading: PingAvatar(
-              initials: u.initials, color: u.color, size: 46, online: u.online),
-          title: Text(u.displayName,
+            initials: u.initials,
+            color: u.color,
+            size: 46,
+            online: u.online,
+            imageUrl: state.avatarUrl(u),
+            imageHeaders: state.authHeaders,
+          ),
+          title: Text(u.label,
               style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('@${u.username}'),
+          subtitle: Text(u.hasName ? u.phone : 'Auf Ping'),
           trailing: const Icon(Icons.chevron_right_rounded),
           onTap: () => _openChat(u),
         );

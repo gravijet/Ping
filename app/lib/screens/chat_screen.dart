@@ -225,11 +225,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Row(
           children: [
             PingAvatar(
-              initials: chat.initials,
+              initials: chat.isGroup
+                  ? chat.initials
+                  : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
               size: 40,
               online: chat.isGroup ? null : online,
               icon: chat.isGroup ? Icons.groups_rounded : null,
+              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+              imageHeaders: state.authHeaders,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -281,7 +285,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildMessageList(AppState state, Chat chat, List<Message> messages) {
     if (messages.isEmpty) {
-      return _EmptyConversation(chat: chat);
+      return _EmptyConversation(
+        chat: chat,
+        imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+        imageHeaders: state.authHeaders,
+      );
     }
 
     // Build a flat list of items in chronological order: a day divider sits
@@ -683,7 +691,10 @@ class _TypingDotsState extends State<_TypingDots>
 
 class _EmptyConversation extends StatelessWidget {
   final Chat chat;
-  const _EmptyConversation({required this.chat});
+  final String? imageUrl;
+  final Map<String, String>? imageHeaders;
+  const _EmptyConversation(
+      {required this.chat, this.imageUrl, this.imageHeaders});
 
   @override
   Widget build(BuildContext context) {
@@ -695,10 +706,14 @@ class _EmptyConversation extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             PingAvatar(
-              initials: chat.initials,
+              initials: chat.isGroup
+                  ? chat.initials
+                  : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
               size: 84,
               icon: chat.isGroup ? Icons.groups_rounded : null,
+              imageUrl: imageUrl,
+              imageHeaders: imageHeaders,
             ),
             const SizedBox(height: 20),
             Text(

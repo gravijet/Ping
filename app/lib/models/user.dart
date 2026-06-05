@@ -1,24 +1,33 @@
 import 'package:flutter/material.dart';
 
-/// A person on Ping. The colour is server-assigned so avatars stay consistent
-/// across every device.
+/// A person on Ping. Identity is the phone number; the colour is server-assigned
+/// so avatars stay consistent across every device. [email]/[hasPassword] are
+/// only populated for the signed-in user (the backup-login info).
 class PingUser {
   final String id;
-  final String username;
+  final String phone;
   final String displayName;
   final String avatarColor;
   final String about;
+  final bool hasAvatar;
+  final int avatarVersion;
   final int? lastSeen;
   final bool online;
+  final String? email;
+  final bool hasPassword;
 
   const PingUser({
     required this.id,
-    required this.username,
+    required this.phone,
     required this.displayName,
     required this.avatarColor,
     this.about = '',
+    this.hasAvatar = false,
+    this.avatarVersion = 0,
     this.lastSeen,
     this.online = false,
+    this.email,
+    this.hasPassword = false,
   });
 
   Color get color {
@@ -26,33 +35,63 @@ class PingUser {
     return Color(int.parse('FF$hex', radix: 16));
   }
 
-  /// First letter(s) used for the avatar fallback.
+  /// Whether the user has set a real name (rather than defaulting to the number).
+  bool get hasName =>
+      displayName.trim().isNotEmpty && displayName.trim() != phone;
+
+  /// What to show as the primary label — the name, falling back to the number.
+  String get label => hasName ? displayName.trim() : phone;
+
+  /// Initials for the avatar fallback. Empty when there are no letters to use
+  /// (e.g. a number-only account), so the avatar shows a person icon instead.
   String get initials {
-    final name = displayName.trim().isEmpty ? username : displayName.trim();
-    final parts = name.split(RegExp(r'\s+'));
-    if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+    if (!hasName) return '';
+    final parts =
+        displayName.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
       return (parts[0][0] + parts[1][0]).toUpperCase();
     }
-    return name.characters.take(2).toString().toUpperCase();
+    final letters = displayName.trim().replaceAll(RegExp(r'[^A-Za-zÀ-ÿ]'), '');
+    if (letters.isEmpty) return '';
+    return letters.characters.take(2).toString().toUpperCase();
   }
 
-  PingUser copyWith({bool? online, int? lastSeen}) => PingUser(
+  PingUser copyWith({
+    String? displayName,
+    String? about,
+    String? avatarColor,
+    bool? hasAvatar,
+    int? avatarVersion,
+    bool? online,
+    int? lastSeen,
+    String? email,
+    bool? hasPassword,
+  }) =>
+      PingUser(
         id: id,
-        username: username,
-        displayName: displayName,
-        avatarColor: avatarColor,
-        about: about,
+        phone: phone,
+        displayName: displayName ?? this.displayName,
+        avatarColor: avatarColor ?? this.avatarColor,
+        about: about ?? this.about,
+        hasAvatar: hasAvatar ?? this.hasAvatar,
+        avatarVersion: avatarVersion ?? this.avatarVersion,
         lastSeen: lastSeen ?? this.lastSeen,
         online: online ?? this.online,
+        email: email ?? this.email,
+        hasPassword: hasPassword ?? this.hasPassword,
       );
 
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
         id: json['id'] as String,
-        username: json['username'] as String,
-        displayName: (json['displayName'] ?? json['username']) as String,
+        phone: (json['phone'] ?? '') as String,
+        displayName: (json['displayName'] ?? json['phone'] ?? '') as String,
         avatarColor: (json['avatarColor'] ?? '#5C6BC0') as String,
         about: (json['about'] ?? '') as String,
+        hasAvatar: (json['hasAvatar'] ?? false) as bool,
+        avatarVersion: (json['avatarVersion'] ?? 0) as int,
         lastSeen: json['lastSeen'] as int?,
         online: (json['online'] ?? false) as bool,
+        email: json['email'] as String?,
+        hasPassword: (json['hasPassword'] ?? false) as bool,
       );
 }

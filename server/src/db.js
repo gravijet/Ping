@@ -12,15 +12,21 @@ db.exec('PRAGMA busy_timeout = 5000;');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    username      TEXT NOT NULL UNIQUE,
-    username_lc   TEXT NOT NULL UNIQUE,
-    display_name  TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    avatar_color  TEXT NOT NULL,
-    about         TEXT NOT NULL DEFAULT '',
-    created_at    INTEGER NOT NULL,
-    last_seen     INTEGER NOT NULL
+    id             TEXT PRIMARY KEY,
+    -- An account needs all three: phone (canonical E.164), email and password.
+    phone          TEXT NOT NULL UNIQUE,
+    email          TEXT NOT NULL,
+    email_lc       TEXT NOT NULL UNIQUE,
+    password_hash  TEXT NOT NULL,
+    display_name   TEXT NOT NULL,
+    about          TEXT NOT NULL DEFAULT '',
+    avatar_color   TEXT NOT NULL,
+    -- Uploaded profile picture (optional). avatar_version busts client caches.
+    avatar_mime    TEXT,
+    avatar_version INTEGER NOT NULL DEFAULT 0,
+    is_admin       INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL,
+    last_seen      INTEGER NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS chats (
@@ -28,6 +34,8 @@ db.exec(`
     type         TEXT NOT NULL CHECK (type IN ('direct','group')),
     name         TEXT,
     avatar_color TEXT NOT NULL,
+    avatar_mime    TEXT,
+    avatar_version INTEGER NOT NULL DEFAULT 0,
     created_by   TEXT NOT NULL REFERENCES users(id),
     created_at   INTEGER NOT NULL,
     -- For direct chats this holds the sorted "a:b" user id pair so we can

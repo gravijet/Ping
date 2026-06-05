@@ -132,7 +132,11 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: _selected.values
                     .map((u) => _SelectedChip(
-                        user: u, onRemove: () => _toggle(u)))
+                          user: u,
+                          imageUrl: context.read<AppState>().avatarUrl(u),
+                          imageHeaders: context.read<AppState>().authHeaders,
+                          onRemove: () => _toggle(u),
+                        ))
                     .toList(),
               ),
             ),
@@ -175,16 +179,23 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
         ),
       );
     }
+    final state = context.read<AppState>();
     return ListView.builder(
       itemCount: _results.length,
       itemBuilder: (context, i) {
         final u = _results[i];
         final selected = _selected.containsKey(u.id);
         return ListTile(
-          leading: PingAvatar(initials: u.initials, color: u.color, size: 46),
-          title: Text(u.displayName,
+          leading: PingAvatar(
+            initials: u.initials,
+            color: u.color,
+            size: 46,
+            imageUrl: state.avatarUrl(u),
+            imageHeaders: state.authHeaders,
+          ),
+          title: Text(u.label,
               style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('@${u.username}'),
+          subtitle: Text(u.hasName ? u.phone : 'Auf Ping'),
           trailing: Checkbox(value: selected, onChanged: (_) => _toggle(u)),
           onTap: () => _toggle(u),
         );
@@ -196,7 +207,14 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
 class _SelectedChip extends StatelessWidget {
   final PingUser user;
   final VoidCallback onRemove;
-  const _SelectedChip({required this.user, required this.onRemove});
+  final String? imageUrl;
+  final Map<String, String>? imageHeaders;
+  const _SelectedChip({
+    required this.user,
+    required this.onRemove,
+    this.imageUrl,
+    this.imageHeaders,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -207,7 +225,13 @@ class _SelectedChip extends StatelessWidget {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              PingAvatar(initials: user.initials, color: user.color, size: 50),
+              PingAvatar(
+                initials: user.initials,
+                color: user.color,
+                size: 50,
+                imageUrl: imageUrl,
+                imageHeaders: imageHeaders,
+              ),
               Positioned(
                 right: -4,
                 top: -4,
@@ -230,7 +254,7 @@ class _SelectedChip extends StatelessWidget {
           SizedBox(
             width: 56,
             child: Text(
-              user.displayName.split(' ').first,
+              user.label.split(' ').first,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,

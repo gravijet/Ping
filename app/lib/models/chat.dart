@@ -41,12 +41,15 @@ class Chat {
 
   String get initials {
     final t = title.trim();
-    if (t.isEmpty) return '?';
-    final parts = t.split(RegExp(r'\s+'));
-    if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+    if (t.isEmpty) return '';
+    final parts = t.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
       return (parts[0][0] + parts[1][0]).toUpperCase();
     }
-    return t.characters.take(2).toString().toUpperCase();
+    // Strip non-letters so a phone-number title doesn't yield "+4".
+    final letters = t.replaceAll(RegExp(r'[^A-Za-zÀ-ÿ]'), '');
+    if (letters.isEmpty) return '';
+    return letters.characters.take(2).toString().toUpperCase();
   }
 
   factory Chat.fromJson(Map<String, dynamic> json) => Chat(

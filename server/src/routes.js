@@ -1,24 +1,46 @@
-import { Router } from 'express';
-import { hashPassword, verifyPassword, signToken, requireAuth } from './auth.js';
+import express, { Router } from 'express';
+import {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  requireAuth,
+  requireAdmin,
+} from './auth.js';
+import { config } from './config.js';
+import { normalizePhone } from './phone.js';
+import { detectImageMime, saveAvatar, readAvatar, deleteAvatar } from './avatars.js';
 import {
   parse,
   registerSchema,
   loginSchema,
   updateProfileSchema,
+  securitySchema,
   messageBodySchema,
-  createDirectChatSchema,
+  directChatSchema,
+  lookupSchema,
+  matchSchema,
   createGroupChatSchema,
+  adminCreateSchema,
+  adminUpdateSchema,
 } from './validation.js';
 import {
   createUser,
-  getUserByUsername,
+  getUserByPhone,
+  getUserByEmail,
   getUserById,
   updateProfile,
-  searchUsers,
+  setAvatar,
+  setEmail,
+  setPassword,
+  setName,
+  setAdmin,
+  deleteUser,
+  countUsers,
+  listUsers,
+  matchContacts,
   publicUser,
-  addContact,
-  removeContact,
-  listContacts,
+  privateUser,
+  adminUser,
 } from './repo.js';
 import {
   getOrCreateDirectChat,
@@ -39,50 +61,71 @@ import {
   messageView,
   markChatRead,
 } from './chatRepo.js';
-import {
-  broadcastToChat,
-  sendToUser,
-  isOnline,
-} from './hub.js';
+import { broadcastToChat, sendToUser, isOnline } from './hub.js';
 
 export const router = Router();
 
 // Wrap async handlers so thrown errors hit the error middleware.
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// A constant bcrypt hash to compare against when no user is found, keeping
+// login timing roughly constant whether or not an account exists.
+const DUMMY_HASH = '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinv';
+
+// Notify everyone who shares a chat with this user about a profile change.
+function broadcastProfile(user) {
+  const view = publicUser(user);
+  for (const chat of getUserChats(user.id)) {
+    broadcastToChat(chat.id, 'user-updated', { user: view }, user.id);
+  }
+}
+
 // ---- Auth ------------------------------------------------------------------
 
+// Register straight away — phone, email and password, no verification step.
 router.post(
   '/auth/register',
   h(async (req, res) => {
-    const { username, password, displayName } = parse(registerSchema, req.body);
-    if (getUserByUsername(username)) {
+    const { phone, email, password, displayName } = parse(registerSchema, req.body);
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      return res.status(400).json({
+        error:
+          'Diese Handynummer können wir nicht erkennen. Probier es im Format +49 170 1234567.',
+      });
+    }
+    if (getUserByPhone(normalized)) {
       return res
         .status(409)
-        .json({ error: 'Dieser Benutzername ist schon vergeben. Versuch einen anderen.' });
+        .json({ error: 'Diese Handynummer ist schon registriert.' });
+    }
+    if (getUserByEmail(email)) {
+      return res
+        .status(409)
+        .json({ error: 'Diese E-Mail-Adresse ist schon registriert.' });
     }
     const passwordHash = await hashPassword(password);
-    const user = createUser({ username, displayName, passwordHash });
-    res.status(201).json({ token: signToken(user), user: publicUser(user) });
+    const user = createUser({ phone: normalized, email, passwordHash, displayName });
+    res.status(201).json({ token: signToken(user), user: privateUser(user) });
   })
 );
 
+// Log in with email or phone + password.
 router.post(
   '/auth/login',
   h(async (req, res) => {
-    const { username, password } = parse(loginSchema, req.body);
-    const user = getUserByUsername(username);
-    // Always run a compare to keep timing roughly constant whether or not the
-    // user exists, so you can't probe for valid usernames.
+    const { login, password } = parse(loginSchema, req.body);
+    const normalized = normalizePhone(login);
+    const user = (normalized && getUserByPhone(normalized)) || getUserByEmail(login);
     const ok = user
       ? await verifyPassword(password, user.password_hash)
-      : await verifyPassword(password, '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinv');
+      : await verifyPassword(password, DUMMY_HASH);
     if (!user || !ok) {
       return res
         .status(401)
-        .json({ error: 'Benutzername oder Passwort stimmt nicht.' });
+        .json({ error: 'Nummer/E-Mail oder Passwort stimmt nicht.' });
     }
-    res.json({ token: signToken(user), user: publicUser(user) });
+    res.json({ token: signToken(user), user: privateUser(user) });
   })
 );
 
@@ -92,7 +135,7 @@ router.get(
   '/me',
   requireAuth,
   h(async (req, res) => {
-    res.json({ user: publicUser(req.user) });
+    res.json({ user: privateUser(req.user) });
   })
 );
 
@@ -102,25 +145,142 @@ router.patch(
   h(async (req, res) => {
     const data = parse(updateProfileSchema, req.body);
     const updated = updateProfile(req.user.id, data);
-    const view = publicUser(updated);
-    // Let peers see the new name/avatar live.
-    for (const chat of getUserChats(req.user.id)) {
-      broadcastToChat(chat.id, 'user-updated', { user: view }, req.user.id);
-    }
-    res.json({ user: view });
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
   })
 );
 
-// ---- User search & contacts ------------------------------------------------
-
-router.get(
-  '/users/search',
+// Change the email and/or password.
+router.patch(
+  '/me/security',
   requireAuth,
   h(async (req, res) => {
-    const q = (req.query.q || '').toString().trim();
-    if (q.length < 2) return res.json({ users: [] });
-    const users = searchUsers(q, req.user.id).map(publicUser);
-    res.json({ users: users.map((u) => ({ ...u, online: isOnline(u.id) })) });
+    const { email, password, currentPassword } = parse(securitySchema, req.body);
+    const me = req.user;
+
+    if (email !== undefined) {
+      const existing = getUserByEmail(email);
+      if (existing && existing.id !== me.id) {
+        return res
+          .status(409)
+          .json({ error: 'Diese E-Mail-Adresse wird schon verwendet.' });
+      }
+    }
+    if (password !== undefined) {
+      const ok = currentPassword
+        ? await verifyPassword(currentPassword, me.password_hash)
+        : false;
+      if (!ok) {
+        return res
+          .status(403)
+          .json({ error: 'Zum Ändern brauchen wir dein aktuelles Passwort.' });
+      }
+    }
+
+    let updated = me;
+    if (email !== undefined) updated = setEmail(me.id, email);
+    if (password !== undefined) {
+      updated = setPassword(me.id, await hashPassword(password));
+    }
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+// Upload a profile picture (raw image bytes in the request body).
+router.post(
+  '/me/avatar',
+  requireAuth,
+  express.raw({ type: () => true, limit: config.maxAvatarBytes }),
+  h(async (req, res) => {
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'Kein Bild empfangen.' });
+    }
+    const mime = detectImageMime(buf);
+    if (!mime) {
+      return res
+        .status(400)
+        .json({ error: 'Nur JPG-, PNG- oder WebP-Bilder werden unterstützt.' });
+    }
+    saveAvatar(req.user.id, buf);
+    const updated = setAvatar(req.user.id, mime);
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+router.delete(
+  '/me/avatar',
+  requireAuth,
+  h(async (req, res) => {
+    deleteAvatar(req.user.id);
+    const updated = setAvatar(req.user.id, null);
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+// ---- Finding people --------------------------------------------------------
+
+// Exact lookup by phone or email (used for manual "start chat" / group add).
+router.post(
+  '/users/lookup',
+  requireAuth,
+  h(async (req, res) => {
+    const { phone, email } = parse(lookupSchema, req.body);
+    let user = null;
+    if (phone) {
+      const n = normalizePhone(phone);
+      if (!n) return res.status(400).json({ error: 'Diese Handynummer können wir nicht erkennen.' });
+      user = getUserByPhone(n);
+    }
+    if (!user && email) user = getUserByEmail(email);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: 'Diese Person ist (noch) nicht bei Ping.' });
+    }
+    res.json({ user: { ...publicUser(user), online: isOnline(user.id) } });
+  })
+);
+
+// Privacy-preserving contact discovery: send normalized phones / emails, get
+// back only those that are registered. The uploaded lists are never stored.
+router.post(
+  '/contacts/match',
+  requireAuth,
+  h(async (req, res) => {
+    const { phones = [], emails = [] } = parse(matchSchema, req.body);
+    const normPhones = phones.map((p) => normalizePhone(p)).filter(Boolean);
+    const lcEmails = emails.map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const rows = matchContacts(normPhones, lcEmails, req.user.id);
+
+    const phoneSet = new Set(normPhones);
+    const emailSet = new Set(lcEmails);
+    // Echo back which of *their own* identifiers matched, so the client can map
+    // each hit to the device contact it came from.
+    const users = rows.map((u) => ({
+      user: { ...publicUser(u), online: isOnline(u.id) },
+      phone: phoneSet.has(u.phone) ? u.phone : null,
+      email: emailSet.has(u.email_lc) ? u.email : null,
+    }));
+    res.json({ users });
+  })
+);
+
+router.get(
+  '/users/:id/avatar',
+  requireAuth,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user || !user.avatar_mime) {
+      return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    }
+    const buf = readAvatar(user.id);
+    if (!buf) return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    res.set('Content-Type', user.avatar_mime);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.send(buf);
   })
 );
 
@@ -131,42 +291,6 @@ router.get(
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
     res.json({ user: { ...publicUser(user), online: isOnline(user.id) } });
-  })
-);
-
-router.get(
-  '/contacts',
-  requireAuth,
-  h(async (req, res) => {
-    const contacts = listContacts(req.user.id).map((u) => ({
-      ...publicUser(u),
-      online: isOnline(u.id),
-    }));
-    res.json({ contacts });
-  })
-);
-
-router.post(
-  '/contacts',
-  requireAuth,
-  h(async (req, res) => {
-    const id = (req.body?.userId || '').toString();
-    if (id === req.user.id) {
-      return res.status(400).json({ error: 'Du kannst dich nicht selbst hinzufügen.' });
-    }
-    const target = getUserById(id);
-    if (!target) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
-    addContact(req.user.id, id);
-    res.status(201).json({ contact: { ...publicUser(target), online: isOnline(id) } });
-  })
-);
-
-router.delete(
-  '/contacts/:id',
-  requireAuth,
-  h(async (req, res) => {
-    removeContact(req.user.id, req.params.id);
-    res.status(204).end();
   })
 );
 
@@ -183,21 +307,31 @@ router.get(
   })
 );
 
+// Start (or reopen) a direct chat by user id, phone number or email.
 router.post(
   '/chats/direct',
   requireAuth,
   h(async (req, res) => {
-    const { userId } = parse(createDirectChatSchema, req.body);
-    if (userId === req.user.id) {
+    const { userId, phone, email } = parse(directChatSchema, req.body);
+    let other = null;
+    if (userId) other = getUserById(userId);
+    if (!other && phone) {
+      const n = normalizePhone(phone);
+      if (!n) return res.status(400).json({ error: 'Diese Handynummer können wir nicht erkennen.' });
+      other = getUserByPhone(n);
+    }
+    if (!other && email) other = getUserByEmail(email);
+    if (!other) {
+      return res
+        .status(404)
+        .json({ error: 'Diese Person ist (noch) nicht bei Ping. Lade sie ein!' });
+    }
+    if (other.id === req.user.id) {
       return res.status(400).json({ error: 'Mit dir selbst kannst du nicht chatten.' });
     }
-    const other = getUserById(userId);
-    if (!other) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
-    const chat = getOrCreateDirectChat(req.user.id, userId);
-    const view = chatView(chat, req.user.id);
-    // Make sure the other side gets the new chat pushed into their list.
-    sendToUser(userId, 'chat-created', { chat: chatView(chat, userId) });
-    res.status(201).json({ chat: view });
+    const chat = getOrCreateDirectChat(req.user.id, other.id);
+    sendToUser(other.id, 'chat-created', { chat: chatView(chat, other.id) });
+    res.status(201).json({ chat: chatView(chat, req.user.id) });
   })
 );
 
@@ -208,7 +342,6 @@ router.post(
     const { name, memberIds = [] } = parse(createGroupChatSchema, req.body);
     const valid = [...new Set(memberIds)].filter((m) => m !== req.user.id && getUserById(m));
     const chat = createGroupChat({ name, ownerId: req.user.id, memberIds: valid });
-    // System message so the timeline starts with something meaningful.
     const sys = createMessage({
       chatId: chat.id,
       senderId: req.user.id,
@@ -218,7 +351,10 @@ router.post(
     for (const memberId of getMemberIds(chat.id)) {
       sendToUser(memberId, 'chat-created', { chat: chatView(chat, memberId) });
     }
-    res.status(201).json({ chat: chatView(chat, req.user.id), firstMessage: messageView(sys, req.user.id) });
+    res.status(201).json({
+      chat: chatView(chat, req.user.id),
+      firstMessage: messageView(sys, req.user.id),
+    });
   })
 );
 
@@ -275,7 +411,6 @@ router.post(
       body,
       replyTo,
     });
-    // Fan the new message out to everyone, each with their own view.
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
     }
@@ -347,7 +482,6 @@ router.post(
   })
 );
 
-// Group management: add members, leave.
 router.post(
   '/chats/:id/members',
   requireAuth,
@@ -399,5 +533,85 @@ router.post(
     removeMember(req.chat.id, req.user.id);
     sendToUser(req.user.id, 'chat-removed', { chatId: req.chat.id });
     res.json({ ok: true });
+  })
+);
+
+// ---- Admin portal API (token-gated via X-Admin-Token) ----------------------
+
+router.get(
+  '/admin/stats',
+  requireAdmin,
+  h(async (_req, res) => {
+    res.json({ users: countUsers(), online: 0 });
+  })
+);
+
+router.get(
+  '/admin/users',
+  requireAdmin,
+  h(async (req, res) => {
+    const q = (req.query.q || '').toString().trim();
+    const users = listUsers(q).map((u) => ({
+      ...adminUser(u),
+      online: isOnline(u.id),
+    }));
+    res.json({ users });
+  })
+);
+
+router.post(
+  '/admin/users',
+  requireAdmin,
+  h(async (req, res) => {
+    const { phone, email, password, displayName, isAdmin } = parse(
+      adminCreateSchema,
+      req.body
+    );
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      return res.status(400).json({ error: 'Ungültige Handynummer.' });
+    }
+    if (getUserByPhone(normalized)) {
+      return res.status(409).json({ error: 'Diese Handynummer ist schon registriert.' });
+    }
+    if (getUserByEmail(email)) {
+      return res.status(409).json({ error: 'Diese E-Mail-Adresse ist schon registriert.' });
+    }
+    const passwordHash = await hashPassword(password);
+    const user = createUser({
+      phone: normalized,
+      email,
+      passwordHash,
+      displayName,
+      isAdmin: !!isAdmin,
+    });
+    res.status(201).json({ user: adminUser(user) });
+  })
+);
+
+router.patch(
+  '/admin/users/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const { displayName, password, isAdmin } = parse(adminUpdateSchema, req.body);
+    let user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    if (displayName !== undefined) user = setName(user.id, displayName);
+    if (isAdmin !== undefined) user = setAdmin(user.id, isAdmin);
+    if (password !== undefined) {
+      user = setPassword(user.id, await hashPassword(password));
+    }
+    res.json({ user: adminUser(user) });
+  })
+);
+
+router.delete(
+  '/admin/users/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    deleteUser(user.id);
+    res.status(204).end();
   })
 );

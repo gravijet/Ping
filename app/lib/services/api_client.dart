@@ -45,6 +45,17 @@ class ApiClient {
         body: jsonEncode(body ?? {}),
       ));
 
+  /// Upload raw bytes (e.g. an image) with an explicit content type.
+  Future<dynamic> postBytes(String path, List<int> bytes, String contentType) =>
+      _send(() => _http.post(
+            _uri(path),
+            headers: {
+              'Content-Type': contentType,
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: bytes,
+          ));
+
   Future<dynamic> patch(String path, [Object? body]) =>
       _send(() => _http.patch(
             _uri(path),

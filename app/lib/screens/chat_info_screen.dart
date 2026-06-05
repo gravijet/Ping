@@ -34,10 +34,14 @@ class ChatInfoScreen extends StatelessWidget {
           const SizedBox(height: 16),
           Center(
             child: PingAvatar(
-              initials: chat.initials,
+              initials: chat.isGroup
+                  ? chat.initials
+                  : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
               size: 104,
               icon: chat.isGroup ? Icons.groups_rounded : null,
+              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+              imageHeaders: state.authHeaders,
             ),
           ),
           const SizedBox(height: 16),
@@ -59,7 +63,7 @@ class ChatInfoScreen extends StatelessWidget {
           if (!chat.isGroup && chat.otherUser != null) ...[
             const SizedBox(height: 4),
             Center(
-              child: Text('@${chat.otherUser!.username}',
+              child: Text(chat.otherUser!.phone,
                   style: TextStyle(color: scheme.onSurfaceVariant)),
             ),
             if (chat.otherUser!.about.isNotEmpty) ...[
@@ -114,12 +118,15 @@ class ChatInfoScreen extends StatelessWidget {
               final isOwner = m.id == chat.ownerId;
               return ListTile(
                 leading: PingAvatar(
-                    initials: m.initials,
-                    color: m.color,
-                    size: 44,
-                    online: state.isOnline(m.id)),
-                title: Text(isMe ? '${m.displayName} (Du)' : m.displayName),
-                subtitle: Text('@${m.username}'),
+                  initials: m.initials,
+                  color: m.color,
+                  size: 44,
+                  online: state.isOnline(m.id),
+                  imageUrl: state.avatarUrl(m),
+                  imageHeaders: state.authHeaders,
+                ),
+                title: Text(isMe ? '${m.label} (Du)' : m.label),
+                subtitle: Text(m.phone),
                 trailing: isOwner
                     ? Chip(
                         label: const Text('Admin'),

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Ping · Admin</title>
+  <style>
+    :root {
+      --bg: #0f1020; --card: #1a1b2e; --card2: #232542; --line: #303257;
+      --text: #e9e9f3; --muted: #9aa0c0; --primary: #6750f4; --accent: #ff6d3b;
+      --danger: #ef4444; --ok: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #25204a, var(--bg)); color: var(--text);
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 18px 64px; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .logo { width: 40px; height: 40px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      display: grid; place-items: center; font-size: 22px; }
+    h1 { font-size: 22px; margin: 0; }
+    .muted { color: var(--muted); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-top: 18px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    input, button, select {
+      font: inherit; border-radius: 10px; border: 1px solid var(--line);
+      background: var(--card2); color: var(--text); padding: 10px 12px;
+    }
+    input { width: 100%; }
+    button { cursor: pointer; border: none; background: var(--primary); color: white; font-weight: 600; }
+    button.secondary { background: var(--card2); border: 1px solid var(--line); }
+    button.danger { background: var(--danger); }
+    button.ghost { background: transparent; color: var(--muted); }
+    button:disabled { opacity: .5; cursor: default; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+    .row > div { flex: 1; min-width: 160px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pill.admin { background: rgba(103,80,244,.25); color: #c3b9ff; }
+    .pill.on { background: rgba(34,197,94,.2); color: #86efac; }
+    .pill.off { background: rgba(154,160,192,.15); color: var(--muted); }
+    .actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .actions button { padding: 6px 9px; font-size: 13px; }
+    .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+      background: var(--card2); border: 1px solid var(--line); padding: 12px 18px; border-radius: 12px;
+      opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+    .toast.show { opacity: 1; }
+    .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+    .hidden { display: none; }
+    .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .count { font-size: 30px; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>Ping · Admin-Portal</h1>
+        <div class="muted">Nutzerverwaltung</div>
+      </div>
+    </div>
+
+    <!-- Login -->
+    <div id="login" class="card hidden">
+      <h2 style="margin-top:0">Anmelden</h2>
+      <p class="note">Gib das Admin-Token ein (Server-Umgebungsvariable <code>ADMIN_TOKEN</code>).</p>
+      <label for="token">Admin-Token</label>
+      <input id="token" type="password" placeholder="••••••••" autocomplete="off" />
+      <div style="margin-top:12px"><button id="loginBtn">Entsperren</button></div>
+      <p id="loginErr" class="note" style="color:var(--danger)"></p>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dash" class="hidden">
+      <div class="card">
+        <div class="head">
+          <div>
+            <div class="muted">Registrierte Nutzer</div>
+            <div class="count" id="count">–</div>
+          </div>
+          <button class="ghost" id="logoutBtn">Abmelden</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">Nutzer anlegen</h2>
+        <div class="grid">
+          <div><label>Name</label><input id="c_name" placeholder="Anna Beispiel" /></div>
+          <div><label>Handynummer</label><input id="c_phone" placeholder="+49 170 1234567" /></div>
+          <div><label>E-Mail</label><input id="c_email" placeholder="user@example.invalid" /></div>
+          <div><label>Passwort</label><input id="c_pw" type="text" placeholder="mind. 6 Zeichen" /></div>
+        </div>
+        <div style="margin-top:12px; display:flex; gap:12px; align-items:center">
+          <label style="display:flex; gap:8px; align-items:center; margin:0; color:var(--text)">
+            <input id="c_admin" type="checkbox" style="width:auto" /> Als Admin anlegen
+          </label>
+          <button id="createBtn">Anlegen</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin-bottom:8px">
+          <div>
+            <label>Suche (Name, E-Mail, Nummer)</label>
+            <input id="q" placeholder="suchen …" />
+          </div>
+          <button class="secondary" id="reloadBtn">Aktualisieren</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Nummer</th><th>E-Mail</th><th>Status</th><th>Erstellt</th><th></th></tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <p id="empty" class="note hidden" style="margin-top:14px">Keine Nutzer gefunden.</p>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">🔒 Datenschutz</h2>
+        <p class="note">
+          Dieses Portal zeigt personenbezogene Daten (Nummer, E-Mail) und ist nur über das
+          geheime Admin-Token erreichbar. Greife nur darauf zu, wenn es für die Verwaltung
+          nötig ist, gib das Token nicht weiter, und nutze in Produktion ausschließlich
+          HTTPS. Kontaktlisten der App werden serverseitig nie gespeichert.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let token = sessionStorage.getItem('ping_admin_token') || '';
+
+    function toast(msg) {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2600);
+    }
+    function esc(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function fmtDate(ms) {
+      if (!ms) return '–';
+      try { return new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' }); }
+      catch { return '–'; }
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch('/api' + path, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token, ...(opts.headers || {}) },
+      });
+      if (res.status === 401) { logout(); throw new Error('Falsches Token.'); }
+      const body = res.status === 204 ? null : await res.json().catch(() => null);
+      if (!res.ok) throw new Error((body && body.error) || ('Fehler ' + res.status));
+      return body;
+    }
+
+    function showLogin() { $('login').classList.remove('hidden'); $('dash').classList.add('hidden'); }
+    function showDash() { $('login').classList.add('hidden'); $('dash').classList.remove('hidden'); }
+
+    function logout() {
+      token = ''; sessionStorage.removeItem('ping_admin_token'); showLogin();
+    }
+
+    async function login() {
+      const val = $('token').value.trim();
+      if (!val) return;
+      token = val;
+      try {
+        await refresh();
+        sessionStorage.setItem('ping_admin_token', token);
+        showDash();
+      } catch (e) {
+        token = '';
+        $('loginErr').textContent = e.message || 'Anmeldung fehlgeschlagen.';
+      }
+    }
+
+    async function refresh() {
+      const stats = await api('/admin/stats');
+      $('count').textContent = stats.users;
+      await loadUsers();
+    }
+
+    async function loadUsers() {
+      const q = encodeURIComponent($('q').value.trim());
+      const { users } = await api('/admin/users?q=' + q);
+      const rows = $('rows');
+      rows.innerHTML = '';
+      $('empty').classList.toggle('hidden', users.length > 0);
+      for (const u of users) {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + esc(u.displayName) +
+            (u.isAdmin ? ' <span class="pill admin">Admin</span>' : '') + '</td>' +
+          '<td>' + esc(u.phone) + '</td>' +
+          '<td>' + esc(u.email) + '</td>' +
+          '<td><span class="pill ' + (u.online ? 'on">online' : 'off">offline') + '</span></td>' +
+          '<td>' + fmtDate(u.createdAt) + '</td>' +
+          '<td><div class="actions">' +
+            '<button class="secondary" data-act="admin" data-id="' + u.id + '">' +
+              (u.isAdmin ? 'Admin entz.' : 'Admin') + '</button>' +
+            '<button class="secondary" data-act="pw" data-id="' + u.id + '">Passwort</button>' +
+            '<button class="danger" data-act="del" data-id="' + u.id + '" data-name="' + esc(u.displayName) + '">Löschen</button>' +
+          '</div></td>';
+        tr.querySelector('[data-act=admin]').onclick = () => toggleAdmin(u);
+        tr.querySelector('[data-act=pw]').onclick = () => resetPw(u);
+        tr.querySelector('[data-act=del]').onclick = () => del(u);
+        rows.appendChild(tr);
+      }
+    }
+
+    async function createUser() {
+      const body = {
+        displayName: $('c_name').value.trim(),
+        phone: $('c_phone').value.trim(),
+        email: $('c_email').value.trim(),
+        password: $('c_pw').value,
+        isAdmin: $('c_admin').checked,
+      };
+      try {
+        await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
+        $('c_name').value = $('c_phone').value = $('c_email').value = $('c_pw').value = '';
+        $('c_admin').checked = false;
+        toast('Nutzer angelegt.');
+        await refresh();
+      } catch (e) { toast(e.message); }
+    }
+
+    async function toggleAdmin(u) {
+      try {
+        await api('/admin/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ isAdmin: !u.isAdmin }) });
+        await loadUsers();
+      } catch (e) { toast(e.message); }
+    }
+
+    async function resetPw(u) {
+      const pw = prompt('Neues Passwort für ' + u.displayName + ' (mind. 6 Zeichen):');
+      if (!pw) return;
+      try {
+        await api('/admin/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ password: pw }) });
+        toast('Passwort geändert.');
+      } catch (e) { toast(e.message); }
+    }
+
+    async function del(u) {
+      if (!confirm('„' + u.displayName + '" wirklich löschen? Das entfernt das Konto und seine Mitgliedschaften.')) return;
+      try {
+        await api('/admin/users/' + u.id, { method: 'DELETE' });
+        toast('Nutzer gelöscht.');
+        await refresh();
+      } catch (e) { toast(e.message); }
+    }
+
+    $('loginBtn').onclick = login;
+    $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+    $('logoutBtn').onclick = logout;
+    $('createBtn').onclick = createUser;
+    $('reloadBtn').onclick = () => loadUsers().catch((e) => toast(e.message));
+    $('q').addEventListener('input', () => { clearTimeout(window._t); window._t = setTimeout(() => loadUsers().catch(() => {}), 300); });
+
+    // Boot: try the saved token, else show login.
+    (async () => {
+      if (token) {
+        try { await refresh(); showDash(); return; } catch { logout(); }
+      }
+      showLogin();
+    })();
+  </script>
+</body>
+</html>

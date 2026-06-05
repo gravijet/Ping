@@ -28,16 +28,21 @@ class SettingsScreen extends StatelessWidget {
                 child: Row(
                   children: [
                     PingAvatar(
-                        initials: me.initials, color: me.color, size: 64),
+                      initials: me.initials,
+                      color: me.color,
+                      size: 64,
+                      imageUrl: state.avatarUrl(me),
+                      imageHeaders: state.authHeaders,
+                    ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(me.displayName,
+                          Text(me.label,
                               style:
                                   Theme.of(context).textTheme.titleLarge),
-                          Text('@${me.username}',
+                          Text(me.phone,
                               style: TextStyle(color: scheme.onSurfaceVariant)),
                           if (me.about.isNotEmpty)
                             Padding(
@@ -146,7 +151,7 @@ class SettingsScreen extends StatelessWidget {
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
             labelText: 'URL',
-            hintText: 'http://192.0.2.1:8080',
+            hintText: defaultBaseUrl,
           ),
         ),
         actions: [

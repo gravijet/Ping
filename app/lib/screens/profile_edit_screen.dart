@@ -3,13 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
-import '../widgets/avatar.dart';
-
-const _palette = [
-  '#EF5350', '#EC407A', '#AB47BC', '#7E57C2', '#5C6BC0',
-  '#42A5F5', '#29B6F6', '#26C6DA', '#26A69A', '#66BB6A',
-  '#9CCC65', '#FFA726', '#FF7043', '#8D6E63', '#78909C',
-];
+import '../theme.dart';
+import '../widgets/editable_avatar.dart';
+import 'security_screen.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -28,7 +24,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   void initState() {
     super.initState();
     final me = context.read<AppState>().me!;
-    _name = TextEditingController(text: me.displayName);
+    _name = TextEditingController(text: me.hasName ? me.displayName : '');
     _about = TextEditingController(text: me.about);
     _color = me.avatarColor;
   }
@@ -78,6 +74,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   @override
   Widget build(BuildContext context) {
     final me = context.watch<AppState>().me!;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profil bearbeiten'),
@@ -96,23 +93,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Center(
-            child: PingAvatar(
-              initials: _name.text.trim().isEmpty
-                  ? me.initials
-                  : _name.text.trim()[0].toUpperCase(),
-              color: _currentColor,
-              size: 104,
-            ),
-          ),
+          Center(child: EditableAvatar(color: _currentColor, size: 116)),
           const SizedBox(height: 24),
-          Text('Avatarfarbe',
-              style: Theme.of(context).textTheme.titleSmall),
+          Text('Avatarfarbe', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 12),
           Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: _palette.map((hex) {
+            children: kAvatarPalette.map((hex) {
               final c = Color(
                   int.parse('FF${hex.replaceFirst('#', '')}', radix: 16));
               final selected = hex == _color;
@@ -142,7 +130,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             controller: _name,
             maxLength: 40,
             textCapitalization: TextCapitalization.words,
-            onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(
               labelText: 'Anzeigename',
               prefixIcon: Icon(Icons.badge_outlined),
@@ -163,9 +150,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           const SizedBox(height: 8),
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.alternate_email),
-            title: Text('@${me.username}'),
-            subtitle: const Text('Dein Benutzername lässt sich nicht ändern.'),
+            leading: const Icon(Icons.phone_rounded),
+            title: Text(me.phone),
+            subtitle: const Text('Deine Nummer lässt sich nicht ändern.'),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.shield_outlined, color: scheme.primary),
+            title: const Text('Sicherung & Login'),
+            subtitle: Text(
+              me.hasPassword
+                  ? 'E-Mail und Passwort als Backup hinterlegt.'
+                  : 'E-Mail und Passwort als Backup hinzufügen.',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SecurityScreen()),
+            ),
           ),
         ],
       ),

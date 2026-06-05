@@ -35,11 +35,15 @@ class ChatTile extends StatelessWidget {
         child: Row(
           children: [
             PingAvatar(
-              initials: chat.initials,
+              initials: chat.isGroup
+                  ? chat.initials
+                  : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
               size: 54,
               online: chat.isGroup ? null : online,
               icon: chat.isGroup ? Icons.groups_rounded : null,
+              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+              imageHeaders: state.authHeaders,
             ),
             const SizedBox(width: 14),
             Expanded(

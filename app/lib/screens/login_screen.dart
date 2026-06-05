@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
+import 'code_verify_screen.dart';
+import 'password_login_screen.dart';
 
+/// First screen: enter a phone number to receive a login code.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -14,43 +18,35 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _username = TextEditingController();
-  final _password = TextEditingController();
-  final _displayName = TextEditingController();
-
-  bool _isRegister = false;
+  final _phone = TextEditingController();
   bool _busy = false;
-  bool _obscure = true;
 
   @override
   void dispose() {
-    _username.dispose();
-    _password.dispose();
-    _displayName.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  Future<void> _requestCode() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => _busy = true);
     final state = context.read<AppState>();
     try {
-      if (_isRegister) {
-        await state.register(
-          _username.text.trim(),
-          _password.text,
-          displayName: _displayName.text,
-        );
-      } else {
-        await state.login(_username.text.trim(), _password.text);
-      }
-      // On success the root widget swaps us out for the home screen.
+      final res = await state.requestCode(_phone.text.trim());
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CodeVerifyScreen(
+            phone: (res['phone'] ?? _phone.text.trim()) as String,
+            devCode: res['devCode'] as String?,
+          ),
+        ),
+      );
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message)),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -74,85 +70,60 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     _header(scheme),
                     const SizedBox(height: 36),
-                    if (_isRegister) ...[
-                      TextFormField(
-                        controller: _displayName,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Anzeigename (optional)',
-                          hintText: 'Wie sollen dich andere sehen?',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
                     TextFormField(
-                      controller: _username,
-                      textInputAction: TextInputAction.next,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Benutzername',
-                        hintText: 'z. B. lena_92',
-                        prefixIcon: Icon(Icons.alternate_email),
-                      ),
-                      validator: (v) {
-                        final value = (v ?? '').trim();
-                        if (value.isEmpty) return 'Bitte gib einen Benutzernamen ein.';
-                        if (_isRegister && value.length < 3) {
-                          return 'Mindestens 3 Zeichen.';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: _password,
-                      obscureText: _obscure,
+                      controller: _phone,
+                      autofocus: true,
+                      keyboardType: TextInputType.phone,
                       textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Passwort',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscure
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined),
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                        ),
+                      onFieldSubmitted: (_) => _requestCode(),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Handynummer',
+                        hintText: '+49 170 1234567',
+                        prefixIcon: Icon(Icons.phone_rounded),
                       ),
                       validator: (v) {
-                        if ((v ?? '').isEmpty) return 'Bitte gib dein Passwort ein.';
-                        if (_isRegister && (v ?? '').length < 6) {
-                          return 'Mindestens 6 Zeichen.';
+                        final digits =
+                            (v ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+                        if (digits.length < 5) {
+                          return 'Bitte gib eine gültige Handynummer ein.';
                         }
                         return null;
                       },
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Wir schicken dir einen Bestätigungscode. Nummern ohne '
+                      'Ländervorwahl behandeln wir als deutsche Nummer (+49).',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 22),
                     FilledButton(
-                      onPressed: _busy ? null : _submit,
+                      onPressed: _busy ? null : _requestCode,
                       child: _busy
                           ? const SizedBox(
                               width: 22,
                               height: 22,
                               child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
+                                  strokeWidth: 2.4, color: Colors.white),
                             )
-                          : Text(_isRegister ? 'Konto erstellen' : 'Anmelden'),
+                          : const Text('Code anfordern'),
                     ),
                     const SizedBox(height: 8),
-                    TextButton(
+                    TextButton.icon(
                       onPressed: _busy
                           ? null
-                          : () => setState(() => _isRegister = !_isRegister),
-                      child: Text(_isRegister
-                          ? 'Schon dabei? Jetzt anmelden'
-                          : 'Neu hier? Konto erstellen'),
+                          : () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => const PasswordLoginScreen()),
+                              ),
+                      icon: const Icon(Icons.password_rounded, size: 18),
+                      label: const Text('Mit E-Mail & Passwort anmelden'),
                     ),
-                    const SizedBox(height: 8),
                     TextButton.icon(
                       onPressed: _busy ? null : _editServer,
                       icon: const Icon(Icons.dns_outlined, size: 18),
@@ -186,15 +157,13 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 18),
         Text(
-          _isRegister ? 'Willkommen bei Ping' : 'Schön, dich zu sehen',
+          'Willkommen bei Ping',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: 6),
         Text(
-          _isRegister
-              ? 'Erstell dir in Sekunden ein Konto und leg los.'
-              : 'Melde dich an und schreib deinen Leuten.',
+          'Melde dich mit deiner Handynummer an und schreib deinen Leuten.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
@@ -216,9 +185,8 @@ class _LoginScreenState extends State<LoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Adresse deines Ping-Servers. Im Android-Emulator erreichst du '
-              'deinen PC über 192.0.2.1, auf einem echten Gerät über die lokale '
-              'IP-Adresse des Servers.',
+              'Adresse deines Ping-Servers. Standard ist der öffentliche Ping-'
+              'Server. Für einen eigenen Server trag hier dessen Adresse ein.',
             ),
             const SizedBox(height: 16),
             TextField(
@@ -227,7 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'URL',
-                hintText: 'http://192.0.2.1:8080',
+                hintText: defaultBaseUrl,
               ),
             ),
           ],

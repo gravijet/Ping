@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { config } from './config.js';
@@ -12,7 +13,7 @@ export function verifyPassword(plain, hash) {
 }
 
 export function signToken(user) {
-  return jwt.sign({ sub: user.id, username: user.username }, config.jwtSecret, {
+  return jwt.sign({ sub: user.id, phone: user.phone }, config.jwtSecret, {
     expiresIn: config.tokenTtl,
   });
 }
@@ -45,5 +46,19 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Dieses Konto existiert nicht mehr.' });
   }
   req.user = user;
+  next();
+}
+
+// Gate for the admin portal. Auth is a single shared secret (config.adminToken)
+// sent in the X-Admin-Token header, compared in constant time.
+export function requireAdmin(req, res, next) {
+  if (!config.adminToken) {
+    return res.status(503).json({ error: 'Das Admin-Portal ist nicht aktiviert.' });
+  }
+  const provided = (req.headers['x-admin-token'] || '').toString();
+  const a = Buffer.from(provided);
+  const b = Buffer.from(config.adminToken);
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!ok) return res.status(401).json({ error: 'Falsches Admin-Token.' });
   next();
 }

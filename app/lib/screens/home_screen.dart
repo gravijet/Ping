@@ -176,8 +176,8 @@ class _EmptyState extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 48),
           child: Text(
-            'Tipp unten auf „Neuer Chat", such jemanden über seinen '
-            'Benutzernamen und schreib die erste Nachricht.',
+            'Tipp unten auf „Neuer Chat", schreib einer Telefonnummer oder '
+            'such jemanden und leg los.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurfaceVariant,

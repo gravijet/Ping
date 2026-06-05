@@ -22,38 +22,54 @@ export function pickAvatarColor(seed) {
 
 const stmts = {
   insertUser: db.prepare(`
-    INSERT INTO users (id, username, username_lc, display_name, password_hash,
-                       avatar_color, about, created_at, last_seen)
-    VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`),
-  userByUsernameLc: db.prepare('SELECT * FROM users WHERE username_lc = ?'),
+    INSERT INTO users
+      (id, phone, email, email_lc, password_hash, display_name, avatar_color,
+       about, is_admin, created_at, last_seen)
+    VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`),
+  userByPhone: db.prepare('SELECT * FROM users WHERE phone = ?'),
+  userByEmailLc: db.prepare('SELECT * FROM users WHERE email_lc = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
   touchSeen: db.prepare('UPDATE users SET last_seen = ? WHERE id = ?'),
   updateProfile: db.prepare(
     'UPDATE users SET display_name = ?, about = ?, avatar_color = ? WHERE id = ?'
   ),
-  searchUsers: db.prepare(`
+  setAvatar: db.prepare(
+    'UPDATE users SET avatar_mime = ?, avatar_version = avatar_version + 1 WHERE id = ?'
+  ),
+  setEmail: db.prepare('UPDATE users SET email = ?, email_lc = ? WHERE id = ?'),
+  setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
+  setAdmin: db.prepare('UPDATE users SET is_admin = ? WHERE id = ?'),
+  setName: db.prepare('UPDATE users SET display_name = ? WHERE id = ?'),
+  deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+  count: db.prepare('SELECT COUNT(*) AS n FROM users'),
+  allUsers: db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 500'),
+  searchAdmin: db.prepare(`
     SELECT * FROM users
-    WHERE username_lc LIKE ? AND id != ?
-    ORDER BY username_lc LIMIT 25`),
+    WHERE LOWER(display_name) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ?
+    ORDER BY created_at DESC LIMIT 500`),
 };
 
-export function createUser({ username, displayName, passwordHash }) {
+export function createUser({ phone, email, passwordHash, displayName, isAdmin = false }) {
   const id = uid();
   const ts = now();
   stmts.insertUser.run(
     id,
-    username,
-    username.toLowerCase(),
-    displayName || username,
+    phone,
+    email,
+    email.toLowerCase(),
     passwordHash,
-    pickAvatarColor(username.toLowerCase()),
+    (displayName && displayName.trim()) || phone,
+    pickAvatarColor(phone),
+    isAdmin ? 1 : 0,
     ts,
     ts
   );
   return stmts.userById.get(id);
 }
 
-export const getUserByUsername = (u) => stmts.userByUsernameLc.get(u.toLowerCase());
+export const getUserByPhone = (phone) => stmts.userByPhone.get(phone);
+export const getUserByEmail = (email) =>
+  email ? stmts.userByEmailLc.get(email.toLowerCase()) : undefined;
 export const getUserById = (id) => stmts.userById.get(id);
 export const touchLastSeen = (id) => stmts.touchSeen.run(now(), id);
 
@@ -69,25 +85,107 @@ export function updateProfile(id, { displayName, about, avatarColor }) {
   return stmts.userById.get(id);
 }
 
-export function searchUsers(query, exceptId) {
-  const like = `%${query.toLowerCase().replace(/[%_]/g, '\\$&')}%`;
-  return stmts.searchUsers.all(like, exceptId);
+export function setAvatar(id, mime) {
+  stmts.setAvatar.run(mime, id);
+  return stmts.userById.get(id);
 }
 
-// Strip secrets before sending a user over the wire.
+export function setEmail(id, email) {
+  stmts.setEmail.run(email, email.toLowerCase(), id);
+  return stmts.userById.get(id);
+}
+
+export function setPassword(id, passwordHash) {
+  stmts.setPassword.run(passwordHash, id);
+  return stmts.userById.get(id);
+}
+
+export function setAdmin(id, isAdmin) {
+  stmts.setAdmin.run(isAdmin ? 1 : 0, id);
+  return stmts.userById.get(id);
+}
+
+export function setName(id, displayName) {
+  stmts.setName.run(displayName, id);
+  return stmts.userById.get(id);
+}
+
+export const deleteUser = (id) => stmts.deleteUser.run(id);
+export const countUsers = () => stmts.count.get().n;
+export const listUsers = (q) => {
+  if (q && q.trim()) {
+    const like = `%${q.toLowerCase().replace(/[%_]/g, '\\$&')}%`;
+    return stmts.searchAdmin.all(like, like, like);
+  }
+  return stmts.allUsers.all();
+};
+
+// Privacy: match a batch of normalized phones / lowercased emails against
+// registered users. Nothing is stored — this only runs in memory for this call.
+export function matchContacts(phones, emails, exceptId) {
+  const ph = [...new Set((phones || []).filter(Boolean))];
+  const em = [...new Set((emails || []).map((e) => e.toLowerCase()).filter(Boolean))];
+  if (ph.length === 0 && em.length === 0) return [];
+  const clauses = [];
+  const params = [exceptId];
+  if (ph.length) {
+    clauses.push(`phone IN (${ph.map(() => '?').join(',')})`);
+    params.push(...ph);
+  }
+  if (em.length) {
+    clauses.push(`email_lc IN (${em.map(() => '?').join(',')})`);
+    params.push(...em);
+  }
+  const sql = `SELECT * FROM users WHERE id != ? AND (${clauses.join(' OR ')})`;
+  return db.prepare(sql).all(...params);
+}
+
+// ---- Serialisation ---------------------------------------------------------
+
+// What anyone may see: name, avatar, presence. Never the phone or email — you
+// can only reach people you already know (via contacts or exact lookup).
 export function publicUser(u) {
   if (!u) return null;
   return {
     id: u.id,
-    username: u.username,
     displayName: u.display_name,
     avatarColor: u.avatar_color,
     about: u.about,
+    hasAvatar: !!u.avatar_mime,
+    avatarVersion: u.avatar_version,
     lastSeen: u.last_seen,
   };
 }
 
-// ---- Contacts --------------------------------------------------------------
+// The richer view of your *own* account.
+export function privateUser(u) {
+  if (!u) return null;
+  return {
+    ...publicUser(u),
+    phone: u.phone,
+    email: u.email,
+    isAdmin: !!u.is_admin,
+  };
+}
+
+// Full view for the admin portal (gated behind the admin token).
+export function adminUser(u) {
+  if (!u) return null;
+  return {
+    id: u.id,
+    phone: u.phone,
+    email: u.email,
+    displayName: u.display_name,
+    about: u.about,
+    avatarColor: u.avatar_color,
+    hasAvatar: !!u.avatar_mime,
+    isAdmin: !!u.is_admin,
+    createdAt: u.created_at,
+    lastSeen: u.last_seen,
+  };
+}
+
+// ---- Contacts (server-side favourites; optional) ---------------------------
 
 const contactStmts = {
   add: db.prepare(

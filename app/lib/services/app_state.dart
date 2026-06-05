@@ -12,9 +12,9 @@ const _kToken = 'ping_token';
 const _kBaseUrl = 'ping_base_url';
 const _kThemeMode = 'ping_theme_mode';
 
-/// Default points at the host machine as seen from the Android emulator.
-/// Real devices override this in the login screen / settings.
-const defaultBaseUrl = 'http://192.0.2.1:8080';
+/// The default Ping server. Always pre-filled so the app works out of the box;
+/// it can still be changed on the login screen / in settings.
+const defaultBaseUrl = 'http://192.0.2.1:61337';
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
@@ -49,6 +49,20 @@ class AppState extends ChangeNotifier {
 
   ApiClient get api => _api;
   SocketService get socket => _socket;
+
+  /// Auth headers for direct image requests (avatars are auth-gated).
+  Map<String, String> get authHeaders =>
+      {if (_api.token != null) 'Authorization': 'Bearer ${_api.token}'};
+
+  /// URL of a user's uploaded avatar, or null if they don't have one. The
+  /// version query busts the cache whenever the picture changes.
+  String? avatarUrl(PingUser? user) {
+    if (user == null || !user.hasAvatar) return null;
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$root/api/users/${user.id}/avatar?v=${user.avatarVersion}';
+  }
 
   // ---- Bootstrap -----------------------------------------------------------
 
@@ -88,20 +102,23 @@ class AppState extends ChangeNotifier {
 
   // ---- Auth ----------------------------------------------------------------
 
-  Future<void> register(String username, String password,
-      {String? displayName}) async {
+  /// Register a new account: phone, email and password are all required (no
+  /// verification step).
+  Future<void> register(
+      String phone, String email, String password, String displayName) async {
     final res = await _api.post('/auth/register', {
-      'username': username,
+      'phone': phone,
+      'email': email,
       'password': password,
-      if (displayName != null && displayName.trim().isNotEmpty)
-        'displayName': displayName.trim(),
+      'displayName': displayName,
     });
     await _handleAuthSuccess(res);
   }
 
-  Future<void> login(String username, String password) async {
+  /// Log in with email or phone number + password.
+  Future<void> login(String loginId, String password) async {
     final res = await _api.post('/auth/login', {
-      'username': username,
+      'login': loginId,
       'password': password,
     });
     await _handleAuthSuccess(res);
@@ -170,6 +187,31 @@ class AppState extends ChangeNotifier {
       if (about != null) 'about': about,
       if (avatarColor != null) 'avatarColor': avatarColor,
     });
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    notifyListeners();
+  }
+
+  /// Add or change the backup email / password used for password login.
+  Future<void> setSecurity(
+      {String? email, String? password, String? currentPassword}) async {
+    final res = await _api.patch('/me/security', {
+      if (email != null) 'email': email,
+      if (password != null) 'password': password,
+      if (currentPassword != null) 'currentPassword': currentPassword,
+    });
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    notifyListeners();
+  }
+
+  /// Upload a new profile picture (raw image bytes + its content type).
+  Future<void> uploadAvatar(List<int> bytes, String contentType) async {
+    final res = await _api.postBytes('/me/avatar', bytes, contentType);
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    notifyListeners();
+  }
+
+  Future<void> removeAvatar() async {
+    final res = await _api.delete('/me/avatar');
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
     notifyListeners();
   }
@@ -273,6 +315,17 @@ class AppState extends ChangeNotifier {
         !c.isGroup && c.otherUser?.id == user.id);
     if (existing.isNotEmpty) return existing.first;
     final res = await _api.post('/chats/direct', {'userId': user.id});
+    final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
+    _upsertChat(chat);
+    _cacheChatUsers(chat);
+    notifyListeners();
+    return chat;
+  }
+
+  /// Open (or create) a direct chat with whoever owns [phone]. Throws an
+  /// [ApiException] with a friendly message if that number isn't on Ping yet.
+  Future<Chat> openDirectChatByPhone(String phone) async {
+    final res = await _api.post('/chats/by-phone', {'phone': phone});
     final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
     _upsertChat(chat);
     _cacheChatUsers(chat);

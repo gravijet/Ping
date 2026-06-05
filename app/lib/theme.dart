@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// The avatar colour palette, mirroring the server's. Used wherever a user can
+/// pick a fallback colour for their avatar.
+const kAvatarPalette = [
+  '#EF5350', '#EC407A', '#AB47BC', '#7E57C2', '#5C6BC0',
+  '#42A5F5', '#29B6F6', '#26C6DA', '#26A69A', '#66BB6A',
+  '#9CCC65', '#FFA726', '#FF7043', '#8D6E63', '#78909C',
+];
+
 /// Ping's visual identity: a vivid indigo→violet seed with warm accents,
 /// built on Material 3. One seed colour drives a fully harmonised palette in
 /// both light and dark mode.

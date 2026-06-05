@@ -130,7 +130,7 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
               autofocus: true,
               onChanged: _onSearch,
               decoration: const InputDecoration(
-                hintText: 'Benutzername suchen …',
+                hintText: 'Name oder Nummer suchen …',
                 prefixIcon: Icon(Icons.search_rounded),
               ),
             ),
@@ -156,13 +156,19 @@ class _AddMembersScreenState extends State<AddMembersScreen> {
                         itemBuilder: (context, i) {
                           final u = _results[i];
                           final selected = _selected.containsKey(u.id);
+                          final state = context.read<AppState>();
                           return ListTile(
                             leading: PingAvatar(
-                                initials: u.initials, color: u.color, size: 46),
-                            title: Text(u.displayName,
+                              initials: u.initials,
+                              color: u.color,
+                              size: 46,
+                              imageUrl: state.avatarUrl(u),
+                              imageHeaders: state.authHeaders,
+                            ),
+                            title: Text(u.label,
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
-                            subtitle: Text('@${u.username}'),
+                            subtitle: Text(u.hasName ? u.phone : 'Auf Ping'),
                             trailing: Checkbox(
                                 value: selected, onChanged: (_) => _toggle(u)),
                             onTap: () => _toggle(u),

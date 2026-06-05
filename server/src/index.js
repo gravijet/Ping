@@ -1,4 +1,6 @@
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -7,28 +9,49 @@ import { config } from './config.js';
 import { router } from './routes.js';
 import { createHub } from './hub.js';
 
+const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+
 export function createApp() {
   const app = express();
   app.set('trust proxy', 1);
-  app.use(helmet());
+  // The admin portal is a tiny inline-script page, so relax CSP just enough to
+  // let it run while keeping helmet's other protections.
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+          'script-src': ["'self'", "'unsafe-inline'"],
+          'style-src': ["'self'", "'unsafe-inline'"],
+        },
+      },
+    })
+  );
   app.use(
     cors({
       origin: config.corsOrigins === '*' ? true : config.corsOrigins.split(','),
     })
   );
+
+  // The admin portal (served before the JSON body parser; it has no API body).
+  app.get(['/admin', '/admin/'], (_req, res) =>
+    res.sendFile(path.join(publicDir, 'admin.html'))
+  );
+
   app.use(express.json({ limit: '64kb' }));
 
-  app.get('/health', (_req, res) => res.json({ ok: true, name: 'ping', version: '1.0.0' }));
+  app.get('/health', (_req, res) => res.json({ ok: true, name: 'ping', version: '2.0.0' }));
 
-  // Tighter limit on auth endpoints to slow down credential stuffing.
+  // Tighter limit on auth + admin endpoints to slow down credential/token guessing.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 40,
+    max: config.authRateMax,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Zu viele Versuche. Bitte warte einen Moment und versuch es erneut.' },
   });
   app.use('/api/auth', authLimiter);
+  app.use('/api/admin', authLimiter);
 
   // General API rate limit.
   app.use(

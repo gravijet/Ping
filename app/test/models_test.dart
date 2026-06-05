@@ -9,19 +9,41 @@ void main() {
     test('parses colour and builds initials from two names', () {
       final u = PingUser.fromJson({
         'id': '1',
-        'username': 'lena_92',
+        'phone': '+491701234567',
         'displayName': 'Lena Maier',
         'avatarColor': '#42A5F5',
       });
       expect(u.color, const Color(0xFF42A5F5));
       expect(u.initials, 'LM');
+      expect(u.label, 'Lena Maier');
       expect(u.online, false);
     });
 
-    test('falls back to username when display name missing', () {
-      final u = PingUser.fromJson({'id': '2', 'username': 'bob'});
-      expect(u.displayName, 'bob');
-      expect(u.initials, 'BO');
+    test('falls back to the phone number when no name is set', () {
+      final u = PingUser.fromJson({'id': '2', 'phone': '+491700000000'});
+      expect(u.displayName, '+491700000000');
+      expect(u.hasName, false);
+      // No letters to use, so the avatar shows an icon instead of initials.
+      expect(u.initials, '');
+      expect(u.label, '+491700000000');
+    });
+
+    test('exposes avatar and backup-login flags', () {
+      final u = PingUser.fromJson({
+        'id': '3',
+        'phone': '+491700000003',
+        'displayName': 'Sam',
+        'avatarColor': '#26A69A',
+        'hasAvatar': true,
+        'avatarVersion': 4,
+        'email': 'sam@example.com',
+        'hasPassword': true,
+      });
+      expect(u.hasAvatar, true);
+      expect(u.avatarVersion, 4);
+      expect(u.email, 'sam@example.com');
+      expect(u.hasPassword, true);
+      expect(u.initials, 'SA');
     });
   });
 
@@ -68,7 +90,7 @@ void main() {
         'memberIds': ['a', 'b'],
         'otherUser': {
           'id': 'b',
-          'username': 'lena',
+          'phone': '+491700000099',
           'displayName': 'Lena',
           'avatarColor': '#EF5350',
         },
@@ -76,7 +98,7 @@ void main() {
         'updatedAt': 5,
       });
       expect(c.isGroup, false);
-      expect(c.otherUser?.username, 'lena');
+      expect(c.otherUser?.phone, '+491700000099');
       expect(c.unread, 3);
     });
 
@@ -89,7 +111,7 @@ void main() {
         'memberIds': ['a', 'b', 'c'],
         'ownerId': 'a',
         'members': [
-          {'id': 'a', 'username': 'a', 'displayName': 'A', 'avatarColor': '#AB47BC'},
+          {'id': 'a', 'phone': '+4911', 'displayName': 'A', 'avatarColor': '#AB47BC'},
         ],
         'updatedAt': 9,
       });

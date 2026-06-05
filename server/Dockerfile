@@ -11,11 +11,12 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY src ./src
 
 ENV NODE_ENV=production
-ENV PORT=8080
+ENV PORT=61337
 ENV DB_FILE=/data/ping.db
-EXPOSE 8080
+# Avatars are written next to the DB, i.e. /data/uploads — also on the volume.
+EXPOSE 61337
 
-# Persist the SQLite database outside the image.
+# Persist the SQLite database and uploaded avatars outside the image.
 VOLUME ["/data"]
 
 CMD ["node", "src/index.js"]
