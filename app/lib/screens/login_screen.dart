@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
-import '../theme.dart';
+import '../widgets/ping_logo.dart';
 
 /// The entry screen. Two modes:
 ///  - Register: name, phone, email and password (all required, no verification).
@@ -253,19 +253,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _header(ColorScheme scheme) {
     return Column(
       children: [
-        Container(
-          width: 76,
-          height: 76,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [PingTheme.seed, PingTheme.accent],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 44),
-        ),
+        const PingLogo(size: 84),
         const SizedBox(height: 18),
         Text(
           'Willkommen bei Ping',
@@ -297,8 +285,8 @@ class _LoginScreenState extends State<LoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Adresse deines Ping-Servers. Standard ist der öffentliche Ping-'
-              'Server. Für einen eigenen Server trag hier dessen Adresse ein.',
+              'Standardmäßig nutzt die App den Ping-Standardserver. Für einen '
+              'eigenen Server trag hier dessen Adresse ein.',
             ),
             const SizedBox(height: 16),
             TextField(
@@ -307,7 +295,7 @@ class _LoginScreenState extends State<LoginScreen> {
               keyboardType: TextInputType.url,
               decoration: const InputDecoration(
                 labelText: 'URL',
-                hintText: defaultBaseUrl,
+                hintText: 'https://dein-server',
               ),
             ),
           ],

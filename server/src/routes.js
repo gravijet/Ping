@@ -16,12 +16,15 @@ import {
   updateProfileSchema,
   securitySchema,
   messageBodySchema,
+  messageSendSchema,
+  statusSchema,
   directChatSchema,
   lookupSchema,
   matchSchema,
   createGroupChatSchema,
   adminCreateSchema,
   adminUpdateSchema,
+  adminBroadcastSchema,
 } from './validation.js';
 import {
   createUser,
@@ -36,8 +39,17 @@ import {
   setAdmin,
   deleteUser,
   countUsers,
+  countChats,
+  countGroups,
+  countMessages,
+  countActiveStatuses,
+  countAdmins,
   listUsers,
   matchContacts,
+  blockUser,
+  unblockUser,
+  hasBlocked,
+  listBlockedIds,
   publicUser,
   privateUser,
   adminUser,
@@ -48,6 +60,7 @@ import {
   getChat,
   isMember,
   getMemberIds,
+  getPeerIds,
   addMember,
   removeMember,
   setMuted,
@@ -60,8 +73,26 @@ import {
   getHistory,
   messageView,
   markChatRead,
+  detachCreatedChats,
 } from './chatRepo.js';
-import { broadcastToChat, sendToUser, isOnline } from './hub.js';
+import {
+  saveUpload,
+  getUploadMeta,
+  readUpload,
+  isInlineMime,
+  kindForMime,
+} from './uploads.js';
+import { detectImageMime as sniffImage } from './avatars.js';
+import {
+  createStatus,
+  getStatus,
+  deleteStatus,
+  activeStatusesForUser,
+  markStatusViewed,
+  statusView,
+  statusViewers,
+} from './statusRepo.js';
+import { broadcastToChat, sendToUser, isOnline, onlineUserIds } from './hub.js';
 
 export const router = Router();
 
@@ -220,6 +251,49 @@ router.delete(
   })
 );
 
+// Self-service account deletion. Irreversible, so we require the account
+// password as confirmation. Cascades remove memberships and receipts; the
+// user's messages stay (sender becomes null) so other people's chats aren't
+// torn apart mid-thread.
+router.delete(
+  '/me',
+  requireAuth,
+  h(async (req, res) => {
+    const me = req.user;
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const ok = password ? await verifyPassword(password, me.password_hash) : false;
+    if (!ok) {
+      return res
+        .status(403)
+        .json({ error: 'Zum Löschen deines Kontos brauchen wir dein Passwort.' });
+    }
+    // Collect everyone who shares a chat with us before we tear the rows down.
+    const peers = new Set();
+    for (const chat of getUserChats(me.id)) {
+      for (const memberId of getMemberIds(chat.id)) {
+        if (memberId !== me.id) peers.add(memberId);
+      }
+    }
+    deleteAvatar(me.id);
+    detachCreatedChats(me.id); // hand off / drop chats we created first.
+    deleteUser(me.id); // FK cascade: memberships + message_status; messages kept.
+    // Let peers refresh: our bubbles now show as a deleted account.
+    const tombstone = {
+      id: me.id,
+      displayName: 'Gelöschtes Konto',
+      avatarColor: '#78909C',
+      about: '',
+      hasAvatar: false,
+      avatarVersion: 0,
+      lastSeen: null,
+    };
+    for (const peerId of peers) {
+      sendToUser(peerId, 'user-updated', { user: tombstone });
+    }
+    res.status(204).end();
+  })
+);
+
 // ---- Finding people --------------------------------------------------------
 
 // Exact lookup by phone or email (used for manual "start chat" / group add).
@@ -227,14 +301,14 @@ router.post(
   '/users/lookup',
   requireAuth,
   h(async (req, res) => {
-    const { phone, email } = parse(lookupSchema, req.body);
-    let user = null;
-    if (phone) {
-      const n = normalizePhone(phone);
-      if (!n) return res.status(400).json({ error: 'Diese Handynummer können wir nicht erkennen.' });
-      user = getUserByPhone(n);
+    const { phone } = parse(lookupSchema, req.body);
+    const n = normalizePhone(phone);
+    if (!n) {
+      return res
+        .status(400)
+        .json({ error: 'Diese Handynummer können wir nicht erkennen.' });
     }
-    if (!user && email) user = getUserByEmail(email);
+    const user = getUserByPhone(n);
     if (!user) {
       return res
         .status(404)
@@ -250,19 +324,16 @@ router.post(
   '/contacts/match',
   requireAuth,
   h(async (req, res) => {
-    const { phones = [], emails = [] } = parse(matchSchema, req.body);
+    const { phones = [] } = parse(matchSchema, req.body);
     const normPhones = phones.map((p) => normalizePhone(p)).filter(Boolean);
-    const lcEmails = emails.map((e) => e.trim().toLowerCase()).filter(Boolean);
-    const rows = matchContacts(normPhones, lcEmails, req.user.id);
+    const rows = matchContacts(normPhones, [], req.user.id);
 
     const phoneSet = new Set(normPhones);
-    const emailSet = new Set(lcEmails);
-    // Echo back which of *their own* identifiers matched, so the client can map
-    // each hit to the device contact it came from.
+    // Echo back which of *their own* phone numbers matched, so the client can
+    // map each hit to the device contact it came from.
     const users = rows.map((u) => ({
       user: { ...publicUser(u), online: isOnline(u.id) },
       phone: phoneSet.has(u.phone) ? u.phone : null,
-      email: emailSet.has(u.email_lc) ? u.email : null,
     }));
     res.json({ users });
   })
@@ -312,7 +383,7 @@ router.post(
   '/chats/direct',
   requireAuth,
   h(async (req, res) => {
-    const { userId, phone, email } = parse(directChatSchema, req.body);
+    const { userId, phone } = parse(directChatSchema, req.body);
     let other = null;
     if (userId) other = getUserById(userId);
     if (!other && phone) {
@@ -320,7 +391,6 @@ router.post(
       if (!n) return res.status(400).json({ error: 'Diese Handynummer können wir nicht erkennen.' });
       other = getUserByPhone(n);
     }
-    if (!other && email) other = getUserByEmail(email);
     if (!other) {
       return res
         .status(404)
@@ -397,18 +467,40 @@ router.post(
   requireAuth,
   memberGuard,
   h(async (req, res) => {
-    const body = parse(messageBodySchema, req.body?.body);
-    const replyTo = req.body?.replyTo ? req.body.replyTo.toString() : null;
+    const { body, type = 'text', attachment, replyTo: replyRaw } = parse(
+      messageSendSchema,
+      req.body || {}
+    );
+    const replyTo = replyRaw ? replyRaw.toString() : null;
     if (replyTo) {
       const target = getMessage(replyTo);
       if (!target || target.chat_id !== req.chat.id) {
         return res.status(400).json({ error: 'Die zitierte Nachricht gehört nicht zu diesem Chat.' });
       }
     }
+    // In a direct chat you can't message someone who has blocked you.
+    if (req.chat.type === 'direct') {
+      const otherId = getMemberIds(req.chat.id).find((mId) => mId !== req.user.id);
+      if (otherId && hasBlocked(otherId, req.user.id)) {
+        return res
+          .status(403)
+          .json({ error: 'Du kannst dieser Person gerade nicht schreiben.' });
+      }
+    }
+    const att = attachment
+      ? {
+          ...attachment,
+          kind:
+            attachment.kind ||
+            kindForMime(attachment.mime || '', attachment.name || ''),
+        }
+      : null;
     const msg = createMessage({
       chatId: req.chat.id,
       senderId: req.user.id,
-      body,
+      type,
+      body: (body || '').trim(),
+      attachment: att,
       replyTo,
     });
     for (const memberId of getMemberIds(req.chat.id)) {
@@ -536,13 +628,226 @@ router.post(
   })
 );
 
-// ---- Admin portal API (token-gated via X-Admin-Token) ----------------------
+// ---- Attachments -----------------------------------------------------------
+
+// Upload raw bytes for a message/status attachment. Images are sniffed from
+// their magic bytes (never the header); other types are stored with their
+// declared mime and always served back with nosniff + a download disposition.
+router.post(
+  '/uploads',
+  requireAuth,
+  express.raw({ type: () => true, limit: config.maxUploadBytes }),
+  h(async (req, res) => {
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'Keine Datei empfangen.' });
+    }
+    let mime = (req.headers['content-type'] || 'application/octet-stream')
+      .toString()
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const sniffed = sniffImage(buf); // jpeg / png / webp
+    const isGif = buf.length > 6 && buf.toString('ascii', 0, 4) === 'GIF8';
+    if (mime.startsWith('image/') || sniffed || isGif) {
+      if (sniffed) mime = sniffed;
+      else if (isGif) mime = 'image/gif';
+      else {
+        return res
+          .status(400)
+          .json({ error: 'Dieses Bildformat wird nicht unterstützt.' });
+      }
+    }
+    const name = req.headers['x-filename']
+      ? decodeURIComponent(req.headers['x-filename'].toString()).slice(0, 200)
+      : null;
+    const meta = saveUpload({ buf, mime, name, ownerId: req.user.id });
+    res.status(201).json({ upload: meta });
+  })
+);
+
+router.get(
+  '/uploads/:id',
+  requireAuth,
+  h(async (req, res) => {
+    const meta = getUploadMeta(req.params.id);
+    if (!meta) return res.status(404).json({ error: 'Datei nicht gefunden.' });
+    const buf = readUpload(meta.id);
+    if (!buf) return res.status(404).json({ error: 'Datei nicht gefunden.' });
+    res.set('Content-Type', meta.mime);
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Cache-Control', 'private, max-age=86400');
+    const disp = isInlineMime(meta.mime) ? 'inline' : 'attachment';
+    res.set(
+      'Content-Disposition',
+      `${disp}; filename="${(meta.name || 'datei').replace(/"/g, '')}"`
+    );
+    res.send(buf);
+  })
+);
+
+// ---- Status updates ("stories") -------------------------------------------
+
+router.post(
+  '/status',
+  requireAuth,
+  h(async (req, res) => {
+    const { type = 'text', body = '', attachment, bgColor } = parse(
+      statusSchema,
+      req.body || {}
+    );
+    const att = attachment
+      ? { ...attachment, kind: attachment.kind || 'image' }
+      : null;
+    const row = createStatus({
+      userId: req.user.id,
+      type,
+      body: (body || '').trim(),
+      attachment: att,
+      bgColor: bgColor || null,
+    });
+    for (const peerId of getPeerIds(req.user.id)) {
+      sendToUser(peerId, 'status-added', { userId: req.user.id });
+    }
+    res.status(201).json({ status: statusView(row, req.user.id) });
+  })
+);
+
+router.get(
+  '/status',
+  requireAuth,
+  h(async (req, res) => {
+    const mine = activeStatusesForUser(req.user.id).map((s) =>
+      statusView(s, req.user.id)
+    );
+    const others = [];
+    for (const peerId of getPeerIds(req.user.id)) {
+      const rows = activeStatusesForUser(peerId);
+      if (rows.length === 0) continue;
+      const items = rows.map((s) => statusView(s, req.user.id));
+      others.push({
+        user: { ...publicUser(getUserById(peerId)), online: isOnline(peerId) },
+        items,
+        hasUnseen: items.some((i) => !i.seen),
+        updatedAt: rows[rows.length - 1].created_at,
+      });
+    }
+    // Unseen rings first, then most recently updated.
+    others.sort((a, b) =>
+      a.hasUnseen === b.hasUnseen
+        ? b.updatedAt - a.updatedAt
+        : a.hasUnseen
+          ? -1
+          : 1
+    );
+    res.json({ mine, others });
+  })
+);
+
+router.post(
+  '/status/:id/view',
+  requireAuth,
+  h(async (req, res) => {
+    const s = getStatus(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Status nicht gefunden.' });
+    if (s.user_id !== req.user.id) markStatusViewed(s.id, req.user.id);
+    res.json({ ok: true });
+  })
+);
+
+router.get(
+  '/status/:id/viewers',
+  requireAuth,
+  h(async (req, res) => {
+    const s = getStatus(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Status nicht gefunden.' });
+    if (s.user_id !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: 'Nur der Ersteller sieht, wer den Status angesehen hat.' });
+    }
+    res.json({ viewers: statusViewers(s.id) });
+  })
+);
+
+router.delete(
+  '/status/:id',
+  requireAuth,
+  h(async (req, res) => {
+    const s = getStatus(req.params.id);
+    if (!s) return res.status(404).json({ error: 'Status nicht gefunden.' });
+    if (s.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Du kannst nur eigene Status löschen.' });
+    }
+    deleteStatus(s.id);
+    res.status(204).end();
+  })
+);
+
+// ---- Blocking --------------------------------------------------------------
+
+router.get(
+  '/blocks',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ blocked: listBlockedIds(req.user.id) });
+  })
+);
+
+router.post(
+  '/users/:id/block',
+  requireAuth,
+  h(async (req, res) => {
+    if (req.params.id === req.user.id) {
+      return res
+        .status(400)
+        .json({ error: 'Dich selbst kannst du nicht blockieren.' });
+    }
+    const target = getUserById(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    blockUser(req.user.id, target.id);
+    res.json({ ok: true, blocked: true });
+  })
+);
+
+router.post(
+  '/users/:id/unblock',
+  requireAuth,
+  h(async (req, res) => {
+    unblockUser(req.user.id, req.params.id);
+    res.json({ ok: true, blocked: false });
+  })
+);
+
+// ---- Admin portal API (admin token or a signed-in admin user) --------------
 
 router.get(
   '/admin/stats',
   requireAdmin,
   h(async (_req, res) => {
-    res.json({ users: countUsers(), online: 0 });
+    res.json({
+      users: countUsers(),
+      online: onlineUserIds().length,
+      admins: countAdmins(),
+      chats: countChats(),
+      groups: countGroups(),
+      messages: countMessages(),
+      statuses: countActiveStatuses(),
+    });
+  })
+);
+
+// Push a live announcement to everyone who is currently connected.
+router.post(
+  '/admin/broadcast',
+  requireAdmin,
+  h(async (req, res) => {
+    const { title, body } = parse(adminBroadcastSchema, req.body);
+    const ids = onlineUserIds();
+    for (const id of ids) {
+      sendToUser(id, 'announcement', { title: title || 'Ping', body });
+    }
+    res.json({ ok: true, delivered: ids.length });
   })
 );
 
@@ -611,6 +916,8 @@ router.delete(
   h(async (req, res) => {
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    deleteAvatar(user.id);
+    detachCreatedChats(user.id);
     deleteUser(user.id);
     res.status(204).end();
   })

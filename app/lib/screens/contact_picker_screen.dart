@@ -60,18 +60,16 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
         return;
       }
       final local = await _contacts.loadContacts();
-      // Gather every phone/email across the address book and ask the server
-      // which of them are on Ping. The raw lists never leave this request.
+      // Gather every phone number across the address book and ask the server
+      // which of them are on Ping. The raw list never leaves this request, and
+      // people are matched by phone only — never by email.
       final phones = <String>{};
-      final emails = <String>{};
       for (final c in local) {
         phones.addAll(c.phones);
-        emails.addAll(c.emails);
       }
       if (!mounted) return;
       final state = context.read<AppState>();
-      final matches =
-          await state.matchContacts(phones.toList(), emails.toList());
+      final matches = await state.matchContacts(phones.toList());
       // Drop people who are already in the chat and de-dupe by user id.
       final seen = <String>{};
       final filtered = <ContactMatch>[];
@@ -232,7 +230,7 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
                 ),
                 title: Text(u.label,
                     style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(m.phone ?? m.email ?? 'Auf Ping'),
+                subtitle: Text(m.phone ?? 'Auf Ping'),
                 trailing: widget.multiSelect
                     ? Checkbox(
                         value: selected,

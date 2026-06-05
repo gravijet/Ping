@@ -67,6 +67,42 @@ export const setMuted = (chatId, userId, muted) =>
   s.setMuted.run(muted ? 1 : 0, chatId, userId);
 export const getUserChats = (userId) => s.userChats.all(userId);
 
+// Everyone who shares at least one chat with this user (their "contacts" in the
+// social-graph sense). Used for status visibility and presence fan-out.
+export function getPeerIds(userId) {
+  const peers = new Set();
+  for (const chat of s.userChats.all(userId)) {
+    for (const row of s.members.all(chat.id)) {
+      if (row.user_id !== userId) peers.add(row.user_id);
+    }
+  }
+  return [...peers];
+}
+
+// Before a user row can be removed, the chats they created must stop pointing at
+// them (chats.created_by has no ON DELETE rule, so the foreign key would block
+// the delete). Hand each such chat to another current member; if nobody is left,
+// drop the chat entirely (its messages cascade away).
+const created = {
+  byCreator: db.prepare('SELECT id FROM chats WHERE created_by = ?'),
+  otherMember: db.prepare(
+    'SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ? LIMIT 1'
+  ),
+  reassign: db.prepare('UPDATE chats SET created_by = ? WHERE id = ?'),
+  drop: db.prepare('DELETE FROM chats WHERE id = ?'),
+};
+
+export function detachCreatedChats(userId) {
+  for (const { id } of created.byCreator.all(userId)) {
+    const other = created.otherMember.get(id, userId);
+    if (other) {
+      created.reassign.run(other.user_id, id);
+    } else {
+      created.drop.run(id);
+    }
+  }
+}
+
 // Build the rich chat view the client renders in the list: title, avatar,
 // last message, unread count and (for direct chats) the other participant.
 export function chatView(chat, viewerId) {
@@ -121,8 +157,8 @@ export function chatView(chat, viewerId) {
 
 const m = {
   insert: db.prepare(`
-    INSERT INTO messages (id, chat_id, sender_id, type, body, reply_to, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO messages (id, chat_id, sender_id, type, body, attachment, reply_to, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   byId: db.prepare('SELECT * FROM messages WHERE id = ?'),
   insertStatus: db.prepare(`
     INSERT OR IGNORE INTO message_status (message_id, user_id, chat_id)
@@ -136,10 +172,18 @@ const m = {
   ),
 };
 
-export function createMessage({ chatId, senderId, body, type = 'text', replyTo = null }) {
+export function createMessage({
+  chatId,
+  senderId,
+  body = '',
+  type = 'text',
+  attachment = null,
+  replyTo = null,
+}) {
   const id = uid();
   const ts = now();
-  m.insert.run(id, chatId, senderId, type, body, replyTo, ts);
+  const att = attachment ? JSON.stringify(attachment) : null;
+  m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts);
   // Seed a status row for every recipient (everyone but the sender).
   for (const memberId of getMemberIds(chatId)) {
     if (memberId !== senderId) m.insertStatus.run(id, memberId, chatId);
@@ -212,6 +256,22 @@ export function receiptState(messageId) {
   return 'sent';
 }
 
+// A compact snapshot of a quoted (replied-to) message so the client can always
+// render the reply preview — even when the original is outside the loaded
+// window or was sent long ago. The body is trimmed; deleted originals are blank.
+export function quotedView(replyToId) {
+  const o = replyToId ? m.byId.get(replyToId) : null;
+  if (!o) return null;
+  const text = o.deleted_at ? '' : o.body;
+  return {
+    id: o.id,
+    senderId: o.sender_id,
+    type: o.type,
+    deleted: !!o.deleted_at,
+    body: text.length > 160 ? `${text.slice(0, 160)}…` : text,
+  };
+}
+
 export function messageView(msg, viewerId) {
   return {
     id: msg.id,
@@ -219,7 +279,11 @@ export function messageView(msg, viewerId) {
     senderId: msg.sender_id,
     type: msg.type,
     body: msg.deleted_at ? '' : msg.body,
+    attachment:
+      msg.deleted_at || !msg.attachment ? null : JSON.parse(msg.attachment),
     replyTo: msg.reply_to,
+    // Inline snapshot of the quoted message (null when this isn't a reply).
+    quoted: msg.reply_to ? quotedView(msg.reply_to) : null,
     createdAt: msg.created_at,
     editedAt: msg.edited_at,
     deleted: !!msg.deleted_at,

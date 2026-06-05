@@ -40,20 +40,14 @@ class NewChatScreen extends StatelessWidget {
     await _openChat(context, () => state.openDirectChat(user));
   }
 
-  Future<void> _byIdentifier(BuildContext context) async {
-    final result = await showDialog<_Identifier>(
+  Future<void> _byPhone(BuildContext context) async {
+    final phone = await showDialog<String>(
       context: context,
-      builder: (_) => const _IdentifierDialog(),
+      builder: (_) => const _PhoneDialog(),
     );
-    if (result == null || !context.mounted) return;
+    if (phone == null || !context.mounted) return;
     final state = context.read<AppState>();
-    await _openChat(
-      context,
-      () => state.startDirectByIdentifier(
-        phone: result.isEmail ? null : result.value,
-        email: result.isEmail ? result.value : null,
-      ),
-    );
+    await _openChat(context, () => state.startDirectByPhone(phone));
   }
 
   @override
@@ -73,9 +67,9 @@ class NewChatScreen extends StatelessWidget {
           _tile(
             scheme,
             Icons.dialpad_rounded,
-            'Per Nummer oder E-Mail',
-            'Direkt eine Handynummer oder E-Mail eingeben',
-            () => _byIdentifier(context),
+            'Per Telefonnummer',
+            'Direkt eine Handynummer eingeben',
+            () => _byPhone(context),
           ),
           _tile(
             scheme,
@@ -128,22 +122,14 @@ class NewChatScreen extends StatelessWidget {
   }
 }
 
-/// The result of the manual-entry dialog: a raw value plus whether it's an email
-/// (vs. a phone number), so the caller knows which API field to fill.
-class _Identifier {
-  final String value;
-  final bool isEmail;
-  const _Identifier(this.value, this.isEmail);
-}
-
-class _IdentifierDialog extends StatefulWidget {
-  const _IdentifierDialog();
+class _PhoneDialog extends StatefulWidget {
+  const _PhoneDialog();
 
   @override
-  State<_IdentifierDialog> createState() => _IdentifierDialogState();
+  State<_PhoneDialog> createState() => _PhoneDialogState();
 }
 
-class _IdentifierDialogState extends State<_IdentifierDialog> {
+class _PhoneDialogState extends State<_PhoneDialog> {
   final _controller = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
@@ -155,14 +141,13 @@ class _IdentifierDialogState extends State<_IdentifierDialog> {
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    final raw = _controller.text.trim();
-    Navigator.of(context).pop(_Identifier(raw, raw.contains('@')));
+    Navigator.of(context).pop(_controller.text.trim());
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Per Nummer oder E-Mail'),
+      title: const Text('Per Telefonnummer'),
       content: Form(
         key: _formKey,
         child: Column(
@@ -170,22 +155,22 @@ class _IdentifierDialogState extends State<_IdentifierDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-                'Gib eine Handynummer oder E-Mail ein. Die Person muss schon '
-                'bei Ping registriert sein.'),
+                'Gib eine Handynummer ein. Die Person muss schon bei Ping '
+                'registriert sein. Man findet andere nur über die Nummer.'),
             const SizedBox(height: 16),
             TextFormField(
               controller: _controller,
               autofocus: true,
-              keyboardType: TextInputType.emailAddress,
+              keyboardType: TextInputType.phone,
               autocorrect: false,
               onFieldSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
-                labelText: 'Nummer oder E-Mail',
+                labelText: 'Handynummer',
                 hintText: '+49 170 1234567',
-                prefixIcon: Icon(Icons.alternate_email_rounded),
+                prefixIcon: Icon(Icons.phone_rounded),
               ),
-              validator: (v) => (v ?? '').trim().isEmpty
-                  ? 'Bitte gib eine Nummer oder E-Mail ein.'
+              validator: (v) => (v ?? '').trim().length < 4
+                  ? 'Bitte gib eine Handynummer ein.'
                   : null,
             ),
           ],

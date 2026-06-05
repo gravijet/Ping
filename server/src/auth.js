@@ -49,16 +49,29 @@ export function requireAuth(req, res, next) {
   next();
 }
 
-// Gate for the admin portal. Auth is a single shared secret (config.adminToken)
-// sent in the X-Admin-Token header, compared in constant time.
+// Gate for the admin API. Two ways in:
+//   1. The shared admin token (X-Admin-Token), used by the web portal.
+//   2. A signed-in user whose account has is_admin set, used by the in-app
+//      admin panel — so admins manage Ping without a separate secret.
 export function requireAdmin(req, res, next) {
+  const provided = (req.headers['x-admin-token'] || '').toString();
+  if (config.adminToken && provided) {
+    const a = Buffer.from(provided);
+    const b = Buffer.from(config.adminToken);
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) return next();
+  }
+
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const payload = token ? verifyToken(token) : null;
+  const user = payload ? findUser.get(payload.sub) : null;
+  if (user && user.is_admin) {
+    req.user = user;
+    return next();
+  }
+
   if (!config.adminToken) {
     return res.status(503).json({ error: 'Das Admin-Portal ist nicht aktiviert.' });
   }
-  const provided = (req.headers['x-admin-token'] || '').toString();
-  const a = Buffer.from(provided);
-  const b = Buffer.from(config.adminToken);
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
-  if (!ok) return res.status(401).json({ error: 'Falsches Admin-Token.' });
-  next();
+  return res.status(401).json({ error: 'Kein Admin-Zugriff.' });
 }

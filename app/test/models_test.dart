@@ -96,6 +96,35 @@ void main() {
       expect(m.deleted, true);
       expect(m.isEdited, false);
     });
+
+    test('parses an inline quoted reply snapshot and copyWith keeps it', () {
+      final m = Message.fromJson({
+        'id': 'm9',
+        'chatId': 'c1',
+        'senderId': 'u2',
+        'type': 'text',
+        'body': 'Antwort',
+        'createdAt': 3000,
+        'replyTo': 'm1',
+        'quoted': {
+          'id': 'm1',
+          'senderId': 'u1',
+          'type': 'text',
+          'deleted': false,
+          'body': 'Originaltext',
+        },
+      });
+      expect(m.replyTo, 'm1');
+      expect(m.quoted, isNotNull);
+      expect(m.quoted!.id, 'm1');
+      expect(m.quoted!.senderId, 'u1');
+      expect(m.quoted!.body, 'Originaltext');
+      expect(m.quoted!.deleted, false);
+      // The snapshot must survive a copyWith (e.g. a receipt status update).
+      final updated = m.copyWith(status: MessageStatus.read);
+      expect(updated.quoted?.body, 'Originaltext');
+      expect(updated.replyTo, 'm1');
+    });
   });
 
   group('Chat', () {

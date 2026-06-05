@@ -65,35 +65,84 @@ export const securitySchema = z
     message: 'Gib eine E-Mail-Adresse oder ein Passwort an.',
   });
 
+// Editing only ever changes text, so this stays strict (non-empty).
 export const messageBodySchema = z
   .string()
   .trim()
   .min(1, 'Leere Nachrichten kannst du nicht senden.')
   .max(4000, 'Die Nachricht ist zu lang (max. 4000 Zeichen).');
 
-// Start a direct chat by user id, phone number or email.
+const mediaTypes = ['text', 'image', 'gif', 'video', 'audio', 'voice', 'file'];
+
+// An uploaded attachment. The url must point at our own /api/uploads/<id> so a
+// client can never smuggle in an arbitrary external/inline URL.
+export const attachmentSchema = z
+  .object({
+    kind: z.enum(['image', 'gif', 'video', 'audio', 'voice', 'file']).optional(),
+    url: z
+      .string()
+      .trim()
+      .min(1)
+      .max(512)
+      .startsWith('/api/uploads/', 'Ungültiger Anhang.'),
+    mime: z.string().max(120).optional(),
+    name: z.string().max(200).optional(),
+    size: z.number().int().nonnegative().max(config.maxUploadBytes).optional(),
+    width: z.number().int().nonnegative().max(20000).optional(),
+    height: z.number().int().nonnegative().max(20000).optional(),
+    durationMs: z.number().int().nonnegative().max(86_400_000).optional(),
+  })
+  .strip();
+
+// Sending a message: plain text, or a typed attachment with an optional caption.
+export const messageSendSchema = z
+  .object({
+    body: z.string().max(4000, 'Die Nachricht ist zu lang.').optional(),
+    type: z.enum(mediaTypes).optional(),
+    attachment: attachmentSchema.optional(),
+    replyTo: z.string().min(1).optional(),
+  })
+  .refine(
+    (d) => {
+      const t = d.type || 'text';
+      return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
+    },
+    { message: 'Die Nachricht braucht Text oder einen Anhang.' }
+  );
+
+// A status update ("story"): coloured text card, or an image with a caption.
+export const statusSchema = z
+  .object({
+    type: z.enum(['text', 'image']).optional(),
+    body: z.string().max(700, 'Der Status ist zu lang.').optional(),
+    attachment: attachmentSchema.optional(),
+    bgColor: avatarColorSchema.optional(),
+  })
+  .refine(
+    (d) => {
+      const t = d.type || 'text';
+      return t === 'image' ? !!d.attachment : !!d.body && d.body.trim().length > 0;
+    },
+    { message: 'Ein Status braucht Text oder ein Bild.' }
+  );
+
+// Start a direct chat by user id or phone number. Discovery by email was
+// removed on purpose — people are found only by their phone number.
 export const directChatSchema = z
   .object({
     userId: z.string().min(1).optional(),
     phone: phoneInputSchema.optional(),
-    email: emailSchema.optional(),
   })
-  .refine((d) => d.userId || d.phone || d.email, {
-    message: 'Gib eine Nummer, E-Mail oder einen Kontakt an.',
+  .refine((d) => d.userId || d.phone, {
+    message: 'Gib eine Handynummer oder einen Kontakt an.',
   });
 
-export const lookupSchema = z
-  .object({
-    phone: phoneInputSchema.optional(),
-    email: emailSchema.optional(),
-  })
-  .refine((d) => d.phone || d.email, {
-    message: 'Gib eine Nummer oder E-Mail an.',
-  });
+// Exact lookup is phone-only (email is a login credential, not a directory key).
+export const lookupSchema = z.object({ phone: phoneInputSchema });
 
+// Contact discovery matches phone numbers only.
 export const matchSchema = z.object({
   phones: z.array(z.string()).max(config.maxContactMatch).optional(),
-  emails: z.array(z.string()).max(config.maxContactMatch).optional(),
 });
 
 export const createGroupChatSchema = z.object({
@@ -128,6 +177,15 @@ export const adminUpdateSchema = z
       d.isAdmin !== undefined,
     { message: 'Nichts zu ändern.' }
   );
+
+export const adminBroadcastSchema = z.object({
+  title: z.string().trim().max(80).optional(),
+  body: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib eine Nachricht ein.')
+    .max(2000, 'Die Durchsage ist zu lang.'),
+});
 
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {

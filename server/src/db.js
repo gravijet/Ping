@@ -55,12 +55,17 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_chat_members_user ON chat_members(user_id);
 
+  -- Messages carry text and/or an attachment. The attachment column is a small
+  -- JSON blob ({ kind, url, mime, name, size, width, height, durationMs }); the
+  -- bytes themselves live under uploads/ and are referenced by id.
   CREATE TABLE IF NOT EXISTS messages (
     id         TEXT PRIMARY KEY,
     chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
-    type       TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text','system')),
-    body       TEXT NOT NULL,
+    type       TEXT NOT NULL DEFAULT 'text'
+      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location')),
+    body       TEXT NOT NULL DEFAULT '',
+    attachment TEXT,
     reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     edited_at  INTEGER,
@@ -87,7 +92,92 @@ db.exec(`
     created_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, contact_id)
   );
+
+  -- Stored bytes for message attachments. Served auth-gated via /api/uploads/:id.
+  CREATE TABLE IF NOT EXISTS uploads (
+    id         TEXT PRIMARY KEY,
+    owner_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    mime       TEXT NOT NULL,
+    name       TEXT,
+    size       INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  -- Ephemeral status updates ("stories"), visible to chat peers for 24h.
+  CREATE TABLE IF NOT EXISTS statuses (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text','image')),
+    body       TEXT NOT NULL DEFAULT '',
+    attachment TEXT,
+    bg_color   TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses(user_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS status_views (
+    status_id TEXT NOT NULL REFERENCES statuses(id) ON DELETE CASCADE,
+    viewer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at INTEGER NOT NULL,
+    PRIMARY KEY (status_id, viewer_id)
+  );
+
+  -- Block list: blocker no longer receives messages from blocked.
+  CREATE TABLE IF NOT EXISTS blocks (
+    blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (blocker_id, blocked_id)
+  );
 `);
+
+// ---- Migrations ------------------------------------------------------------
+
+// Older databases (schema v1) had a messages table whose `type` only allowed
+// 'text'/'system' and had no `attachment` column. Rebuild it in place so media
+// messages work without losing any history. New databases already match.
+function migrate() {
+  const cols = db.prepare('PRAGMA table_info(messages)').all();
+  const hasAttachment = cols.some((c) => c.name === 'attachment');
+  if (hasAttachment) return;
+
+  // The 12-step ALTER procedure: toggle FKs off, swap the table, turn them back
+  // on. message_status / replies keep pointing at the same message ids.
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, reply_to, created_at, edited_at, deleted_at)
+        SELECT id, chat_id, sender_id, type, body, reply_to, created_at, edited_at, deleted_at
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
+migrate();
 
 export function now() {
   return Date.now();

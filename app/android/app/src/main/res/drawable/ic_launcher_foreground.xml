@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- White speech bubble with a tail -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,34 H69 A9,9 0 0 1 78,43 V57 A9,9 0 0 1 69,66 H47 L37,75 V43 A9,9 0 0 1 45,34 Z" />
+    <!-- Three blue "ping" dots -->
+    <path
+        android:fillColor="#0A84FF"
+        android:pathData="M50,48 m-3.4,0 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0 Z" />
+    <path
+        android:fillColor="#0A84FF"
+        android:pathData="M58,48 m-3.4,0 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0 Z" />
+    <path
+        android:fillColor="#0A84FF"
+        android:pathData="M66,48 m-3.4,0 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0 Z" />
+</vector>

@@ -58,6 +58,12 @@ export const config = {
   // Max avatar upload size.
   maxAvatarBytes: Number(process.env.MAX_AVATAR_BYTES) || 5 * 1024 * 1024,
 
+  // Max size of a message attachment (photo, voice note, file, …).
+  maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES) || 30 * 1024 * 1024,
+
+  // How long a status update ("story") stays visible before it expires.
+  statusTtlMs: Number(process.env.STATUS_TTL_MS) || 24 * 60 * 60 * 1000,
+
   // Privacy: how many identifiers a single contact-match request may carry.
   // Contacts are matched in memory and never stored.
   maxContactMatch: Number(process.env.MAX_CONTACT_MATCH) || 2000,

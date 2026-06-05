@@ -15,6 +15,7 @@ class PingUser {
   final bool online;
   final String? email;
   final bool hasPassword;
+  final bool isAdmin;
 
   const PingUser({
     required this.id,
@@ -28,6 +29,7 @@ class PingUser {
     this.online = false,
     this.email,
     this.hasPassword = false,
+    this.isAdmin = false,
   });
 
   Color get color {
@@ -66,6 +68,7 @@ class PingUser {
     int? lastSeen,
     String? email,
     bool? hasPassword,
+    bool? isAdmin,
   }) =>
       PingUser(
         id: id,
@@ -79,6 +82,7 @@ class PingUser {
         online: online ?? this.online,
         email: email ?? this.email,
         hasPassword: hasPassword ?? this.hasPassword,
+        isAdmin: isAdmin ?? this.isAdmin,
       );
 
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
@@ -93,6 +97,7 @@ class PingUser {
         online: (json['online'] ?? false) as bool,
         email: json['email'] as String?,
         hasPassword: (json['hasPassword'] ?? false) as bool,
+        isAdmin: (json['isAdmin'] ?? false) as bool,
       );
 }
 

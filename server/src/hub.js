@@ -200,10 +200,12 @@ async function handleMessage(ws, msg) {
       break;
     }
     case 'read': {
-      const { chatId } = payload;
+      // `silent` marks messages read (clearing the badge everywhere) without
+      // telling the senders — this is how "read receipts off" works.
+      const { chatId, silent } = payload;
       if (chatId && isMember(chatId, userId)) {
         const { messageIds, senders } = markChatRead(chatId, userId);
-        notifyReceipts(senders);
+        if (!silent) notifyReceipts(senders);
         // Let other devices of THIS user clear the unread badge too.
         sendToUser(userId, 'read-self', { chatId, messageIds });
       }

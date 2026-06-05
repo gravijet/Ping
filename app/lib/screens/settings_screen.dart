@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
+import '../widgets/ping_logo.dart';
+import 'admin_screen.dart';
 import 'profile_edit_screen.dart';
+import 'security_screen.dart';
+import 'settings_sections.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -40,8 +45,7 @@ class SettingsScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(me.label,
-                              style:
-                                  Theme.of(context).textTheme.titleLarge),
+                              style: Theme.of(context).textTheme.titleLarge),
                           Text(me.phone,
                               style: TextStyle(color: scheme.onSurfaceVariant)),
                           if (me.about.isNotEmpty)
@@ -67,6 +71,38 @@ class SettingsScreen extends StatelessWidget {
           const Divider(),
           _SectionHeader('Darstellung'),
           _ThemeSelector(state: state),
+          _navTile(context, Icons.chat_bubble_outline_rounded, 'Chats',
+              'Schriftgröße, Hintergrund, Enter zum Senden',
+              () => const ChatSettingsScreen()),
+          const Divider(),
+          _SectionHeader('Konto & Sicherheit'),
+          _navTile(context, Icons.shield_outlined, 'Sicherung & Login',
+              'E-Mail und Passwort ändern', () => const SecurityScreen()),
+          _navTile(context, Icons.lock_outline_rounded, 'Datenschutz',
+              'Lesebestätigungen, Online-Status, Blockierte',
+              () => const PrivacySettingsScreen()),
+          _navTile(
+              context,
+              Icons.notifications_none_rounded,
+              'Benachrichtigungen',
+              'Hinweise, Vorschau, Vibration',
+              () => const NotificationSettingsScreen()),
+          _navTile(context, Icons.record_voice_over_outlined, 'Vorlesen',
+              'Text-to-Speech, Sprache, Geschwindigkeit',
+              () => const ReadAloudSettingsScreen()),
+          if (me?.isAdmin == true) ...[
+            const Divider(),
+            _SectionHeader('Verwaltung'),
+            ListTile(
+              leading: Icon(Icons.admin_panel_settings_rounded,
+                  color: scheme.primary),
+              title: const Text('Admin-Panel'),
+              subtitle: const Text('Statistik, Nutzer, Durchsagen'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AdminScreen())),
+            ),
+          ],
           const Divider(),
           _SectionHeader('Verbindung'),
           ListTile(
@@ -74,21 +110,34 @@ class SettingsScreen extends StatelessWidget {
               state.socketConnected
                   ? Icons.cloud_done_rounded
                   : Icons.cloud_off_rounded,
-              color: state.socketConnected ? const Color(0xFF22C55E) : scheme.error,
+              color:
+                  state.socketConnected ? const Color(0xFF22C55E) : scheme.error,
             ),
             title: const Text('Server'),
             subtitle: Text(
-                '${state.baseUrl}\n${state.socketConnected ? 'Verbunden' : 'Nicht verbunden'}'),
+              '${isDefaultServer(state.baseUrl) ? serverLabel : state.baseUrl}'
+              '\n${state.socketConnected ? 'Verbunden' : 'Nicht verbunden'}',
+            ),
             isThreeLine: true,
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => _editServer(context, state),
           ),
           const Divider(),
           _SectionHeader('Über'),
-          const ListTile(
-            leading: Icon(Icons.bolt_rounded),
-            title: Text('Ping'),
-            subtitle: Text('Version 1.0.0 — schnell, bunt, einfach.'),
+          ListTile(
+            leading: const PingLogo(size: 40),
+            title: const Text('Ping'),
+            subtitle: const Text('Version 2.0.0 — schnell, sicher, in Blau.'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: const Text('Open-Source-Lizenzen'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showLicensePage(
+              context: context,
+              applicationName: 'Ping',
+              applicationVersion: '2.0.0',
+            ),
           ),
           const SizedBox(height: 8),
           Padding(
@@ -106,9 +155,34 @@ class SettingsScreen extends StatelessWidget {
               onPressed: () => _confirmLogout(context, state),
             ),
           ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                foregroundColor: scheme.error,
+              ),
+              icon: const Icon(Icons.delete_forever_rounded),
+              label: const Text('Konto löschen'),
+              onPressed: () => _confirmDeleteAccount(context, state),
+            ),
+          ),
           const SizedBox(height: 32),
         ],
       ),
+    );
+  }
+
+  Widget _navTile(BuildContext context, IconData icon, String title,
+      String subtitle, Widget Function() builder) {
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(subtitle),
+      trailing: const Icon(Icons.chevron_right_rounded),
+      onTap: () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => builder())),
     );
   }
 
@@ -139,6 +213,67 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _confirmDeleteAccount(
+      BuildContext context, AppState state) async {
+    final scheme = Theme.of(context).colorScheme;
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Konto löschen?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Dein Konto und deine Mitgliedschaften werden dauerhaft '
+                'entfernt — das lässt sich nicht rückgängig machen. Gib zur '
+                'Bestätigung dein Passwort ein.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Passwort',
+                prefixIcon: Icon(Icons.lock_outline_rounded),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: scheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Endgültig löschen'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final password = controller.text;
+    if (password.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bitte gib dein Passwort ein.')),
+        );
+      }
+      return;
+    }
+    try {
+      await state.deleteAccount(password);
+      if (context.mounted) Navigator.of(context).pop();
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
   Future<void> _editServer(BuildContext context, AppState state) async {
     final controller = TextEditingController(text: state.baseUrl);
     final result = await showDialog<String>(
@@ -151,7 +286,7 @@ class SettingsScreen extends StatelessWidget {
           keyboardType: TextInputType.url,
           decoration: const InputDecoration(
             labelText: 'URL',
-            hintText: defaultBaseUrl,
+            hintText: 'https://dein-server',
           ),
         ),
         actions: [

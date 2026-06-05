@@ -1,20 +1,50 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/chat.dart';
 import '../models/message.dart';
+import '../models/settings.dart';
+import '../models/status.dart';
 import '../models/user.dart';
 import 'api_client.dart';
+import 'audio_player_service.dart';
+import 'media_service.dart';
 import 'notification_service.dart';
 import 'socket_service.dart';
+import 'tts_service.dart';
 
 const _kToken = 'ping_token';
 const _kBaseUrl = 'ping_base_url';
 const _kThemeMode = 'ping_theme_mode';
+const _kSettings = 'ping_settings';
 
-/// The default Ping server. Always pre-filled so the app works out of the box;
-/// it can still be changed on the login screen / in settings.
-const defaultBaseUrl = 'http://192.0.2.1:61337';
+/// Friendly name shown instead of the raw server address by default, so the
+/// endpoint isn't advertised in the UI.
+const serverLabel = 'Ping Cloud';
+
+/// The default Ping server. The address is kept packed (not a plain literal)
+/// so it isn't trivially visible in the sources/binary; override it at build
+/// time with `--dart-define=PING_SERVER=https://your-host`.
+String _resolveDefaultServer() {
+  const override = String.fromEnvironment('PING_SERVER');
+  if (override.isNotEmpty) return override;
+  const packed = 'aHR0cDovLzQ1LjE0MS4xMTYuMTU6NjEzMzc=';
+  try {
+    return utf8.decode(base64.decode(packed));
+  } catch (_) {
+    return '';
+  }
+}
+
+final String defaultBaseUrl = _resolveDefaultServer();
+
+/// Whether [url] is the built-in default server (so the UI can show the
+/// friendly [serverLabel] instead of the raw address).
+bool isDefaultServer(String url) =>
+    url.trim().replaceAll(RegExp(r'/$'), '') ==
+    defaultBaseUrl.replaceAll(RegExp(r'/$'), '');
 
 enum AuthStatus { unknown, signedOut, signedIn }
 
@@ -24,18 +54,36 @@ class AppState extends ChangeNotifier {
   late ApiClient _api;
   late SocketService _socket;
   final NotificationService notifications = NotificationService();
+  final TtsController tts = TtsController();
+  final AudioController audio = AudioController();
+  final MediaService media = MediaService();
 
   AuthStatus status = AuthStatus.unknown;
   PingUser? me;
   String baseUrl = defaultBaseUrl;
   bool socketConnected = false;
   ThemeMode themeMode = ThemeMode.system;
+  PingSettings settings = const PingSettings();
 
   final List<Chat> chats = [];
   final Map<String, List<Message>> _messages = {};
   final Set<String> _online = {};
   final Map<String, Set<String>> _typing = {}; // chatId -> userIds typing
   final Map<String, PingUser> _userCache = {};
+
+  // Status ("stories")
+  final List<PingStatus> statusMine = [];
+  final List<StatusGroup> statusOthers = [];
+
+  // Blocking
+  final Set<String> blockedIds = {};
+
+  /// Called when the server pushes an admin announcement (title, body).
+  void Function(String title, String body)? onAnnouncement;
+
+  int get statusUnseen => statusOthers.where((g) => g.hasUnseen).length;
+  bool isBlocked(String userId) => blockedIds.contains(userId);
+  bool get isAdmin => me?.isAdmin ?? false;
 
   String? _activeChatId; // chat currently open on screen
 
@@ -64,6 +112,16 @@ class AppState extends ChangeNotifier {
     return '$root/api/users/${user.id}/avatar?v=${user.avatarVersion}';
   }
 
+  /// Resolve a server-relative attachment path (e.g. `/api/uploads/<id>`) to a
+  /// full URL against the current server.
+  String mediaUrl(String relative) {
+    if (relative.startsWith('http')) return relative;
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$root$relative';
+  }
+
   // ---- Bootstrap -----------------------------------------------------------
 
   Future<void> init() async {
@@ -71,6 +129,12 @@ class AppState extends ChangeNotifier {
     baseUrl = prefs.getString(_kBaseUrl) ?? defaultBaseUrl;
     final token = prefs.getString(_kToken);
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
+    settings = PingSettings.decode(prefs.getString(_kSettings));
+    await tts.configure(
+      language: settings.ttsLanguage,
+      rate: settings.ttsRate,
+      pitch: settings.ttsPitch,
+    );
 
     _api = ApiClient(baseUrl: baseUrl, token: token);
     _socket = SocketService(
@@ -139,18 +203,33 @@ class AppState extends ChangeNotifier {
     _socket.connect(baseUrl, _api.token!);
     await notifications.requestPermission();
     await loadChats();
+    await loadBlocks();
+    await loadStatus();
   }
 
   Future<void> logout() async {
     _socket.disconnect();
     await _clearToken();
+    await tts.stop();
+    await audio.stop();
     chats.clear();
     _messages.clear();
     _online.clear();
     _typing.clear();
+    statusMine.clear();
+    statusOthers.clear();
+    blockedIds.clear();
     me = null;
     status = AuthStatus.signedOut;
     notifyListeners();
+  }
+
+  /// Permanently delete the signed-in account. The server requires the current
+  /// password as confirmation; on success the local session is cleared just
+  /// like a logout (which drops us back to the login screen).
+  Future<void> deleteAccount(String password) async {
+    await _api.delete('/me', {'password': password});
+    await logout();
   }
 
   Future<void> _clearToken() async {
@@ -177,6 +256,20 @@ class AppState extends ChangeNotifier {
     themeMode = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemeMode, mode.name);
+    notifyListeners();
+  }
+
+  /// Persist the on-device [PingSettings] and apply anything that takes effect
+  /// immediately (e.g. the text-to-speech voice configuration).
+  Future<void> updateSettings(PingSettings next) async {
+    settings = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSettings, next.encode());
+    await tts.configure(
+      language: next.ttsLanguage,
+      rate: next.ttsRate,
+      pitch: next.ttsPitch,
+    );
     notifyListeners();
   }
 
@@ -296,6 +389,73 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Upload raw bytes and return the resulting [Attachment] descriptor.
+  Future<Attachment> uploadAttachment(
+    List<int> bytes,
+    String contentType, {
+    String? filename,
+    String? kind,
+    int? width,
+    int? height,
+    int? durationMs,
+  }) async {
+    final res =
+        await _api.postBytes('/uploads', bytes, contentType, filename: filename);
+    final up = res['upload'] as Map<String, dynamic>;
+    return Attachment(
+      kind: kind ?? (up['kind'] as String? ?? 'file'),
+      url: up['url'] as String,
+      mime: up['mime'] as String?,
+      name: (up['name'] as String?) ?? filename,
+      size: up['size'] as int?,
+      width: width,
+      height: height,
+      durationMs: durationMs,
+    );
+  }
+
+  /// Send a media message (optimistic, like [sendMessage]).
+  Future<void> sendAttachment(
+    String chatId,
+    Attachment att, {
+    String? caption,
+    String? replyTo,
+  }) async {
+    final temp = Message(
+      id: 'tmp-${DateTime.now().microsecondsSinceEpoch}',
+      chatId: chatId,
+      senderId: me?.id,
+      type: att.kind,
+      body: caption?.trim() ?? '',
+      attachment: att,
+      replyTo: replyTo,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      status: MessageStatus.sending,
+    );
+    _appendMessage(temp);
+    notifyListeners();
+    try {
+      final res = await _api.post('/chats/$chatId/messages', {
+        'type': att.kind,
+        if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
+        'attachment': att.toJson(),
+        if (replyTo != null) 'replyTo': replyTo,
+      });
+      final real = Message.fromJson(res['message'] as Map<String, dynamic>);
+      final list = _messages[chatId]!;
+      list.removeWhere((m) => m.id == temp.id);
+      if (!list.any((m) => m.id == real.id)) list.add(real);
+      _bumpChat(chatId, real);
+      notifyListeners();
+    } on ApiException {
+      final list = _messages[chatId]!;
+      final i = list.indexWhere((m) => m.id == temp.id);
+      if (i != -1) list[i] = temp.copyWith(status: MessageStatus.failed);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> editMessage(String chatId, String messageId, String body) async {
     final res =
         await _api.patch('/chats/$chatId/messages/$messageId', {'body': body});
@@ -322,13 +482,10 @@ class AppState extends ChangeNotifier {
     return chat;
   }
 
-  /// Open (or create) a direct chat with whoever owns [phone] or [email]. Throws
-  /// an [ApiException] with a friendly message if that person isn't on Ping yet.
-  Future<Chat> startDirectByIdentifier({String? phone, String? email}) async {
-    final res = await _api.post('/chats/direct', {
-      if (phone != null) 'phone': phone,
-      if (email != null) 'email': email,
-    });
+  /// Open (or create) a direct chat with whoever owns [phone]. Throws an
+  /// [ApiException] with a friendly message if that person isn't on Ping yet.
+  Future<Chat> startDirectByPhone(String phone) async {
+    final res = await _api.post('/chats/direct', {'phone': phone});
     final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
     _upsertChat(chat);
     _cacheChatUsers(chat);
@@ -382,15 +539,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Look up a single registered user by an exact phone number or email. Returns
-  /// null if nobody on Ping matches. Used by the "start chat by number/email"
-  /// flow; we never expose fuzzy search to protect everyone's privacy.
-  Future<PingUser?> lookupUser({String? phone, String? email}) async {
+  /// Look up a single registered user by an exact phone number. Returns null if
+  /// nobody on Ping matches. People can only be found by phone — never by email
+  /// or name — to protect everyone's privacy.
+  Future<PingUser?> lookupUser(String phone) async {
     try {
-      final res = await _api.post('/users/lookup', {
-        if (phone != null) 'phone': phone,
-        if (email != null) 'email': email,
-      });
+      final res = await _api.post('/users/lookup', {'phone': phone});
       final parsed = PingUser.fromJson(res['user'] as Map<String, dynamic>);
       _userCache[parsed.id] = parsed;
       return parsed;
@@ -400,17 +554,12 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Privacy-preserving contact matching: send the phone numbers / emails from
-  /// the device address book and get back only those that already have a Ping
-  /// account. Nothing is stored server-side; unmatched contacts are discarded.
-  /// Each match echoes the identifier we sent so the UI can show which local
-  /// contact it belongs to.
-  Future<List<ContactMatch>> matchContacts(
-      List<String> phones, List<String> emails) async {
-    final res = await _api.post('/contacts/match', {
-      'phones': phones,
-      'emails': emails,
-    });
+  /// Privacy-preserving contact matching: send the phone numbers from the device
+  /// address book and get back only those that already have a Ping account.
+  /// Nothing is stored server-side; unmatched contacts are discarded. Each match
+  /// echoes the number we sent so the UI can show which local contact it is.
+  Future<List<ContactMatch>> matchContacts(List<String> phones) async {
+    final res = await _api.post('/contacts/match', {'phones': phones});
     final matches = (res['users'] as List)
         .map((e) => ContactMatch.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -420,12 +569,105 @@ class AppState extends ChangeNotifier {
     return matches;
   }
 
+  // ---- Status ("stories") --------------------------------------------------
+
+  Future<void> loadStatus() async {
+    try {
+      final res = await _api.get('/status');
+      statusMine
+        ..clear()
+        ..addAll((res['mine'] as List)
+            .map((e) => PingStatus.fromJson(e as Map<String, dynamic>)));
+      statusOthers
+        ..clear()
+        ..addAll((res['others'] as List)
+            .map((e) => StatusGroup.fromJson(e as Map<String, dynamic>)));
+      notifyListeners();
+    } on ApiException {
+      /* leave the previous list in place */
+    }
+  }
+
+  Future<void> postTextStatus(String body, String bgColor) async {
+    await _api.post('/status', {'type': 'text', 'body': body, 'bgColor': bgColor});
+    await loadStatus();
+  }
+
+  Future<void> postImageStatus(Attachment att, {String? caption}) async {
+    await _api.post('/status', {
+      'type': 'image',
+      'attachment': att.toJson(),
+      if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
+    });
+    await loadStatus();
+  }
+
+  Future<void> markStatusViewed(String id) async {
+    try {
+      await _api.post('/status/$id/view');
+    } on ApiException {
+      /* a missed view receipt isn't worth surfacing */
+    }
+  }
+
+  Future<List<StatusViewer>> statusViewers(String id) async {
+    final res = await _api.get('/status/$id/viewers');
+    return (res['viewers'] as List)
+        .map((e) => StatusViewer.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> deleteStatus(String id) async {
+    await _api.delete('/status/$id');
+    await loadStatus();
+  }
+
+  // ---- Blocking ------------------------------------------------------------
+
+  Future<void> loadBlocks() async {
+    try {
+      final res = await _api.get('/blocks');
+      blockedIds
+        ..clear()
+        ..addAll((res['blocked'] as List).cast<String>());
+      notifyListeners();
+    } on ApiException {
+      /* keep whatever we had */
+    }
+  }
+
+  /// Fetch a public user by id (used e.g. to render the blocked list).
+  Future<PingUser?> fetchUser(String id) async {
+    final cached = _userCache[id];
+    if (cached != null) return cached;
+    try {
+      final res = await _api.get('/users/$id');
+      final u = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+      _userCache[u.id] = u;
+      return u;
+    } on ApiException {
+      return null;
+    }
+  }
+
+  Future<void> blockUser(String userId) async {
+    await _api.post('/users/$userId/block');
+    blockedIds.add(userId);
+    notifyListeners();
+  }
+
+  Future<void> unblockUser(String userId) async {
+    await _api.post('/users/$userId/unblock');
+    blockedIds.remove(userId);
+    notifyListeners();
+  }
+
   // ---- Active chat tracking ------------------------------------------------
 
   void setActiveChat(String? chatId) {
     _activeChatId = chatId;
     if (chatId != null) {
-      _socket.markRead(chatId);
+      _socket.markRead(chatId, silent: !settings.readReceipts);
       notifications.cancelForChat(chatId);
       final i = chats.indexWhere((c) => c.id == chatId);
       if (i != -1 && chats[i].unread != 0) {
@@ -507,15 +749,34 @@ class AppState extends ChangeNotifier {
         _userCache[user.id] = user;
         notifyListeners();
         break;
+
+      case 'status-added':
+        // A contact posted a status — refresh the Status tab.
+        loadStatus();
+        break;
+
+      case 'announcement':
+        final title = (payload['title'] as String?) ?? 'Ping';
+        final body = (payload['body'] as String?) ?? '';
+        onAnnouncement?.call(title, body);
+        if (settings.notificationsEnabled) {
+          notifications.showMessage(
+              chatId: '__broadcast__', title: title, body: body);
+        }
+        break;
     }
   }
 
   void _onIncomingMessage(Message msg) {
     // If this is our own message echoed back, retire any still-pending
-    // optimistic bubble for it so we don't show it twice.
+    // optimistic bubble for it so we don't show it twice (match on the
+    // attachment URL for media, otherwise the body text).
     if (msg.senderId == me?.id) {
-      _messages[msg.chatId]
-          ?.removeWhere((m) => m.id.startsWith('tmp-') && m.body == msg.body);
+      _messages[msg.chatId]?.removeWhere((m) =>
+          m.id.startsWith('tmp-') &&
+          (msg.attachment != null
+              ? m.attachment?.url == msg.attachment?.url
+              : m.body == msg.body));
     }
     _appendMessage(msg);
     _bumpChat(msg.chatId, msg);
@@ -525,19 +786,21 @@ class AppState extends ChangeNotifier {
 
     if (!isMine && !msg.isSystem) {
       if (isActive) {
-        // We're looking at it — immediately mark read and acknowledge.
-        _socket.markRead(msg.chatId);
+        // We're looking at it — mark read (silently if receipts are off).
+        _socket.markRead(msg.chatId, silent: !settings.readReceipts);
+        _maybeReadAloud(msg);
       } else {
-        // Bump unread and raise a notification (unless muted).
+        // Bump unread and raise a notification (unless muted / disabled).
         final i = chats.indexWhere((c) => c.id == msg.chatId);
         if (i != -1) {
           final chat = chats[i];
           chats[i] = chat.copyWith(unread: chat.unread + 1);
-          if (!chat.muted) {
-            final sender = _userCache[msg.senderId]?.displayName ??
-                (chat.isGroup ? chat.title : chat.title);
+          if (!chat.muted && settings.notificationsEnabled) {
+            final sender = _userCache[msg.senderId]?.displayName ?? chat.title;
             final title = chat.isGroup ? chat.title : sender;
-            final body = chat.isGroup ? '$sender: ${msg.body}' : msg.body;
+            final preview =
+                settings.notificationPreview ? msg.preview : 'Neue Nachricht';
+            final body = chat.isGroup ? '$sender: $preview' : preview;
             notifications.showMessage(
                 chatId: msg.chatId, title: title, body: body);
           }
@@ -547,6 +810,15 @@ class AppState extends ChangeNotifier {
       }
     }
     notifyListeners();
+  }
+
+  void _maybeReadAloud(Message msg) {
+    if (settings.ttsEnabled &&
+        settings.ttsAutoRead &&
+        !msg.isSystem &&
+        msg.body.trim().isNotEmpty) {
+      tts.speak(msg.id, msg.body);
+    }
   }
 
   void _applyReceipt(Map<String, dynamic> payload) {
@@ -641,6 +913,8 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _socket.disconnect();
     _api.close();
+    tts.dispose();
+    audio.dispose();
     super.dispose();
   }
 }

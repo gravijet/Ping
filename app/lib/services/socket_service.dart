@@ -106,8 +106,10 @@ class SocketService {
     }
   }
 
-  /// Tell the server we've seen everything in a chat.
-  void markRead(String chatId) => send('read', {'chatId': chatId});
+  /// Tell the server we've seen everything in a chat. When [silent] is true the
+  /// messages are marked read but the senders are NOT told (read-receipts off).
+  void markRead(String chatId, {bool silent = false}) =>
+      send('read', {'chatId': chatId, 'silent': silent});
   void markDelivered(String chatId) => send('delivered', {'chatId': chatId});
   void setTyping(String chatId, bool typing) =>
       send('typing', {'chatId': chatId, 'typing': typing});

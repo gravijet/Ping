@@ -45,13 +45,18 @@ class ApiClient {
         body: jsonEncode(body ?? {}),
       ));
 
-  /// Upload raw bytes (e.g. an image) with an explicit content type.
-  Future<dynamic> postBytes(String path, List<int> bytes, String contentType) =>
+  /// Upload raw bytes (e.g. an image, a voice note or a file) with an explicit
+  /// content type. An optional [filename] is sent in X-Filename so the server
+  /// can preserve the original name.
+  Future<dynamic> postBytes(String path, List<int> bytes, String contentType,
+          {String? filename}) =>
       _send(() => _http.post(
             _uri(path),
             headers: {
               'Content-Type': contentType,
               if (token != null) 'Authorization': 'Bearer $token',
+              if (filename != null && filename.isNotEmpty)
+                'X-Filename': Uri.encodeComponent(filename),
             },
             body: bytes,
           ));
@@ -63,8 +68,12 @@ class ApiClient {
             body: jsonEncode(body ?? {}),
           ));
 
-  Future<dynamic> delete(String path) =>
-      _send(() => _http.delete(_uri(path), headers: _headers));
+  Future<dynamic> delete(String path, [Object? body]) =>
+      _send(() => _http.delete(
+            _uri(path),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          ));
 
   Future<dynamic> _send(Future<http.Response> Function() request) async {
     http.Response res;

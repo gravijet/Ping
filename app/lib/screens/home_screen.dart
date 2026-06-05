@@ -6,6 +6,7 @@ import '../widgets/chat_tile.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
 import 'settings_screen.dart';
+import 'status_tab.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,7 +15,9 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs = TabController(length: 2, vsync: this);
   bool _loading = true;
   String? _error;
 
@@ -22,21 +25,49 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _refresh();
+    final state = context.read<AppState>();
     // Route notification taps to the right chat.
-    context.read<AppState>().notifications.onTapChat = _openChatById;
+    state.notifications.onTapChat = _openChatById;
+    // Surface admin announcements while the app is open.
+    state.onAnnouncement = _showAnnouncement;
+    _tabs.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _error = null;
-    });
+    setState(() => _error = null);
     try {
-      await context.read<AppState>().loadChats();
+      final state = context.read<AppState>();
+      await state.loadChats();
+      await state.loadStatus();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _showAnnouncement(String title, String body) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.campaign_rounded),
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _openChatById(String chatId) {
@@ -56,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
+    final onStatus = _tabs.index == 1;
 
     return Scaffold(
       appBar: AppBar(
@@ -64,36 +96,77 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('Ping'),
             const SizedBox(width: 10),
-            if (!state.socketConnected)
-              _ConnectionChip(scheme: scheme),
+            if (!state.socketConnected) const _ConnectionChip(),
           ],
         ),
         actions: [
           IconButton(
             tooltip: 'Einstellungen',
             icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-            ),
+            onPressed: _openSettings,
           ),
           const SizedBox(width: 4),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const NewChatScreen()),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: [
+            const Tab(text: 'Chats'),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Status'),
+                  if (state.statusUnseen > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${state.statusUnseen}',
+                        style: TextStyle(
+                            color: scheme.primary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
-        icon: const Icon(Icons.edit_rounded),
-        label: const Text('Neuer Chat'),
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: _buildBody(state, scheme),
+      floatingActionButton: onStatus
+          ? FloatingActionButton(
+              onPressed: () => showAddStatusSheet(context),
+              child: const Icon(Icons.add_a_photo_rounded),
+            )
+          : FloatingActionButton.extended(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const NewChatScreen()),
+              ),
+              icon: const Icon(Icons.edit_rounded),
+              label: const Text('Neuer Chat'),
+            ),
+      body: TabBarView(
+        controller: _tabs,
+        children: [
+          RefreshIndicator(onRefresh: _refresh, child: _chatsBody(state, scheme)),
+          const StatusTab(),
+        ],
       ),
     );
   }
 
-  Widget _buildBody(AppState state, ColorScheme scheme) {
+  void _openSettings() => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+      );
+
+  Widget _chatsBody(AppState state, ColorScheme scheme) {
     if (_loading && state.chats.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -121,32 +194,30 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _ConnectionChip extends StatelessWidget {
-  final ColorScheme scheme;
-  const _ConnectionChip({required this.scheme});
+  const _ConnectionChip();
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: scheme.errorContainer,
+        color: Colors.white.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
+      child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
             width: 11,
             height: 11,
-            child: CircularProgressIndicator(
-                strokeWidth: 2, color: scheme.onErrorContainer),
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
           ),
-          const SizedBox(width: 6),
+          SizedBox(width: 6),
           Text(
             'verbinde …',
             style: TextStyle(
               fontSize: 12,
-              color: scheme.onErrorContainer,
+              color: Colors.white,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -165,7 +236,8 @@ class _EmptyState extends StatelessWidget {
     return ListView(
       children: [
         SizedBox(height: MediaQuery.of(context).size.height * 0.18),
-        Icon(Icons.forum_outlined, size: 88, color: scheme.primary.withValues(alpha: 0.5)),
+        Icon(Icons.forum_outlined,
+            size: 88, color: scheme.primary.withValues(alpha: 0.5)),
         const SizedBox(height: 20),
         Text(
           'Noch keine Chats',

@@ -42,6 +42,35 @@ void main() {
     expect(find.text('14:30'), findsOneWidget);
   });
 
+  testWidgets('message bubble renders a quoted reply preview', (tester) async {
+    final original = Message(
+      id: 'm1',
+      chatId: 'c1',
+      senderId: 'u2',
+      type: 'text',
+      body: 'Ursprüngliche Nachricht',
+      createdAt: DateTime(2024, 1, 1, 8, 0).millisecondsSinceEpoch,
+    );
+    final reply = Message(
+      id: 'm2',
+      chatId: 'c1',
+      senderId: 'u1',
+      type: 'text',
+      body: 'Meine Antwort',
+      replyTo: 'm1',
+      createdAt: DateTime(2024, 1, 1, 8, 5).millisecondsSinceEpoch,
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(
+      message: reply,
+      isMine: true,
+      repliedTo: original,
+      repliedToSender: 'Mara',
+    )));
+    expect(find.text('Meine Antwort'), findsOneWidget);
+    expect(find.text('Ursprüngliche Nachricht'), findsOneWidget);
+    expect(find.text('Mara'), findsOneWidget);
+  });
+
   testWidgets('deleted message shows a removed notice', (tester) async {
     final msg = Message(
       id: 'm2',

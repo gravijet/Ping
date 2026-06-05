@@ -81,6 +81,40 @@ class ChatInfoScreen extends StatelessWidget {
             value: chat.muted,
             onChanged: (v) => state.toggleMute(chat.id, v),
           ),
+          if (!chat.isGroup && chat.otherUser != null) ...[
+            const Divider(height: 24),
+            Builder(builder: (context) {
+              final blocked = state.isBlocked(chat.otherUser!.id);
+              return ListTile(
+                leading: Icon(
+                    blocked ? Icons.lock_open_rounded : Icons.block_rounded,
+                    color: scheme.error),
+                title: Text(
+                  blocked
+                      ? 'Blockierung aufheben'
+                      : '${chat.otherUser!.label} blockieren',
+                  style: TextStyle(color: scheme.error),
+                ),
+                subtitle: Text(blocked
+                    ? 'Diese Person kann dir wieder schreiben.'
+                    : 'Blockierte Personen können dir nicht mehr schreiben.'),
+                onTap: () async {
+                  try {
+                    if (blocked) {
+                      await state.unblockUser(chat.otherUser!.id);
+                    } else {
+                      await state.blockUser(chat.otherUser!.id);
+                    }
+                  } on ApiException catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(e.message)));
+                    }
+                  }
+                },
+              );
+            }),
+          ],
           if (chat.isGroup) ...[
             const Divider(height: 24),
             Padding(

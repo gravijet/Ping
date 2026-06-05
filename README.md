@@ -17,26 +17,35 @@ Online-Status, Lesebestätigungen).
 
 ## Features
 
+- **WhatsApp-artiges Design in Blau** – Material 3, Chat-Tabs (Chats & Status),
+  Sprechblasen mit Haken, wählbarer Chat-Hintergrund und Hell-/Dunkelmodus.
 - **Registrierung in einem Schritt** – Handynummer, E-Mail und Passwort eingeben,
-  fertig. **Keine Bestätigung per SMS oder E-Mail.** Für ein Konto braucht man
-  immer alle drei: Nummer, E-Mail und Passwort.
+  fertig. **Keine Bestätigung per SMS oder E-Mail.**
 - **Anmeldung** – mit Handynummer **oder** E-Mail plus Passwort.
-- **Chats über Kontakte** – Ping gleicht das Adressbuch ab und zeigt, wer davon
-  schon bei Ping ist. Mit einem Tipp ist der Chat gestartet. Alternativ direkt
-  eine Handynummer oder E-Mail eingeben.
-- **Gruppen** – mehrere Kontakte auswählen, Gruppe benennen, später weitere
-  Mitglieder hinzufügen.
-- **Profile** – Profilbild (aus Galerie oder Kamera), Anzeigename, Avatarfarbe und
-  „Über mich". Bilder erscheinen überall: Chatliste, Chat, Gruppen, Infos.
-- **Echtzeit** – Nachrichten kommen sofort an, inklusive Tippanzeige („tippt …"),
-  Online-/Zuletzt-online-Status und ✓✓-Lesebestätigungen.
-- **Nachrichten verwalten** – antworten (mit Zitat), bearbeiten, löschen,
-  kopieren. Optimistisches Senden mit Wiederholung bei Fehlern.
-- **Admin-Portal** – einfache Web-Oberfläche zum Verwalten und Anlegen von
-  Nutzern (`/admin`), abgesichert über ein geheimes Token.
-- **Komfort** – Ungelesen-Zähler, Chats stummschalten, Gruppen verlassen,
-  Hell-/Dunkel-/System-Design.
+- **Kontakte nur per Telefonnummer** – Ping gleicht das Adressbuch ab und zeigt,
+  wer davon schon bei Ping ist. Man findet andere **ausschließlich über die
+  Telefonnummer** – nie über E-Mail oder eine Namenssuche.
+- **Anhänge** – Fotos & Kamera, GIFs, beliebige Dateien und **Sprachnachrichten**
+  (aufnehmen & abspielen) versenden, mit Vollbild-Bildbetrachter.
+- **Vorlesen (Text-to-Speech)** – Nachrichten vorlesen lassen, optional
+  automatisch im offenen Chat; Sprache, Tempo und Tonhöhe einstellbar.
+- **Status** – wie bei WhatsApp: Text- oder Bild-Updates, die nach 24 h ablaufen,
+  mit „gesehen"-Ringen und Betrachterliste.
+- **Blockieren** – Kontakte blockieren; Blockierte können dir nicht mehr schreiben.
+- **Gruppen** – mehrere Kontakte auswählen, Gruppe benennen, Mitglieder hinzufügen.
+- **Profile** – Profilbild (Galerie/Kamera), Anzeigename, Avatarfarbe und „Über mich".
+- **Echtzeit** – sofortige Zustellung, Tippanzeige, Online-/Zuletzt-online-Status
+  und ✓✓-Lesebestätigungen (abschaltbar).
+- **Nachrichten verwalten** – antworten (mit Zitat), bearbeiten, löschen, kopieren,
+  vorlesen. Optimistisches Senden mit Wiederholung bei Fehlern.
+- **Viele Einstellungen** – Lesebestätigungen, Benachrichtigungen (Vorschau,
+  Vibration), „mit Enter senden", Schriftgröße, Chat-Hintergrund, Vorlesen u. v. m.
+- **Admin** – Web-Portal **und** In-App-Panel (für Admin-Konten): Statistik,
+  Nutzerverwaltung und Durchsagen an alle.
 - **Benachrichtigungen** – lokale Hinweise bei neuen Nachrichten (Android).
+- **Konto löschen** – jede Person kann ihr eigenes Konto dauerhaft löschen
+  (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
+  eigenen Nachrichten erscheinen dort nur noch als „Gelöschtes Konto".
 
 ---
 
@@ -47,12 +56,13 @@ Datenschutz ist eingebaut, nicht nachgerüstet:
 - **Keine Fremd-Daten preisgegeben.** Telefonnummer und E-Mail einer Person
   werden **niemals** an andere Nutzer ausgeliefert – öffentliche Profile
   enthalten nur Name, Farbe, Bild und „Über mich".
-- **Kein Adressbuch auf dem Server.** Beim Kontaktabgleich werden die Nummern/
-  E-Mails nur für die Dauer der Anfrage im Arbeitsspeicher verglichen und sofort
-  verworfen – es wird **nichts gespeichert** und keine „wer-kennt-wen"-Liste
+- **Kein Adressbuch auf dem Server.** Beim Kontaktabgleich werden die
+  Telefonnummern nur für die Dauer der Anfrage im Arbeitsspeicher verglichen und
+  sofort verworfen – es wird **nichts gespeichert** und keine „wer-kennt-wen"-Liste
   aufgebaut.
-- **Keine Namenssuche.** Es gibt bewusst keine Volltext-/Nutzersuche; man findet
-  andere nur über die exakte Nummer/E-Mail oder über die eigenen Kontakte. So
+- **Keine Namenssuche, keine E-Mail-Suche.** Es gibt bewusst keine
+  Volltext-/Nutzersuche; man findet andere **nur über die exakte Telefonnummer**
+  oder über die eigenen Kontakte. Die E-Mail dient ausschließlich dem Login. So
   kann niemand das Verzeichnis nach Fremden durchforsten.
 - **Admin-Zugriff ist getrennt.** Personenbezogene Daten (Nummer, E-Mail) sind
   nur über das tokengeschützte Admin-Portal sichtbar, nie über die normale API.
@@ -76,13 +86,28 @@ einem schon genutzten Server.
 Für die Entwicklung reicht das so – ohne `JWT_SECRET` wird in Nicht-Produktion
 ein zufälliges Secret pro Start erzeugt, und das Admin-Token ist `ping-admin-dev`.
 Für den Produktivbetrieb `.env.example` nach `.env` kopieren und feste Werte für
-`JWT_SECRET` **und** `ADMIN_TOKEN` setzen.
+`JWT_SECRET` **und** `ADMIN_TOKEN` setzen. `npm start` lädt `.env` automatisch
+(`node --env-file-if-exists=.env`).
+
+#### Dauerbetrieb mit systemd
+
+Für einen Server, der beim Booten startet und nach einem Absturz automatisch
+neu hochfährt, eignet sich ein systemd-Dienst. Eine fertige Unit liegt unter
+`/etc/systemd/system/ping-server.service` (Arbeitsverzeichnis `server/`, lädt
+`server/.env`):
+
+```bash
+sudo systemctl enable --now ping-server   # starten + beim Boot aktivieren
+systemctl status ping-server              # Status ansehen
+journalctl -u ping-server -f              # Live-Logs verfolgen
+sudo systemctl restart ping-server        # nach einem Update neu starten
+```
 
 Tests:
 
 ```bash
 cd server
-npm test           # 16 End-to-End-Tests (Konto, Kontakte, Avatare, Messaging, Admin …)
+npm test           # 25 End-to-End-Tests (Konto, Kontakte, Medien, Status, Blockieren, Admin …)
 ```
 
 ### 2. App starten
@@ -102,16 +127,20 @@ flutter build apk --release
 
 ### 3. App mit dem Server verbinden
 
-Die App ist standardmäßig auf den öffentlichen Ping-Server eingestellt:
+Die App ist standardmäßig auf den Ping-Standardserver eingestellt — dessen
+Adresse ist fest in der App hinterlegt und wird in der Oberfläche **nicht**
+angezeigt (in den Einstellungen erscheint nur „Ping Cloud"). Die Adresse lässt
+sich jederzeit auf dem Login-Screen oder in den Einstellungen unter
+**Server-Adresse** überschreiben:
 
-| Wo läuft die App?            | Server-Adresse                  |
-|------------------------------|---------------------------------|
-| Standard (vorausgefüllt)     | `http://192.0.2.1:61337`    |
-| Eigener Server im WLAN       | `http://<Server-IP>:61337`      |
-| Android-Emulator → lokaler PC| `http://192.0.2.1:61337`         |
+| Wo läuft die App?            | Server-Adresse              |
+|------------------------------|-----------------------------|
+| Eigener Server               | `https://<dein-server>`     |
+| Eigener Server im WLAN       | `http://<Server-IP>:61337`  |
+| Android-Emulator → lokaler PC| `http://192.0.2.1:61337`     |
 
-Die Adresse lässt sich jederzeit auf dem Login-Screen oder in den Einstellungen
-unter **Server-Adresse** ändern.
+> Den eingebauten Standardserver lässt sich beim Build überschreiben:
+> `flutter build apk --dart-define=PING_SERVER=https://dein-server`.
 
 > Standardmäßig wird Klartext-HTTP erlaubt, damit ein selbst gehosteter Server
 > sofort funktioniert. Für einen öffentlichen Server unbedingt HTTPS/WSS
@@ -129,22 +158,26 @@ unter **Server-Adresse** ändern.
 3. **Kontakte freigeben.** Beim ersten „Neuer Chat → Aus Kontakten wählen" fragt
    die App nach Zugriff auf die Kontakte (`READ_CONTACTS`). Sie zeigt dann nur die
    Kontakte, die schon ein Ping-Konto haben.
-4. **Direkt per Nummer/E-Mail.** Alternativ unter „Neuer Chat → Per Nummer oder
-   E-Mail" jemanden direkt anschreiben, sofern die Person registriert ist.
+4. **Direkt per Telefonnummer.** Alternativ unter „Neuer Chat → Per Telefonnummer"
+   jemanden direkt anschreiben, sofern die Person registriert ist.
 
 ---
 
 ## Admin-Portal
 
-Unter **`/admin`** (z. B. `http://192.0.2.1:61337/admin`) gibt es eine
-schlanke Web-Oberfläche zum Verwalten der Nutzer:
+Unter **`/admin`** (z. B. `https://<dein-server>/admin`) gibt es eine schlanke
+Web-Oberfläche zum Verwalten der Nutzer:
 
+- Statistik (Nutzer, online, Chats, Gruppen, Nachrichten, aktive Status),
+- Durchsage an alle verbundenen Apps senden,
 - Nutzer anlegen (Nummer, E-Mail, Passwort, optional Admin-Flag),
 - Liste durchsuchen, Namen/Passwörter ändern, Admin-Rechte setzen, Nutzer löschen.
 
-Der Zugang ist über das **`ADMIN_TOKEN`** geschützt (Header `X-Admin-Token`,
-timing-sicher verglichen). In Produktion ohne gesetztes Token bleibt das Portal
-deaktiviert (`503`). In der Entwicklung lautet das Token `ping-admin-dev`.
+Der Zugang geht über das **`ADMIN_TOKEN`** (Header `X-Admin-Token`, timing-sicher
+verglichen) **oder** über ein angemeldetes Admin-Konto — Letzteres treibt auch
+das **In-App-Admin-Panel** (Einstellungen → Verwaltung) an. In Produktion ohne
+gesetztes Token und ohne Admin-Konto bleibt das Portal deaktiviert (`503`). In
+der Entwicklung lautet das Token `ping-admin-dev`.
 
 ---
 
@@ -158,12 +191,14 @@ cd server && npm test
 cd app && flutter analyze && flutter test
 ```
 
-- **Backend:** 16 Tests decken Registrierung (Nummer + E-Mail + Passwort,
+- **Backend:** 25 Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
-  schonenden Kontaktabgleich, Direktnachrichten per Nummer/E-Mail/ID mit
-  Lesebestätigung über echte WebSockets, Gruppen, Bearbeiten/Löschen,
-  Zugriffsschutz, Profilbild-Upload sowie das tokengeschützte Admin-Portal ab.
-  Geprüft wird außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
+  schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
+  Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,
+  Gruppen, Bearbeiten/Löschen, Zugriffsschutz, **Medien-Uploads & -Nachrichten**,
+  **Status** (posten/sehen/Betrachter), **Blockieren**, Profilbild-Upload sowie
+  das Admin-Portal (Token **oder** Admin-Konto) inkl. Durchsagen. Geprüft wird
+  außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
 - **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt.
 
 ---

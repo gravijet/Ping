@@ -112,6 +112,20 @@ export function setName(id, displayName) {
 
 export const deleteUser = (id) => stmts.deleteUser.run(id);
 export const countUsers = () => stmts.count.get().n;
+
+// Aggregate counters for the admin dashboard.
+const adminStats = {
+  chats: db.prepare('SELECT COUNT(*) AS n FROM chats'),
+  groups: db.prepare("SELECT COUNT(*) AS n FROM chats WHERE type = 'group'"),
+  messages: db.prepare('SELECT COUNT(*) AS n FROM messages WHERE deleted_at IS NULL'),
+  statuses: db.prepare('SELECT COUNT(*) AS n FROM statuses WHERE expires_at > ?'),
+  admins: db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1'),
+};
+export const countChats = () => adminStats.chats.get().n;
+export const countGroups = () => adminStats.groups.get().n;
+export const countMessages = () => adminStats.messages.get().n;
+export const countActiveStatuses = () => adminStats.statuses.get(now()).n;
+export const countAdmins = () => adminStats.admins.get().n;
 export const listUsers = (q) => {
   if (q && q.trim()) {
     const like = `%${q.toLowerCase().replace(/[%_]/g, '\\$&')}%`;
@@ -202,3 +216,26 @@ export const addContact = (userId, contactId) =>
 export const removeContact = (userId, contactId) =>
   contactStmts.remove.run(userId, contactId);
 export const listContacts = (userId) => contactStmts.list.all(userId);
+
+// ---- Blocking --------------------------------------------------------------
+
+const blockStmts = {
+  add: db.prepare(
+    'INSERT OR IGNORE INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)'
+  ),
+  remove: db.prepare('DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?'),
+  isBlocked: db.prepare(
+    'SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?'
+  ),
+  listIds: db.prepare('SELECT blocked_id FROM blocks WHERE blocker_id = ?'),
+};
+
+export const blockUser = (blockerId, blockedId) =>
+  blockStmts.add.run(blockerId, blockedId, now());
+export const unblockUser = (blockerId, blockedId) =>
+  blockStmts.remove.run(blockerId, blockedId);
+// True when `blockerId` has blocked `blockedId`.
+export const hasBlocked = (blockerId, blockedId) =>
+  !!blockStmts.isBlocked.get(blockerId, blockedId);
+export const listBlockedIds = (blockerId) =>
+  blockStmts.listIds.all(blockerId).map((r) => r.blocked_id);

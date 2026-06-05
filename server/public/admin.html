@@ -7,32 +7,35 @@
   <title>Ping · Admin</title>
   <style>
     :root {
-      --bg: #0f1020; --card: #1a1b2e; --card2: #232542; --line: #303257;
-      --text: #e9e9f3; --muted: #9aa0c0; --primary: #6750f4; --accent: #ff6d3b;
-      --danger: #ef4444; --ok: #22c55e;
+      --bg: #0b1622; --card: #11202f; --card2: #17293b; --line: #22384c;
+      --text: #eaf2fb; --muted: #93a7bd; --primary: #1d9bf0;
+      --primary2: #0a84ff; --accent: #38bdf8; --danger: #ef4444; --ok: #22c55e;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: radial-gradient(1200px 600px at 20% -10%, #25204a, var(--bg)); color: var(--text);
+      background: radial-gradient(1200px 600px at 18% -10%, #123249, var(--bg)); color: var(--text);
       min-height: 100vh;
     }
     a { color: var(--accent); }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 18px 64px; }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-    .logo { width: 40px; height: 40px; border-radius: 12px;
-      background: linear-gradient(135deg, var(--primary), var(--accent));
-      display: grid; place-items: center; font-size: 22px; }
-    h1 { font-size: 22px; margin: 0; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 18px 64px; }
+    .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+    .logo { width: 46px; height: 46px; border-radius: 14px;
+      background: linear-gradient(135deg, var(--primary2), var(--accent));
+      display: grid; place-items: center; box-shadow: 0 8px 24px rgba(10,132,255,.35); }
+    .logo svg { width: 26px; height: 26px; }
+    h1 { font-size: 22px; margin: 0; letter-spacing: -.3px; }
+    h2 { letter-spacing: -.2px; }
     .muted { color: var(--muted); }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-top: 18px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; margin-top: 18px; }
     label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
-    input, button, select {
-      font: inherit; border-radius: 10px; border: 1px solid var(--line);
+    input, button, select, textarea {
+      font: inherit; border-radius: 11px; border: 1px solid var(--line);
       background: var(--card2); color: var(--text); padding: 10px 12px;
     }
-    input { width: 100%; }
-    button { cursor: pointer; border: none; background: var(--primary); color: white; font-weight: 600; }
+    input, textarea { width: 100%; }
+    textarea { resize: vertical; min-height: 64px; }
+    button { cursor: pointer; border: none; background: var(--primary2); color: white; font-weight: 600; }
     button.secondary { background: var(--card2); border: 1px solid var(--line); }
     button.danger { background: var(--danger); }
     button.ghost { background: transparent; color: var(--muted); }
@@ -40,13 +43,18 @@
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
     .row > div { flex: 1; min-width: 160px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+    .stat { background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+    .stat .n { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
+    .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+    .stat .n.on { color: #4ade80; }
     table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14px; }
     th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-    .pill.admin { background: rgba(103,80,244,.25); color: #c3b9ff; }
+    .pill.admin { background: rgba(29,155,240,.22); color: #9bd3ff; }
     .pill.on { background: rgba(34,197,94,.2); color: #86efac; }
-    .pill.off { background: rgba(154,160,192,.15); color: var(--muted); }
+    .pill.off { background: rgba(147,167,189,.15); color: var(--muted); }
     .actions { display: flex; gap: 6px; justify-content: flex-end; }
     .actions button { padding: 6px 9px; font-size: 13px; }
     .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
@@ -56,16 +64,22 @@
     .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
     .hidden { display: none; }
     .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-    .count { font-size: 30px; font-weight: 800; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="brand">
-      <div class="logo">⚡</div>
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".95"/>
+          <circle cx="9" cy="10.5" r="1.4" fill="#0a84ff"/>
+          <circle cx="13" cy="10.5" r="1.4" fill="#0a84ff"/>
+          <circle cx="17" cy="10.5" r="1.4" fill="#0a84ff"/>
+        </svg>
+      </div>
       <div>
         <h1>Ping · Admin-Portal</h1>
-        <div class="muted">Nutzerverwaltung</div>
+        <div class="muted">Nutzer, Statistik &amp; Durchsagen</div>
       </div>
     </div>
 
@@ -82,13 +96,21 @@
     <!-- Dashboard -->
     <div id="dash" class="hidden">
       <div class="card">
-        <div class="head">
-          <div>
-            <div class="muted">Registrierte Nutzer</div>
-            <div class="count" id="count">–</div>
-          </div>
+        <div class="head" style="margin-bottom:14px">
+          <h2 style="margin:0">Übersicht</h2>
           <button class="ghost" id="logoutBtn">Abmelden</button>
         </div>
+        <div class="stats" id="stats"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">📣 Durchsage an alle Online-Nutzer</h2>
+        <div class="row">
+          <div style="flex:0 0 220px"><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
+          <div><label>Nachricht</label><input id="b_body" placeholder="z. B. Wartung um 22 Uhr" /></div>
+          <button id="broadcastBtn">Senden</button>
+        </div>
+        <p class="note">Die Durchsage erscheint sofort bei allen verbundenen Apps.</p>
       </div>
 
       <div class="card">
@@ -130,9 +152,9 @@
         <h2 style="margin-top:0">🔒 Datenschutz</h2>
         <p class="note">
           Dieses Portal zeigt personenbezogene Daten (Nummer, E-Mail) und ist nur über das
-          geheime Admin-Token erreichbar. Greife nur darauf zu, wenn es für die Verwaltung
-          nötig ist, gib das Token nicht weiter, und nutze in Produktion ausschließlich
-          HTTPS. Kontaktlisten der App werden serverseitig nie gespeichert.
+          geheime Admin-Token oder ein Admin-Konto erreichbar. Greife nur darauf zu, wenn es
+          für die Verwaltung nötig ist, gib das Token nicht weiter, und nutze in Produktion
+          ausschließlich HTTPS. Kontaktlisten der App werden serverseitig nie gespeichert.
         </p>
       </div>
     </div>
@@ -190,9 +212,20 @@
       }
     }
 
+    function statCard(n, l, cls) {
+      return '<div class="stat"><div class="n ' + (cls || '') + '">' + n + '</div><div class="l">' + l + '</div></div>';
+    }
+
     async function refresh() {
-      const stats = await api('/admin/stats');
-      $('count').textContent = stats.users;
+      const s = await api('/admin/stats');
+      $('stats').innerHTML =
+        statCard(s.users ?? '–', 'Nutzer') +
+        statCard(s.online ?? '–', 'Online', 'on') +
+        statCard(s.admins ?? '–', 'Admins') +
+        statCard(s.chats ?? '–', 'Chats') +
+        statCard(s.groups ?? '–', 'Gruppen') +
+        statCard(s.messages ?? '–', 'Nachrichten') +
+        statCard(s.statuses ?? '–', 'Status aktiv');
       await loadUsers();
     }
 
@@ -224,6 +257,19 @@
       }
     }
 
+    async function broadcast() {
+      const body = $('b_body').value.trim();
+      if (!body) return toast('Bitte eine Nachricht eingeben.');
+      try {
+        const r = await api('/admin/broadcast', {
+          method: 'POST',
+          body: JSON.stringify({ title: $('b_title').value.trim(), body }),
+        });
+        $('b_body').value = '';
+        toast('Durchsage an ' + r.delivered + ' Online-Nutzer gesendet.');
+      } catch (e) { toast(e.message); }
+    }
+
     async function createUser() {
       const body = {
         displayName: $('c_name').value.trim(),
@@ -244,7 +290,7 @@
     async function toggleAdmin(u) {
       try {
         await api('/admin/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ isAdmin: !u.isAdmin }) });
-        await loadUsers();
+        await refresh();
       } catch (e) { toast(e.message); }
     }
 
@@ -269,8 +315,9 @@
     $('loginBtn').onclick = login;
     $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
     $('logoutBtn').onclick = logout;
+    $('broadcastBtn').onclick = broadcast;
     $('createBtn').onclick = createUser;
-    $('reloadBtn').onclick = () => loadUsers().catch((e) => toast(e.message));
+    $('reloadBtn').onclick = () => refresh().catch((e) => toast(e.message));
     $('q').addEventListener('input', () => { clearTimeout(window._t); window._t = setTimeout(() => loadUsers().catch(() => {}), 300); });
 
     // Boot: try the saved token, else show login.
