@@ -10,7 +10,7 @@ import '../widgets/avatar.dart';
 import 'status_composer_screen.dart';
 import 'status_viewer_screen.dart';
 
-/// Offer the choice between a text and a photo status, then route accordingly.
+/// Offer text / photo / video statuses (gallery or camera), then route there.
 Future<void> showAddStatusSheet(BuildContext context) async {
   await showModalBottomSheet(
     context: context,
@@ -30,24 +30,39 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             },
           ),
           ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.photo_rounded)),
-            title: const Text('Foto'),
-            subtitle: const Text('Teile ein Bild aus der Galerie'),
-            onTap: () async {
+            leading: const CircleAvatar(child: Icon(Icons.photo_camera_rounded)),
+            title: const Text('Foto aufnehmen'),
+            subtitle: const Text('Mit der Kamera ein Bild machen'),
+            onTap: () {
               Navigator.pop(ctx);
-              final picker = ImagePicker();
-              final file = await picker.pickImage(
-                  source: ImageSource.gallery, imageQuality: 85, maxWidth: 1920);
-              if (file == null || !context.mounted) return;
-              final bytes = await file.readAsBytes();
-              if (!context.mounted) return;
-              Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => StatusImageComposer(
-                  bytes: bytes,
-                  contentType: file.mimeType ?? 'image/jpeg',
-                  filename: file.name,
-                ),
-              ));
+              _pickStatusImage(context, ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.photo_rounded)),
+            title: const Text('Foto aus Galerie'),
+            subtitle: const Text('Teile ein Bild aus der Galerie'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickStatusImage(context, ImageSource.gallery);
+            },
+          ),
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.videocam_rounded)),
+            title: const Text('Video aufnehmen'),
+            subtitle: const Text('Bis zu 30 Sekunden'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickStatusVideo(context, ImageSource.camera);
+            },
+          ),
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.video_library_rounded)),
+            title: const Text('Video aus Galerie'),
+            subtitle: const Text('Ein Video aus der Galerie teilen'),
+            onTap: () {
+              Navigator.pop(ctx);
+              _pickStatusVideo(context, ImageSource.gallery);
             },
           ),
           const SizedBox(height: 8),
@@ -55,6 +70,34 @@ Future<void> showAddStatusSheet(BuildContext context) async {
       ),
     ),
   );
+}
+
+Future<void> _pickStatusImage(BuildContext context, ImageSource source) async {
+  final file = await ImagePicker()
+      .pickImage(source: source, imageQuality: 85, maxWidth: 1920);
+  if (file == null || !context.mounted) return;
+  final bytes = await file.readAsBytes();
+  if (!context.mounted) return;
+  Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => StatusImageComposer(
+      bytes: bytes,
+      contentType: file.mimeType ?? 'image/jpeg',
+      filename: file.name,
+    ),
+  ));
+}
+
+Future<void> _pickStatusVideo(BuildContext context, ImageSource source) async {
+  final file = await ImagePicker()
+      .pickVideo(source: source, maxDuration: const Duration(seconds: 30));
+  if (file == null || !context.mounted) return;
+  Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => StatusVideoComposer(
+      path: file.path,
+      contentType: file.mimeType ?? 'video/mp4',
+      filename: file.name,
+    ),
+  ));
 }
 
 /// The Status ("Updates") tab: your own status plus your contacts' rings.

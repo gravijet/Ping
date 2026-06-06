@@ -1,5 +1,27 @@
+import 'user.dart';
+
 /// Delivery state of a message the current user sent.
 enum MessageStatus { sending, sent, delivered, read, failed }
+
+/// One recipient's delivery/read state for a message — used by the "message
+/// info" sheet (long-press → Info).
+class MessageReceiptInfo {
+  final PingUser user;
+  final int? deliveredAt;
+  final int? readAt;
+
+  const MessageReceiptInfo({required this.user, this.deliveredAt, this.readAt});
+
+  bool get read => readAt != null;
+  bool get delivered => deliveredAt != null;
+
+  factory MessageReceiptInfo.fromJson(Map<String, dynamic> json) =>
+      MessageReceiptInfo(
+        user: PingUser.fromJson(json['user'] as Map<String, dynamic>),
+        deliveredAt: json['deliveredAt'] as int?,
+        readAt: json['readAt'] as int?,
+      );
+}
 
 MessageStatus statusFromString(String? s) {
   switch (s) {

@@ -31,6 +31,8 @@ class PingStatus {
   });
 
   bool get isImage => type == 'image';
+  bool get isVideo => type == 'video';
+  bool get isMedia => type != 'text';
 
   Color get background {
     final hex = (bgColor ?? '#0A84FF').replaceFirst('#', '');

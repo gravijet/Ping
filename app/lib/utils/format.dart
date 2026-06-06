@@ -23,6 +23,15 @@ class TimeFormat {
 
   static String messageTime(DateTime t) => _time.format(t);
 
+  /// Date + time for the message-info sheet, e.g. "3. Jun, 14:05".
+  static String receiptStamp(int? ms) {
+    if (ms == null) return '—';
+    final t = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    final datePart = t.year == now.year ? _dayMonth.format(t) : _full.format(t);
+    return '$datePart, ${_time.format(t)}';
+  }
+
   /// Date divider shown between groups of messages.
   static String dayDivider(DateTime t) {
     final now = DateTime.now();

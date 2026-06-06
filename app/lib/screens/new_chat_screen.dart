@@ -40,6 +40,11 @@ class NewChatScreen extends StatelessWidget {
     await _openChat(context, () => state.openDirectChat(user));
   }
 
+  Future<void> _selfChat(BuildContext context) async {
+    final state = context.read<AppState>();
+    await _openChat(context, () => state.openSelfChat());
+  }
+
   Future<void> _byPhone(BuildContext context) async {
     final phone = await showDialog<String>(
       context: context,
@@ -57,6 +62,13 @@ class NewChatScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Neuer Chat')),
       body: ListView(
         children: [
+          _tile(
+            scheme,
+            Icons.bookmark_rounded,
+            'Notiz an mich',
+            'Nachrichten, Links und Dateien für dich selbst',
+            () => _selfChat(context),
+          ),
           _tile(
             scheme,
             Icons.contacts_rounded,
@@ -166,7 +178,7 @@ class _PhoneDialogState extends State<_PhoneDialog> {
               onFieldSubmitted: (_) => _submit(),
               decoration: const InputDecoration(
                 labelText: 'Handynummer',
-                hintText: '+49 170 1234567',
+                hintText: '+43 660 1234567',
                 prefixIcon: Icon(Icons.phone_rounded),
               ),
               validator: (v) => (v ?? '').trim().length < 4

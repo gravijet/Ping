@@ -12,6 +12,10 @@ class Chat {
   final List<PingUser> members; // populated for groups
   final PingUser? otherUser; // populated for direct chats
   final String? ownerId;
+  final bool self; // true for the "note to self" chat
+  final String description; // groups: optional description
+  final bool hasAvatar; // groups: an uploaded group picture exists
+  final int avatarVersion; // groups: cache-buster for the group picture
   Message? lastMessage;
   int unread;
   bool muted;
@@ -27,12 +31,19 @@ class Chat {
     this.members = const [],
     this.otherUser,
     this.ownerId,
+    this.self = false,
+    this.description = '',
+    this.hasAvatar = false,
+    this.avatarVersion = 0,
     this.lastMessage,
     this.unread = 0,
     this.muted = false,
   });
 
   bool get isGroup => type == 'group';
+
+  /// Title to display: the self-chat reads "Notiz an mich" instead of your name.
+  String get displayTitle => self ? 'Notiz an mich' : title;
 
   Color get color {
     final hex = avatarColor.replaceFirst('#', '');
@@ -67,6 +78,10 @@ class Chat {
             ? PingUser.fromJson(json['otherUser'] as Map<String, dynamic>)
             : null,
         ownerId: json['ownerId'] as String?,
+        self: (json['self'] ?? false) as bool,
+        description: (json['description'] ?? '') as String,
+        hasAvatar: (json['hasAvatar'] ?? false) as bool,
+        avatarVersion: (json['avatarVersion'] ?? 0) as int,
         lastMessage: json['lastMessage'] != null
             ? Message.fromJson(json['lastMessage'] as Map<String, dynamic>)
             : null,
@@ -93,6 +108,10 @@ class Chat {
         members: members ?? this.members,
         otherUser: otherUser ?? this.otherUser,
         ownerId: ownerId,
+        self: self,
+        description: description,
+        hasAvatar: hasAvatar,
+        avatarVersion: avatarVersion,
         lastMessage: lastMessage ?? this.lastMessage,
         unread: unread ?? this.unread,
         muted: muted ?? this.muted,

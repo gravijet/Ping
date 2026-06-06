@@ -25,6 +25,7 @@ class ChatTile extends StatelessWidget {
             state.typingIn(chat.id).contains(chat.otherUser!.id));
 
     final online = !chat.isGroup &&
+        !chat.self &&
         chat.otherUser != null &&
         state.isOnline(chat.otherUser!.id);
 
@@ -41,8 +42,12 @@ class ChatTile extends StatelessWidget {
               color: chat.color,
               size: 54,
               online: chat.isGroup ? null : online,
-              icon: chat.isGroup ? Icons.groups_rounded : null,
-              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+              icon: chat.isGroup
+                  ? Icons.groups_rounded
+                  : (chat.self ? Icons.bookmark_rounded : null),
+              imageUrl: chat.isGroup
+                  ? state.groupAvatarUrl(chat)
+                  : state.avatarUrl(chat.otherUser),
               imageHeaders: state.authHeaders,
             ),
             const SizedBox(width: 14),
@@ -54,7 +59,7 @@ class ChatTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          chat.title,
+                          chat.displayTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -126,7 +131,7 @@ class ChatTile extends StatelessWidget {
     } else {
       final mine = last.senderId == state.me?.id;
       final prefix = mine
-          ? 'Du: '
+          ? (chat.self ? '' : 'Du: ')
           : (chat.isGroup
               ? '${state.cachedUser(last.senderId ?? '')?.displayName.split(' ').first ?? ''}: '
               : '');

@@ -112,6 +112,15 @@ class AppState extends ChangeNotifier {
     return '$root/api/users/${user.id}/avatar?v=${user.avatarVersion}';
   }
 
+  /// URL of a group's uploaded picture, or null if it has none.
+  String? groupAvatarUrl(Chat chat) {
+    if (!chat.isGroup || !chat.hasAvatar) return null;
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$root/api/chats/${chat.id}/avatar?v=${chat.avatarVersion}';
+  }
+
   /// Resolve a server-relative attachment path (e.g. `/api/uploads/<id>`) to a
   /// full URL against the current server.
   String mediaUrl(String relative) {
@@ -169,12 +178,14 @@ class AppState extends ChangeNotifier {
   /// Register a new account: phone, email and password are all required (no
   /// verification step).
   Future<void> register(
-      String phone, String email, String password, String displayName) async {
+      String phone, String email, String password, String displayName,
+      {String? firebaseIdToken}) async {
     final res = await _api.post('/auth/register', {
       'phone': phone,
       'email': email,
       'password': password,
       'displayName': displayName,
+      if (firebaseIdToken != null) 'firebaseIdToken': firebaseIdToken,
     });
     await _handleAuthSuccess(res);
   }
@@ -456,6 +467,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Per-recipient delivery/read info for one of my own messages (message info).
+  Future<List<MessageReceiptInfo>> messageReceipts(
+      String chatId, String messageId) async {
+    final res =
+        await _api.get('/chats/$chatId/messages/$messageId/receipts');
+    return (res['receipts'] as List)
+        .map((e) => MessageReceiptInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> editMessage(String chatId, String messageId, String body) async {
     final res =
         await _api.patch('/chats/$chatId/messages/$messageId', {'body': body});
@@ -532,6 +553,39 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rename a group and/or change its description (owner only on the server).
+  Future<void> updateGroup(String chatId,
+      {String? name, String? description}) async {
+    final res = await _api.patch('/chats/$chatId', {
+      if (name != null) 'name': name,
+      if (description != null) 'description': description,
+    });
+    _upsertChat(Chat.fromJson(res['chat'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Upload a new group picture (owner only).
+  Future<void> uploadGroupAvatar(
+      String chatId, List<int> bytes, String contentType) async {
+    final res = await _api.postBytes('/chats/$chatId/avatar', bytes, contentType);
+    _upsertChat(Chat.fromJson(res['chat'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  Future<void> removeGroupAvatar(String chatId) async {
+    final res = await _api.delete('/chats/$chatId/avatar');
+    _upsertChat(Chat.fromJson(res['chat'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Remove a member from a group (owner only), then refresh the chat.
+  Future<void> removeGroupMember(String chatId, String userId) async {
+    await _api.delete('/chats/$chatId/members/$userId');
+    final chatRes = await _api.get('/chats/$chatId');
+    _upsertChat(Chat.fromJson(chatRes['chat'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
   Future<void> toggleMute(String chatId, bool muted) async {
     await _api.post('/chats/$chatId/mute', {'muted': muted});
     final i = chats.indexWhere((c) => c.id == chatId);
@@ -596,6 +650,15 @@ class AppState extends ChangeNotifier {
   Future<void> postImageStatus(Attachment att, {String? caption}) async {
     await _api.post('/status', {
       'type': 'image',
+      'attachment': att.toJson(),
+      if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
+    });
+    await loadStatus();
+  }
+
+  Future<void> postVideoStatus(Attachment att, {String? caption}) async {
+    await _api.post('/status', {
+      'type': 'video',
       'attachment': att.toJson(),
       if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
     });
@@ -892,10 +955,24 @@ class AppState extends ChangeNotifier {
 
   void _sortChats() {
     chats.sort((a, b) {
+      // The "note to self" chat is pinned to the very top.
+      if (a.self != b.self) return a.self ? -1 : 1;
       final at = a.lastMessage?.createdAt ?? a.updatedAt;
       final bt = b.lastMessage?.createdAt ?? b.updatedAt;
       return bt.compareTo(at);
     });
+  }
+
+  /// Open (or create) the "note to self" chat — a direct chat with yourself.
+  Future<Chat> openSelfChat() async {
+    final existing = chats.where((c) => c.self);
+    if (existing.isNotEmpty) return existing.first;
+    final res = await _api.post('/chats/direct', {'userId': me!.id});
+    final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
+    _upsertChat(chat);
+    _cacheChatUsers(chat);
+    notifyListeners();
+    return chat;
   }
 
   ThemeMode _themeFromString(String? s) {

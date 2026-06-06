@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/chat.dart';
+import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
@@ -26,6 +28,8 @@ class ChatInfoScreen extends StatelessWidget {
     final online = !chat.isGroup &&
         chat.otherUser != null &&
         state.isOnline(chat.otherUser!.id);
+    // I'm the group owner ("admin") — unlocks editing the group.
+    final isOwner = chat.isGroup && chat.ownerId == state.me?.id;
 
     return Scaffold(
       appBar: AppBar(title: Text(chat.isGroup ? 'Gruppeninfo' : 'Kontaktinfo')),
@@ -33,21 +37,63 @@ class ChatInfoScreen extends StatelessWidget {
         children: [
           const SizedBox(height: 16),
           Center(
-            child: PingAvatar(
-              initials: chat.isGroup
-                  ? chat.initials
-                  : (chat.otherUser?.initials ?? chat.initials),
-              color: chat.color,
-              size: 104,
-              icon: chat.isGroup ? Icons.groups_rounded : null,
-              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
-              imageHeaders: state.authHeaders,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                PingAvatar(
+                  initials: chat.isGroup
+                      ? chat.initials
+                      : (chat.otherUser?.initials ?? chat.initials),
+                  color: chat.color,
+                  size: 104,
+                  icon: chat.isGroup ? Icons.groups_rounded : null,
+                  imageUrl: chat.isGroup
+                      ? state.groupAvatarUrl(chat)
+                      : state.avatarUrl(chat.otherUser),
+                  imageHeaders: state.authHeaders,
+                ),
+                if (isOwner)
+                  Positioned(
+                    right: -4,
+                    bottom: -4,
+                    child: Material(
+                      color: scheme.primary,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => _editGroupPhoto(context, state, chat),
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.photo_camera_rounded,
+                              color: Colors.white, size: 18),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
           Center(
-            child: Text(chat.title,
-                style: Theme.of(context).textTheme.headlineSmall),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(chat.title,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineSmall),
+                ),
+                if (isOwner) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.edit_rounded, size: 20),
+                    tooltip: 'Gruppe bearbeiten',
+                    onPressed: () => _editGroupInfo(context, state, chat),
+                  ),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: 4),
           Center(
@@ -60,6 +106,10 @@ class ChatInfoScreen extends StatelessWidget {
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
           ),
+          if (chat.isGroup && chat.description.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            _Section(title: 'Beschreibung', child: Text(chat.description)),
+          ],
           if (!chat.isGroup &&
               chat.otherUser != null &&
               chat.otherUser!.about.isNotEmpty) ...[
@@ -144,7 +194,7 @@ class ChatInfoScreen extends StatelessWidget {
             ),
             ...chat.members.map((m) {
               final isMe = m.id == state.me?.id;
-              final isOwner = m.id == chat.ownerId;
+              final memberIsOwner = m.id == chat.ownerId;
               return ListTile(
                 leading: PingAvatar(
                   initials: m.initials,
@@ -158,14 +208,21 @@ class ChatInfoScreen extends StatelessWidget {
                 subtitle: Text(m.about.isNotEmpty
                     ? m.about
                     : (state.isOnline(m.id) ? 'online' : 'Auf Ping')),
-                trailing: isOwner
+                trailing: memberIsOwner
                     ? Chip(
                         label: const Text('Admin'),
                         visualDensity: VisualDensity.compact,
                         backgroundColor: scheme.primaryContainer,
                         side: BorderSide.none,
                       )
-                    : null,
+                    : (isOwner && !isMe
+                        ? IconButton(
+                            icon: const Icon(Icons.more_vert_rounded),
+                            tooltip: 'Optionen',
+                            onPressed: () =>
+                                _memberActions(context, state, chat, m),
+                          )
+                        : null),
               );
             }),
             const Divider(height: 24),
@@ -180,6 +237,187 @@ class ChatInfoScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  void _snack(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _imageMime(String path) {
+    final p = path.toLowerCase();
+    if (p.endsWith('.png')) return 'image/png';
+    if (p.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  }
+
+  Future<void> _editGroupPhoto(
+      BuildContext context, AppState state, Chat chat) async {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Aus Galerie'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickGroupPhoto(context, state, chat, ImageSource.gallery);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_rounded),
+              title: const Text('Foto aufnehmen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickGroupPhoto(context, state, chat, ImageSource.camera);
+              },
+            ),
+            if (chat.hasAvatar)
+              ListTile(
+                leading: Icon(Icons.delete_outline_rounded, color: scheme.error),
+                title: Text('Bild entfernen',
+                    style: TextStyle(color: scheme.error)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await state.removeGroupAvatar(chat.id);
+                  } on ApiException catch (e) {
+                    if (context.mounted) _snack(context, e.message);
+                  }
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickGroupPhoto(
+      BuildContext context, AppState state, Chat chat, ImageSource source) async {
+    try {
+      final f = await ImagePicker()
+          .pickImage(source: source, imageQuality: 85, maxWidth: 1024);
+      if (f == null) return;
+      final bytes = await f.readAsBytes();
+      await state.uploadGroupAvatar(
+          chat.id, bytes, f.mimeType ?? _imageMime(f.path));
+      if (context.mounted) _snack(context, 'Gruppenbild aktualisiert.');
+    } on ApiException catch (e) {
+      if (context.mounted) _snack(context, e.message);
+    } catch (_) {
+      if (context.mounted) _snack(context, 'Bild konnte nicht geladen werden.');
+    }
+  }
+
+  Future<void> _editGroupInfo(
+      BuildContext context, AppState state, Chat chat) async {
+    final nameC = TextEditingController(text: chat.title);
+    final descC = TextEditingController(text: chat.description);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gruppe bearbeiten'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameC,
+              maxLength: 80,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(labelText: 'Gruppenname'),
+            ),
+            TextField(
+              controller: descC,
+              maxLength: 500,
+              maxLines: 3,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              decoration:
+                  const InputDecoration(labelText: 'Beschreibung (optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Speichern')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final name = nameC.text.trim();
+    if (name.isEmpty) {
+      if (context.mounted) _snack(context, 'Der Gruppenname darf nicht leer sein.');
+      return;
+    }
+    try {
+      await state.updateGroup(chat.id, name: name, description: descC.text.trim());
+      if (context.mounted) _snack(context, 'Gruppe aktualisiert.');
+    } on ApiException catch (e) {
+      if (context.mounted) _snack(context, e.message);
+    }
+  }
+
+  void _memberActions(
+      BuildContext context, AppState state, Chat chat, PingUser m) {
+    final scheme = Theme.of(context).colorScheme;
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.person_remove_rounded, color: scheme.error),
+              title: Text('${m.label} entfernen',
+                  style: TextStyle(color: scheme.error)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await _confirmRemoveMember(context, state, chat, m);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmRemoveMember(
+      BuildContext context, AppState state, Chat chat, PingUser m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${m.label} entfernen?'),
+        content: const Text(
+            'Die Person verlässt die Gruppe und sieht keine neuen Nachrichten '
+            'mehr.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Entfernen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await state.removeGroupMember(chat.id, m.id);
+    } on ApiException catch (e) {
+      if (context.mounted) _snack(context, e.message);
+    }
   }
 
   Future<void> _confirmLeave(

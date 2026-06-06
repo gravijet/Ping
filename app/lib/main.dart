@@ -1,3 +1,5 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
@@ -11,6 +13,17 @@ import 'theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('de');
+
+  // Firebase backs phone-number verification. Only Android is configured (via
+  // android/app/google-services.json); on other platforms we just skip it and
+  // registration proceeds without the extra check.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await Firebase.initializeApp();
+    } catch (_) {
+      // Verification will be unavailable; the app still works otherwise.
+    }
+  }
 
   final state = AppState();
   // Kick off bootstrap; the UI shows a splash until it resolves.

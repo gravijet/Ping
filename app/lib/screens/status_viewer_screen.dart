@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player/video_player.dart';
 
 import '../models/status.dart';
 import '../services/app_state.dart';
@@ -29,6 +30,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   late final AnimationController _progress;
   int _group = 0;
   int _item = 0;
+  // Drives the top bar for video items (images/text use [_progress]).
+  double _videoProgress = 0;
+
+  bool _isVideo(PingStatus s) => s.isVideo || s.attachment?.kind == 'video';
 
   @override
   void initState() {
@@ -48,41 +53,34 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     if (!widget.mine) {
       context.read<AppState>().markStatusViewed(_current.id);
     }
-    _progress
-      ..reset()
-      ..forward();
+    _videoProgress = 0;
+    _progress.reset();
+    // Videos drive their own progress bar and advance when they finish; only
+    // text/image use the fixed 5-second timer.
+    if (!_isVideo(_current)) _progress.forward();
   }
 
   void _next() {
     if (_item < _currentGroup.items.length - 1) {
       setState(() => _item++);
       _start();
-    } else if (_group < widget.groups.length - 1) {
-      setState(() {
-        _group++;
-        _item = 0;
-      });
-      _start();
     } else {
+      // Last status of this person → stop showing (don't jump to someone else).
       Navigator.of(context).maybePop();
     }
   }
 
   void _prev() {
+    // Stay within this person; at the first item just restart it.
     if (_item > 0) {
       setState(() => _item--);
-      _start();
-    } else if (_group > 0) {
-      setState(() {
-        _group--;
-        _item = 0;
-      });
-      _start();
-    } else {
-      _progress
-        ..reset()
-        ..forward();
     }
+    _start();
+  }
+
+  // Resume the timed progress after a sheet/dialog (no-op for videos).
+  void _resume() {
+    if (!_isVideo(_current)) _progress.forward();
   }
 
   Future<void> _showViewers() async {
@@ -129,7 +127,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     } catch (_) {
       /* ignore */
     }
-    if (mounted) _progress.forward();
+    if (mounted) _resume();
   }
 
   Future<void> _delete() async {
@@ -154,7 +152,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
       ),
     );
     if (ok != true) {
-      if (mounted) _progress.forward();
+      if (mounted) _resume();
       return;
     }
     await state.deleteStatus(_current.id);
@@ -174,7 +172,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     final group = _currentGroup;
 
     return Scaffold(
-      backgroundColor: status.isImage ? Colors.black : status.background,
+      backgroundColor: status.isMedia ? Colors.black : status.background,
       body: GestureDetector(
         onTapUp: (d) {
           final w = MediaQuery.of(context).size.width;
@@ -248,6 +246,30 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   Widget _content(AppState state, PingStatus status) {
+    if (_isVideo(status) && status.attachment != null) {
+      return Column(
+        children: [
+          Expanded(
+            child: _StatusVideoView(
+              key: ValueKey(status.id),
+              url: state.mediaUrl(status.attachment!.url),
+              headers: state.authHeaders,
+              onProgress: (p) {
+                if (mounted) setState(() => _videoProgress = p);
+              },
+              onEnd: _next,
+            ),
+          ),
+          if (status.body.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 60),
+              child: Text(status.body,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 16)),
+            ),
+        ],
+      );
+    }
     if (status.isImage && status.attachment != null) {
       return Column(
         children: [
@@ -299,15 +321,22 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             ? Container(color: Colors.white)
             : i > _item
                 ? Container(color: Colors.white30)
-                : AnimatedBuilder(
-                    animation: _progress,
-                    builder: (_, _) => LinearProgressIndicator(
-                      value: _progress.value,
-                      backgroundColor: Colors.white30,
-                      valueColor:
-                          const AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  ),
+                : _isVideo(_current)
+                    ? LinearProgressIndicator(
+                        value: _videoProgress,
+                        backgroundColor: Colors.white30,
+                        valueColor:
+                            const AlwaysStoppedAnimation<Color>(Colors.white),
+                      )
+                    : AnimatedBuilder(
+                        animation: _progress,
+                        builder: (_, _) => LinearProgressIndicator(
+                          value: _progress.value,
+                          backgroundColor: Colors.white30,
+                          valueColor:
+                              const AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
       ),
     );
   }
@@ -345,6 +374,83 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           onPressed: () => Navigator.of(context).maybePop(),
         ),
       ],
+    );
+  }
+}
+
+/// Plays a video status, reporting progress to the viewer's top bar and calling
+/// [onEnd] when it finishes so the story advances.
+class _StatusVideoView extends StatefulWidget {
+  final String url;
+  final Map<String, String>? headers;
+  final void Function(double progress) onProgress;
+  final VoidCallback onEnd;
+  const _StatusVideoView({
+    super.key,
+    required this.url,
+    this.headers,
+    required this.onProgress,
+    required this.onEnd,
+  });
+
+  @override
+  State<_StatusVideoView> createState() => _StatusVideoViewState();
+}
+
+class _StatusVideoViewState extends State<_StatusVideoView> {
+  late final VideoPlayerController _c;
+  bool _ready = false;
+  bool _ended = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = VideoPlayerController.networkUrl(
+      Uri.parse(widget.url),
+      httpHeaders: widget.headers ?? const {},
+    );
+    _c.addListener(_tick);
+    _c.initialize().then((_) {
+      if (!mounted) return;
+      setState(() => _ready = true);
+      _c
+        ..setLooping(false)
+        ..play();
+    }).catchError((_) {
+      if (mounted) widget.onEnd();
+    });
+  }
+
+  void _tick() {
+    if (!_ready) return;
+    final v = _c.value;
+    final dur = v.duration.inMilliseconds;
+    if (dur > 0) {
+      widget.onProgress((v.position.inMilliseconds / dur).clamp(0.0, 1.0));
+      if (!_ended && v.position >= v.duration && !v.isPlaying) {
+        _ended = true;
+        widget.onEnd();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.removeListener(_tick);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
+    return Center(
+      child: AspectRatio(
+        aspectRatio: _c.value.aspectRatio == 0 ? 9 / 16 : _c.value.aspectRatio,
+        child: VideoPlayer(_c),
+      ),
     );
   }
 }

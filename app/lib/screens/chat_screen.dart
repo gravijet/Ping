@@ -42,6 +42,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Message? _replyTo;
   Message? _editing;
 
+  // Jump-to-quoted-message: a stable key per message id so we can scroll to it,
+  // plus a transient highlight on the message we just jumped to.
+  final Map<String, GlobalKey> _messageKeys = {};
+  String? _highlightId;
+  Timer? _highlightTimer;
+
   // Attachments & voice recording
   final AudioRecorder _recorder = AudioRecorder();
   bool _uploading = false;
@@ -168,6 +174,61 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  /// Tapped a reply quote → bring the original message into view and flash it.
+  Future<void> _jumpToMessage(String id) async {
+    final state = context.read<AppState>();
+    // A reply always points at an *older* message, so page back until it's
+    // loaded (or we run out of history).
+    var guard = 0;
+    while (!state.messagesFor(widget.chatId).any((m) => m.id == id) &&
+        _hasMore &&
+        guard < 10) {
+      guard++;
+      await _loadOlder();
+      if (!mounted) return;
+    }
+    if (!state.messagesFor(widget.chatId).any((m) => m.id == id)) {
+      _showError('Die ursprüngliche Nachricht ist nicht mehr verfügbar.');
+      return;
+    }
+    await _ensureVisibleById(id);
+  }
+
+  Future<void> _ensureVisibleById(String id) async {
+    for (var attempt = 0; attempt < 14 && mounted; attempt++) {
+      final ctx = _messageKeys[id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.35,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+        _flashHighlight(id);
+        return;
+      }
+      // Off-screen and not built yet — nudge toward older messages (higher
+      // offset in this reverse list) so the builder materialises it, then retry.
+      if (_scroll.hasClients) {
+        final target = (_scroll.position.pixels + 700)
+            .clamp(0.0, _scroll.position.maxScrollExtent);
+        await _scroll.animateTo(target,
+            duration: const Duration(milliseconds: 120), curve: Curves.linear);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 70));
+    }
+    _flashHighlight(id);
+  }
+
+  void _flashHighlight(String id) {
+    if (!mounted) return;
+    setState(() => _highlightId = id);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 1700), () {
+      if (mounted) setState(() => _highlightId = null);
+    });
+  }
+
   Chat? get _chat {
     final chats = context.read<AppState>().chats;
     final i = chats.indexWhere((c) => c.id == widget.chatId);
@@ -178,6 +239,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopTyping();
+    _highlightTimer?.cancel();
     _recordTicker?.cancel();
     _recorder.dispose();
     context.read<AppState>().setActiveChat(null);
@@ -255,11 +317,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   PreferredSizeWidget _buildAppBar(AppState state, Chat chat) {
     final scheme = Theme.of(context).colorScheme;
     final online = !chat.isGroup &&
+        !chat.self &&
         chat.otherUser != null &&
         state.isOnline(chat.otherUser!.id);
     final typingUsers = state.typingIn(chat.id);
     String subtitle;
-    if (typingUsers.isNotEmpty) {
+    if (chat.self) {
+      subtitle = 'Nachrichten an dich selbst';
+    } else if (typingUsers.isNotEmpty) {
       subtitle = chat.isGroup
           ? (typingUsers.length == 1
               ? '${state.cachedUser(typingUsers.first)?.displayName.split(' ').first ?? 'Jemand'} tippt …'
@@ -286,8 +351,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               color: chat.color,
               size: 40,
               online: chat.isGroup ? null : online,
-              icon: chat.isGroup ? Icons.groups_rounded : null,
-              imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+              icon: chat.isGroup
+                  ? Icons.groups_rounded
+                  : (chat.self ? Icons.bookmark_rounded : null),
+              imageUrl: chat.isGroup
+                  ? state.groupAvatarUrl(chat)
+                  : state.avatarUrl(chat.otherUser),
               imageHeaders: state.authHeaders,
             ),
             const SizedBox(width: 12),
@@ -297,7 +366,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    chat.title,
+                    chat.displayTitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -342,7 +411,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (messages.isEmpty) {
       return _EmptyConversation(
         chat: chat,
-        imageUrl: chat.isGroup ? null : state.avatarUrl(chat.otherUser),
+        imageUrl: chat.isGroup
+            ? state.groupAvatarUrl(chat)
+            : state.avatarUrl(chat.otherUser),
         imageHeaders: state.authHeaders,
       );
     }
@@ -408,6 +479,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : state.cachedUser(replied.senderId ?? '')?.displayName;
 
     return MessageBubble(
+      key: _messageKeys.putIfAbsent(m.id, () => GlobalKey()),
       message: m,
       isMine: isMine,
       showSenderName: chat.isGroup && !isMine,
@@ -415,6 +487,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       senderColor: sender?.color ?? Theme.of(context).colorScheme.primary,
       repliedTo: replied,
       repliedToSender: repliedSender,
+      highlighted: _highlightId == m.id,
+      onTapQuote: m.replyTo != null ? () => _jumpToMessage(m.replyTo!) : null,
       onLongPress: () => _showMessageActions(m, isMine),
       resolveUrl: state.mediaUrl,
       mediaHeaders: state.authHeaders,
@@ -428,6 +502,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _showMessageActions(Message m, bool isMine) {
     if (m.deleted || m.isSystem) return;
+    final selfChat = _chat?.self ?? false;
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -447,6 +522,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 _inputFocus.requestFocus();
               },
             ),
+            if (isMine && !selfChat)
+              ListTile(
+                leading: const Icon(Icons.info_outline_rounded),
+                title: const Text('Info'),
+                subtitle: const Text('Wer hat sie wann gelesen'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showMessageInfo(m);
+                },
+              ),
             if (m.body.trim().isNotEmpty) ...[
               ListTile(
                 leading: const Icon(Icons.copy_rounded),
@@ -528,6 +613,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _showError(e.message);
       }
     }
+  }
+
+  void _showMessageInfo(Message m) {
+    final state = context.read<AppState>();
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _MessageInfoSheet(
+        future: state.messageReceipts(widget.chatId, m.id),
+        message: m,
+        state: state,
+      ),
+    );
   }
 
   // ---- Attachments & voice -------------------------------------------------
@@ -647,7 +746,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _pickGif() async {
     try {
-      final res = await FilePicker.platform.pickFiles(
+      final res = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['gif'],
         withData: true,
@@ -663,7 +762,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _pickFile() async {
     try {
-      final res = await FilePicker.platform.pickFiles(withData: true);
+      final res = await FilePicker.pickFiles(withData: true);
       if (res == null || res.files.isEmpty) return;
       final f = res.files.first;
       if (f.bytes == null) {
@@ -1240,21 +1339,27 @@ class _EmptyConversation extends StatelessWidget {
                   : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
               size: 84,
-              icon: chat.isGroup ? Icons.groups_rounded : null,
+              icon: chat.isGroup
+                  ? Icons.groups_rounded
+                  : (chat.self ? Icons.bookmark_rounded : null),
               imageUrl: imageUrl,
               imageHeaders: imageHeaders,
             ),
             const SizedBox(height: 20),
             Text(
-              chat.isGroup
-                  ? 'Das ist der Anfang von „${chat.title}"'
-                  : 'Schreib ${chat.title} die erste Nachricht',
+              chat.self
+                  ? 'Notiz an mich'
+                  : chat.isGroup
+                      ? 'Das ist der Anfang von „${chat.title}"'
+                      : 'Schreib ${chat.title} die erste Nachricht',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              'Nachrichten sind nur für Mitglieder dieses Chats sichtbar.',
+              chat.self
+                  ? 'Schreib dir selbst Notizen, sichere Links und Dateien — nur du siehst sie.'
+                  : 'Nachrichten sind nur für Mitglieder dieses Chats sichtbar.',
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
@@ -1263,6 +1368,100 @@ class _EmptyConversation extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet showing, per recipient, whether and when they received and read
+/// one of my messages (long-press → Info). Especially useful in groups.
+class _MessageInfoSheet extends StatelessWidget {
+  final Future<List<MessageReceiptInfo>> future;
+  final Message message;
+  final AppState state;
+  const _MessageInfoSheet(
+      {required this.future, required this.message, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.5,
+      minChildSize: 0.3,
+      maxChildSize: 0.9,
+      builder: (ctx, controller) => ListView(
+        controller: controller,
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        children: [
+          Text('Nachrichten-Info',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            message.preview,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const Divider(height: 28),
+          FutureBuilder<List<MessageReceiptInfo>>(
+            future: future,
+            builder: (context, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snap.hasError) {
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Konnte die Info nicht laden.',
+                      style: TextStyle(color: scheme.error)),
+                );
+              }
+              final receipts = snap.data ?? const <MessageReceiptInfo>[];
+              if (receipts.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Noch niemand hat diese Nachricht erhalten.',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                );
+              }
+              return Column(
+                children: [for (final r in receipts) _row(context, r)],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, MessageReceiptInfo r) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = r.read
+        ? 'Gelesen · ${TimeFormat.receiptStamp(r.readAt)}'
+        : r.delivered
+            ? 'Zugestellt · ${TimeFormat.receiptStamp(r.deliveredAt)}'
+            : 'Gesendet';
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: PingAvatar(
+        initials: r.user.initials,
+        color: r.user.color,
+        size: 42,
+        imageUrl: state.avatarUrl(r.user),
+        imageHeaders: state.authHeaders,
+      ),
+      title: Text(r.user.label),
+      subtitle: Text(status),
+      trailing: Icon(
+        r.read || r.delivered ? Icons.done_all_rounded : Icons.check_rounded,
+        color: r.read ? scheme.primary : scheme.onSurfaceVariant,
+        size: 18,
       ),
     );
   }

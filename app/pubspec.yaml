@@ -20,12 +20,15 @@ dependencies:
   image_picker: ^1.1.2
   flutter_contacts: ^1.1.9+2
   # Media + accessibility
-  file_picker: ^8.1.6
-  record: ^5.2.0
+  file_picker: ^11.0.0
+  record: ^7.0.0
   audioplayers: ^6.1.0
   flutter_tts: ^4.2.0
   url_launcher: ^6.3.1
   path_provider: ^2.1.5
+  firebase_core: ^4.10.0
+  firebase_auth: ^6.5.2
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:

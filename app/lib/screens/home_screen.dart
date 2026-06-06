@@ -92,13 +92,7 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 16,
-        title: Row(
-          children: [
-            const Text('Ping'),
-            const SizedBox(width: 10),
-            if (!state.socketConnected) const _ConnectionChip(),
-          ],
-        ),
+        title: const Text('Ping'),
         actions: [
           IconButton(
             tooltip: 'Einstellungen',
@@ -189,40 +183,6 @@ class _HomeScreenState extends State<HomeScreen>
         final chat = state.chats[i];
         return ChatTile(chat: chat, onTap: () => _openChat(i));
       },
-    );
-  }
-}
-
-class _ConnectionChip extends StatelessWidget {
-  const _ConnectionChip();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 11,
-            height: 11,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-          ),
-          SizedBox(width: 6),
-          Text(
-            'verbinde …',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

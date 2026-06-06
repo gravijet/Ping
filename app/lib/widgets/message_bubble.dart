@@ -20,6 +20,12 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onSwipeReply;
 
+  /// Tapped the reply quote — jump to the original message.
+  final VoidCallback? onTapQuote;
+
+  /// Briefly highlighted because we just jumped to it.
+  final bool highlighted;
+
   // Media plumbing (all optional so the widget renders fine in tests).
   final String Function(String relativeUrl)? resolveUrl;
   final Map<String, String>? mediaHeaders;
@@ -27,6 +33,7 @@ class MessageBubble extends StatelessWidget {
   final void Function(Attachment att)? onOpenImage;
   final void Function(Attachment att)? onOpenFile;
   final void Function(Attachment att)? onPlayAudio;
+  final void Function(Attachment att)? onOpenVideo;
   final double textScale;
 
   const MessageBubble({
@@ -40,12 +47,15 @@ class MessageBubble extends StatelessWidget {
     this.repliedToSender,
     this.onLongPress,
     this.onSwipeReply,
+    this.onTapQuote,
+    this.highlighted = false,
     this.resolveUrl,
     this.mediaHeaders,
     this.audio,
     this.onOpenImage,
     this.onOpenFile,
     this.onPlayAudio,
+    this.onOpenVideo,
     this.textScale = 1.0,
   });
 
@@ -61,10 +71,15 @@ class MessageBubble extends StatelessWidget {
     final hasMedia = message.attachment != null && !message.deleted;
     final hasText = message.body.trim().isNotEmpty;
 
-    return Align(
-      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
-        onLongPress: onLongPress,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      color: highlighted
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.16)
+          : Colors.transparent,
+      child: Align(
+        alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+        child: GestureDetector(
+          onLongPress: onLongPress,
         child: Container(
           constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.80,
@@ -111,6 +126,7 @@ class MessageBubble extends StatelessWidget {
                     message: repliedTo!,
                     sender: repliedToSender,
                     mine: isMine,
+                    onTap: onTapQuote,
                   ),
                 ),
               if (hasMedia) _media(context, fg),
@@ -147,6 +163,7 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -199,6 +216,9 @@ class MessageBubble extends StatelessWidget {
         mine: isMine,
         onTap: () => onPlayAudio?.call(att),
       );
+    }
+    if (att.kind == 'video') {
+      return _VideoAttachment(att: att, onTap: () => onOpenVideo?.call(att));
     }
     return _FileAttachment(att: att, fg: fg, onTap: () => onOpenFile?.call(att));
   }
@@ -420,22 +440,26 @@ class _ReplyQuote extends StatelessWidget {
   final Message message;
   final String? sender;
   final bool mine;
-  const _ReplyQuote({required this.message, this.sender, required this.mine});
+  final VoidCallback? onTap;
+  const _ReplyQuote(
+      {required this.message, this.sender, required this.mine, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = scheme.primary;
     final base = mine ? context.ping.bubbleOutText : context.ping.bubbleInText;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(left: BorderSide(color: accent, width: 3)),
-      ),
-      child: Column(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(left: BorderSide(color: accent, width: 3)),
+        ),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
@@ -452,6 +476,7 @@ class _ReplyQuote extends StatelessWidget {
                 TextStyle(color: base.withValues(alpha: 0.85), fontSize: 13),
           ),
         ],
+      ),
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/ping_logo.dart';
+import 'phone_verify_screen.dart';
 
 /// The entry screen. Two modes:
 ///  - Register: name, phone, email and password (all required, no verification).
@@ -45,11 +47,28 @@ class _LoginScreenState extends State<LoginScreen> {
     final state = context.read<AppState>();
     try {
       if (_register) {
+        final phoneRaw = _phone.text.trim();
+        String? idToken;
+        // On Android we prove phone ownership via Firebase before creating the
+        // account (Play Integrity-backed; the code is often auto-detected).
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+          idToken = await Navigator.of(context).push<String>(
+            MaterialPageRoute(
+              builder: (_) => PhoneVerifyScreen(e164Phone: _toE164(phoneRaw)),
+            ),
+          );
+          if (idToken == null) {
+            // Verification was cancelled or failed — don't create the account.
+            if (mounted) setState(() => _busy = false);
+            return;
+          }
+        }
         await state.register(
-          _phone.text.trim(),
+          phoneRaw,
           _email.text.trim(),
           _password.text,
           _name.text.trim(),
+          firebaseIdToken: idToken,
         );
       } else {
         await state.login(_login.text.trim(), _password.text);
@@ -63,6 +82,19 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Turn user input into an E.164 number for Firebase, mirroring the server's
+  /// normalisation (default country = Austria, +43).
+  String _toE164(String input, {String cc = '43'}) {
+    final hasPlus = input.trim().startsWith('+');
+    final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
+    if (hasPlus) return '+$digits';
+    if (digits.startsWith('00')) return '+${digits.substring(2)}';
+    if (digits.startsWith('0')) {
+      return '+$cc${digits.replaceFirst(RegExp(r'^0+'), '')}';
+    }
+    return '+$cc$digits';
   }
 
   @override
@@ -138,8 +170,8 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(height: 10),
         _hint(
           'Telefonnummer, E-Mail und Passwort sind nötig. Nummern ohne '
-          'Ländervorwahl behandeln wir als deutsche Nummer (+49). Wir '
-          'verschicken keinen Bestätigungscode.',
+          'Ländervorwahl behandeln wir als österreichische Nummer (+43). Mit '
+          '+<Vorwahl> kannst du das überschreiben.',
         ),
       ];
 
@@ -171,7 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
         decoration: const InputDecoration(
           labelText: 'Handynummer',
-          hintText: '+49 170 1234567',
+          hintText: '+43 660 1234567',
           prefixIcon: Icon(Icons.phone_rounded),
         ),
         validator: (v) {
