@@ -11,8 +11,16 @@ import 'receipt_ticks.dart';
 class ChatTile extends StatelessWidget {
   final Chat chat;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool pinned;
 
-  const ChatTile({super.key, required this.chat, required this.onTap});
+  const ChatTile({
+    super.key,
+    required this.chat,
+    required this.onTap,
+    this.onLongPress,
+    this.pinned = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +39,7 @@ class ChatTile extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -167,6 +176,15 @@ class ChatTile extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (pinned)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Transform.rotate(
+              angle: 0.7,
+              child: Icon(Icons.push_pin_rounded,
+                  size: 15, color: scheme.onSurfaceVariant),
+            ),
+          ),
         if (chat.muted)
           Padding(
             padding: const EdgeInsets.only(right: 6),

@@ -18,6 +18,8 @@ import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/avatar.dart';
 import '../widgets/chat_wallpaper.dart';
+import '../widgets/forward_sheet.dart';
+import '../widgets/message_actions.dart';
 import '../widgets/message_bubble.dart';
 import 'chat_info_screen.dart';
 import 'image_viewer_screen.dart';
@@ -43,6 +45,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _typingTimer;
   Message? _replyTo;
   Message? _editing;
+
+  // Show a "jump to latest" button once the user scrolls up a fair distance.
+  bool _showScrollDown = false;
+
+  // In-chat search over the loaded messages.
+  bool _searching = false;
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   // Jump-to-quoted-message: a stable key per message id so we can scroll to it,
   // plus a transient highlight on the message we just jumped to.
@@ -97,6 +107,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         !_loadingOlder &&
         _hasMore) {
       _loadOlder();
+    }
+    // In a reversed list, pixels grow as you scroll up away from the latest
+    // message — surface a quick "back to bottom" button past a threshold.
+    final showDown = _scroll.hasClients && _scroll.position.pixels > 600;
+    if (showDown != _showScrollDown) {
+      setState(() => _showScrollDown = showDown);
     }
   }
 
@@ -248,6 +264,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scroll.dispose();
     _input.dispose();
     _inputFocus.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -273,7 +290,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         state.isBlocked(chat.otherUser!.id);
 
     return Scaffold(
-      appBar: _buildAppBar(state, chat),
+      appBar: _searching ? _buildSearchAppBar() : _buildAppBar(state, chat),
       body: Column(
         children: [
           Expanded(
@@ -285,7 +302,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     fallback: context.ping.wallpaper,
                   ),
                 ),
-                _buildMessageList(state, chat, messages),
+                if (_searching)
+                  _buildSearchResults(state, chat, messages)
+                else
+                  _buildMessageList(state, chat, messages),
+                if (!_searching && _showScrollDown)
+                  Positioned(
+                    right: 14,
+                    bottom: 14,
+                    child: _ScrollDownButton(onTap: _scrollToBottom),
+                  ),
               ],
             ),
           ),
@@ -391,6 +417,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
       actions: [
         IconButton(
+          icon: const Icon(Icons.search_rounded),
+          tooltip: 'In Chat suchen',
+          onPressed: _enterSearch,
+        ),
+        IconButton(
           icon: const Icon(Icons.info_outline_rounded),
           tooltip: 'Chat-Infos',
           onPressed: () => _openInfo(chat),
@@ -399,6 +430,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ],
     );
   }
+
+  PreferredSizeWidget _buildSearchAppBar() {
+    return AppBar(
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back_rounded),
+        onPressed: _exitSearch,
+      ),
+      titleSpacing: 0,
+      title: TextField(
+        controller: _searchController,
+        autofocus: true,
+        style: const TextStyle(color: Colors.white, fontSize: 17),
+        cursorColor: Colors.white,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        decoration: const InputDecoration(
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          filled: false,
+          hintText: 'In dieser Unterhaltung suchen …',
+          hintStyle: TextStyle(color: Colors.white70),
+        ),
+      ),
+      actions: [
+        if (_searchQuery.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => setState(() {
+              _searchController.clear();
+              _searchQuery = '';
+            }),
+          ),
+      ],
+    );
+  }
+
+  void _enterSearch() => setState(() => _searching = true);
+
+  void _exitSearch() => setState(() {
+        _searching = false;
+        _searchController.clear();
+        _searchQuery = '';
+      });
 
   void _openInfo(Chat chat) {
     Navigator.of(context).push(
@@ -458,8 +532,74 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  Widget _buildSearchResults(
+      AppState state, Chat chat, List<Message> messages) {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) {
+      return const _SearchHint(
+        icon: Icons.search_rounded,
+        text: 'Gib einen Begriff ein, um diese Unterhaltung zu durchsuchen.',
+      );
+    }
+    final matches = messages
+        .where((m) =>
+            !m.isSystem && !m.deleted && m.body.toLowerCase().contains(q))
+        .toList()
+        .reversed
+        .toList();
+    if (matches.isEmpty) {
+      return const _SearchHint(
+        icon: Icons.search_off_rounded,
+        text: 'Keine Treffer in den geladenen Nachrichten.',
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      itemCount: matches.length,
+      separatorBuilder: (_, _) => Divider(
+        height: 1,
+        indent: 20,
+        endIndent: 20,
+        color: scheme.outlineVariant.withValues(alpha: 0.3),
+      ),
+      itemBuilder: (context, i) {
+        final m = matches[i];
+        final mine = m.senderId == state.me?.id;
+        final who = mine
+            ? 'Du'
+            : state.cachedUser(m.senderId ?? '')?.displayName ??
+                chat.displayTitle;
+        return ListTile(
+          tileColor: scheme.surface.withValues(alpha: 0.85),
+          leading: CircleAvatar(
+            backgroundColor: scheme.primary.withValues(alpha: 0.12),
+            child: Icon(Icons.chat_bubble_outline_rounded,
+                size: 18, color: scheme.primary),
+          ),
+          title: Text(who,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+          subtitle:
+              Text(m.preview, maxLines: 2, overflow: TextOverflow.ellipsis),
+          trailing: Text(TimeFormat.chatStamp(m.time),
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11)),
+          onTap: () {
+            final id = m.id;
+            _exitSearch();
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _jumpToMessage(id));
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildBubble(
-      AppState state, Chat chat, List<Message> messages, Message m) {
+      AppState state, Chat chat, List<Message> messages, Message m,
+      {bool interactive = true}) {
     final isMine = m.senderId == state.me?.id;
     final sender = m.senderId != null ? state.cachedUser(m.senderId!) : null;
     // Prefer the fully-loaded original (so edits/deletes show live); fall back
@@ -478,7 +618,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : state.cachedUser(replied.senderId ?? '')?.displayName;
 
     return MessageBubble(
-      key: _messageKeys.putIfAbsent(m.id, () => GlobalKey()),
+      key: interactive
+          ? _messageKeys.putIfAbsent(m.id, () => GlobalKey())
+          : null,
       message: m,
       isMine: isMine,
       showSenderName: chat.isGroup && !isMine,
@@ -486,9 +628,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       senderColor: sender?.color ?? Theme.of(context).colorScheme.primary,
       repliedTo: replied,
       repliedToSender: repliedSender,
-      highlighted: _highlightId == m.id,
-      onTapQuote: m.replyTo != null ? () => _jumpToMessage(m.replyTo!) : null,
-      onLongPress: () => _showMessageActions(m, isMine),
+      starred: state.isStarred(m.id),
+      highlighted: interactive && _highlightId == m.id,
+      onTapQuote: interactive && m.replyTo != null
+          ? () => _jumpToMessage(m.replyTo!)
+          : null,
+      onLongPress: interactive ? () => _showMessageActions(m, isMine) : null,
+      onSwipeReply:
+          interactive && !m.deleted ? () => _startReply(m) : null,
+      onDoubleTap: interactive && !m.deleted
+          ? () => state.toggleReaction(widget.chatId, m.id, '❤️')
+          : null,
       resolveUrl: state.mediaUrl,
       mediaHeaders: state.authHeaders,
       audio: state.audio,
@@ -497,102 +647,159 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onPlayAudio: _playAudio,
       onOpenVideo: _openVideo,
       textScale: state.settings.fontScale,
-      onToggleReaction: (emoji) =>
-          state.toggleReaction(widget.chatId, m.id, emoji),
+      onToggleReaction: interactive
+          ? (emoji) => state.toggleReaction(widget.chatId, m.id, emoji)
+          : null,
     );
+  }
+
+  void _startReply(Message m) {
+    setState(() {
+      _replyTo = m;
+      _editing = null;
+    });
+    _inputFocus.requestFocus();
   }
 
   void _showMessageActions(Message m, bool isMine) {
     if (m.deleted || m.isSystem) return;
-    final selfChat = _chat?.self ?? false;
+    final state = context.read<AppState>();
+    final chat = _chat;
+    final selfChat = chat?.self ?? false;
+    final messages = state.messagesFor(widget.chatId);
+    final hasText = m.body.trim().isNotEmpty;
+    final starred = state.isStarred(m.id);
+
+    // Where the tapped bubble sits, so the menu can animate from there.
+    Rect? rect;
+    final box = _messageKeys[m.id]?.currentContext?.findRenderObject();
+    if (box is RenderBox && box.hasSize) {
+      rect = box.localToGlobal(Offset.zero) & box.size;
+    }
+
+    final actions = <MessageAction>[
+      MessageAction(
+        icon: Icons.reply_rounded,
+        label: 'Antworten',
+        onTap: () => _startReply(m),
+      ),
+      MessageAction(
+        icon: Icons.forward_rounded,
+        label: 'Weiterleiten',
+        onTap: () => _forwardMessage(m),
+      ),
+      if (hasText)
+        MessageAction(
+          icon: Icons.copy_rounded,
+          label: 'Kopieren',
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: m.body));
+            _showError('In die Zwischenablage kopiert.');
+          },
+        ),
+      MessageAction(
+        icon: starred ? Icons.star_rounded : Icons.star_outline_rounded,
+        label: starred ? 'Nicht mehr speichern' : 'Markieren',
+        onTap: () => _toggleStar(m),
+      ),
+      if (isMine && !selfChat)
+        MessageAction(
+          icon: Icons.info_outline_rounded,
+          label: 'Info',
+          onTap: () => _showMessageInfo(m),
+        ),
+      if (hasText && state.settings.ttsEnabled)
+        MessageAction(
+          icon: Icons.volume_up_rounded,
+          label: 'Vorlesen',
+          onTap: () => state.tts.speak(m.id, m.body),
+        ),
+      if (isMine && !m.isMedia)
+        MessageAction(
+          icon: Icons.edit_rounded,
+          label: 'Bearbeiten',
+          onTap: () {
+            setState(() {
+              _editing = m;
+              _replyTo = null;
+              _input.text = m.body;
+            });
+            _inputFocus.requestFocus();
+          },
+        ),
+      if (isMine)
+        MessageAction(
+          icon: Icons.delete_outline_rounded,
+          label: 'Löschen',
+          destructive: true,
+          onTap: () => _confirmDelete(m),
+        ),
+    ];
+
+    showMessageActionsMenu(
+      context,
+      bubblePreview: chat != null
+          ? _buildBubble(state, chat, messages, m, interactive: false)
+          : const SizedBox.shrink(),
+      isMine: isMine,
+      selectedReactions: m.myReactions,
+      onReact: (emoji) => state.toggleReaction(widget.chatId, m.id, emoji),
+      onMore: () => _openReactionPicker(m),
+      actions: actions,
+      originRect: rect,
+    );
+  }
+
+  /// Full emoji grid for reacting with any emoji (the "+" in the reaction pill).
+  void _openReactionPicker(Message m) {
     final state = context.read<AppState>();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        builder: (c, controller) => GridView.count(
+          controller: controller,
+          crossAxisCount: 6,
+          padding: const EdgeInsets.all(12),
           children: [
-            _ReactionPicker(
-              selected: m.myReactions,
-              onPick: (emoji) {
-                Navigator.pop(ctx);
-                state.toggleReaction(widget.chatId, m.id, emoji);
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.reply_rounded),
-              title: const Text('Antworten'),
-              onTap: () {
-                Navigator.pop(ctx);
-                setState(() {
-                  _replyTo = m;
-                  _editing = null;
-                });
-                _inputFocus.requestFocus();
-              },
-            ),
-            if (isMine && !selfChat)
-              ListTile(
-                leading: const Icon(Icons.info_outline_rounded),
-                title: const Text('Info'),
-                subtitle: const Text('Wer hat sie wann gelesen'),
+            for (final e in _reactionEmojis)
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showMessageInfo(m);
+                  state.toggleReaction(widget.chatId, m.id, e);
                 },
-              ),
-            if (m.body.trim().isNotEmpty) ...[
-              ListTile(
-                leading: const Icon(Icons.copy_rounded),
-                title: const Text('Kopieren'),
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: m.body));
-                  Navigator.pop(ctx);
-                  _showError('In die Zwischenablage kopiert.');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.volume_up_rounded),
-                title: const Text('Vorlesen'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  context.read<AppState>().tts.speak(m.id, m.body);
-                },
-              ),
-            ],
-            if (isMine) ...[
-              if (!m.isMedia)
-                ListTile(
-                  leading: const Icon(Icons.edit_rounded),
-                  title: const Text('Bearbeiten'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    setState(() {
-                      _editing = m;
-                      _replyTo = null;
-                      _input.text = m.body;
-                    });
-                    _inputFocus.requestFocus();
-                  },
+                child: Center(
+                  child: Text(e, style: const TextStyle(fontSize: 30)),
                 ),
-              ListTile(
-                leading: Icon(Icons.delete_outline_rounded,
-                    color: Theme.of(context).colorScheme.error),
-                title: Text('Löschen',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.error)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _confirmDelete(m);
-                },
               ),
-            ],
           ],
         ),
       ),
     );
+  }
+
+  void _toggleStar(Message m) {
+    context.read<AppState>().toggleStar(m, _chat?.displayTitle ?? 'Chat');
+  }
+
+  Future<void> _forwardMessage(Message m) async {
+    final targets = await showForwardSheet(context);
+    if (targets == null || targets.isEmpty || !mounted) return;
+    try {
+      await context.read<AppState>().forwardMessage(m, targets);
+      if (!mounted) return;
+      _showError(targets.length == 1
+          ? 'Weitergeleitet.'
+          : 'An ${targets.length} Chats weitergeleitet.');
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
   }
 
   Future<void> _confirmDelete(Message m) async {
@@ -783,6 +990,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     '❤️','🧡','💛','💚','💙','💜','🖤','💔','💕','💯',
     '🔥','✨','🎉','🎊','⭐','🌟','💩','👀','🫶','🤙',
     '🐶','🐱','🦄','🍕','🍔','☕','⚽','🎮','🚀','🌈',
+  ];
+
+  // A broad set of emoji offered when reacting via the reaction pill's "+".
+  static const _reactionEmojis = [
+    '👍','👎','❤️','🔥','🥰','👏','😁','😂','🤣','😊',
+    '😍','😮','😢','😡','🥳','😎','🤔','🙄','😴','🤯',
+    '🤗','🤝','🙏','💪','✌️','🤙','👌','🫶','💯','✨',
+    '🎉','🎊','⭐','🌟','💔','💕','😅','😭','😱','🤤',
   ];
 
   void _openStickerSheet() {
@@ -1535,7 +1750,8 @@ class _EmptyConversation extends StatelessWidget {
 }
 
 /// Bottom sheet showing, per recipient, whether and when they received and read
-/// one of my messages (long-press → Info). Especially useful in groups.
+/// one of my messages (long-press → Info). Each recipient gets a little
+/// delivered/read timeline rather than a single status line.
 class _MessageInfoSheet extends StatelessWidget {
   final Future<List<MessageReceiptInfo>> future;
   final Message message;
@@ -1548,23 +1764,46 @@ class _MessageInfoSheet extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.5,
+      initialChildSize: 0.55,
       minChildSize: 0.3,
-      maxChildSize: 0.9,
+      maxChildSize: 0.92,
       builder: (ctx, controller) => ListView(
         controller: controller,
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 28),
         children: [
-          Text('Nachrichten-Info',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(
-            message.preview,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: scheme.onSurfaceVariant),
+          Center(
+            child: Text('Nachrichten-Info',
+                style: Theme.of(context).textTheme.titleLarge),
           ),
-          const Divider(height: 28),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              message.preview,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, height: 1.3),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Icon(Icons.schedule_rounded,
+                  size: 17, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Text(
+                'Gesendet · ${TimeFormat.receiptStamp(message.createdAt)}',
+                style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const Divider(height: 30),
           FutureBuilder<List<MessageReceiptInfo>>(
             future: future,
             builder: (context, snap) {
@@ -1592,7 +1831,7 @@ class _MessageInfoSheet extends StatelessWidget {
                 );
               }
               return Column(
-                children: [for (final r in receipts) _row(context, r)],
+                children: [for (final r in receipts) _recipient(context, r)],
               );
             },
           ),
@@ -1601,70 +1840,144 @@ class _MessageInfoSheet extends StatelessWidget {
     );
   }
 
-  Widget _row(BuildContext context, MessageReceiptInfo r) {
+  Widget _recipient(BuildContext context, MessageReceiptInfo r) {
     final scheme = Theme.of(context).colorScheme;
-    final status = r.read
-        ? 'Gelesen · ${TimeFormat.receiptStamp(r.readAt)}'
-        : r.delivered
-            ? 'Zugestellt · ${TimeFormat.receiptStamp(r.deliveredAt)}'
-            : 'Gesendet';
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: PingAvatar(
-        initials: r.user.initials,
-        color: r.user.color,
-        size: 42,
-        imageUrl: state.avatarUrl(r.user),
-        imageHeaders: state.authHeaders,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
       ),
-      title: Text(r.user.label),
-      subtitle: Text(status),
-      trailing: Icon(
-        r.read || r.delivered ? Icons.done_all_rounded : Icons.check_rounded,
-        color: r.read ? scheme.primary : scheme.onSurfaceVariant,
-        size: 18,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              PingAvatar(
+                initials: r.user.initials,
+                color: r.user.color,
+                size: 40,
+                imageUrl: state.avatarUrl(r.user),
+                imageHeaders: state.authHeaders,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  r.user.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 15.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _timelineRow(
+            context,
+            label: 'Zugestellt',
+            time: r.deliveredAt,
+            active: r.delivered,
+            blue: false,
+          ),
+          const SizedBox(height: 8),
+          _timelineRow(
+            context,
+            label: 'Gelesen',
+            time: r.readAt,
+            active: r.read,
+            blue: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timelineRow(
+    BuildContext context, {
+    required String label,
+    required int? time,
+    required bool active,
+    required bool blue,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = !active
+        ? scheme.onSurfaceVariant.withValues(alpha: 0.45)
+        : (blue ? scheme.primary : scheme.onSurfaceVariant);
+    return Row(
+      children: [
+        Icon(Icons.done_all_rounded, size: 18, color: color),
+        const SizedBox(width: 10),
+        Text(
+          label,
+          style: TextStyle(
+            color: active ? null : scheme.onSurfaceVariant.withValues(alpha: 0.6),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          active ? TimeFormat.receiptStamp(time) : 'Noch nicht',
+          style: TextStyle(
+            color: active ? color : scheme.onSurfaceVariant.withValues(alpha: 0.6),
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Placeholder shown in the in-chat search view before a query is entered or
+/// when nothing matches.
+class _SearchHint extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _SearchHint({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 56, color: scheme.onSurfaceVariant),
+            const SizedBox(height: 14),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// A horizontal strip of quick emoji reactions shown at the top of a message's
-/// long-press menu. The viewer's existing reactions are highlighted.
-class _ReactionPicker extends StatelessWidget {
-  final Set<String> selected;
-  final void Function(String emoji) onPick;
-  const _ReactionPicker({required this.selected, required this.onPick});
-
-  static const _emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
+/// A floating "jump to latest" pill shown when the user has scrolled up.
+class _ScrollDownButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ScrollDownButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 56,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        children: [
-          for (final e in _emojis)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: GestureDetector(
-                onTap: () => onPick(e),
-                child: Container(
-                  width: 44,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: selected.contains(e)
-                        ? scheme.primary.withValues(alpha: 0.20)
-                        : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                  ),
-                  child: Text(e, style: const TextStyle(fontSize: 24)),
-                ),
-              ),
-            ),
-        ],
+    return Material(
+      color: scheme.surface,
+      elevation: 4,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(9),
+          child: Icon(Icons.keyboard_arrow_down_rounded,
+              color: scheme.primary, size: 28),
+        ),
       ),
     );
   }

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/chat.dart';
+import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/brand.dart';
 import '../widgets/chat_tile.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
+import 'saved_messages_screen.dart';
 import 'settings_screen.dart';
 import 'status_tab.dart';
 
@@ -21,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen>
   late final TabController _tabs = TabController(length: 2, vsync: this);
   bool _loading = true;
   String? _error;
+  String _chatQuery = '';
 
   @override
   void initState() {
@@ -96,6 +100,13 @@ class _HomeScreenState extends State<HomeScreen>
         titleSpacing: 16,
         title: const Text('Ping'),
         actions: [
+          IconButton(
+            tooltip: 'Gespeichert',
+            icon: const Icon(Icons.bookmark_border_rounded),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedMessagesScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Einstellungen',
             icon: const Icon(Icons.settings_outlined),
@@ -174,19 +185,110 @@ class _HomeScreenState extends State<HomeScreen>
     if (state.chats.isEmpty) {
       return const _EmptyState();
     }
-    return ListView.separated(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 96, top: 4),
-      itemCount: state.chats.length,
-      separatorBuilder: (_, _) => Divider(
-        indent: 84,
-        endIndent: 16,
-        color: scheme.outlineVariant.withValues(alpha: 0.3),
+
+    final q = _chatQuery.trim().toLowerCase();
+    final chats = q.isEmpty
+        ? state.chats
+        : state.chats
+            .where((c) =>
+                c.displayTitle.toLowerCase().contains(q) ||
+                (c.lastMessage?.body.toLowerCase().contains(q) ?? false))
+            .toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: TextField(
+            onChanged: (v) => setState(() => _chatQuery = v),
+            textInputAction: TextInputAction.search,
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded),
+              hintText: 'Chats durchsuchen',
+              isDense: true,
+            ),
+          ),
+        ),
+        Expanded(
+          child: chats.isEmpty
+              ? Center(
+                  child: Text('Keine Chats gefunden',
+                      style: TextStyle(color: scheme.onSurfaceVariant)),
+                )
+              : ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(bottom: 96, top: 2),
+                  itemCount: chats.length,
+                  separatorBuilder: (_, _) => Divider(
+                    indent: 84,
+                    endIndent: 16,
+                    color: scheme.outlineVariant.withValues(alpha: 0.3),
+                  ),
+                  itemBuilder: (context, i) {
+                    final chat = chats[i];
+                    return ChatTile(
+                      chat: chat,
+                      pinned: state.isPinned(chat.id),
+                      onTap: () => _openChatById(chat.id),
+                      onLongPress: () => _showChatMenu(chat),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  void _showChatMenu(Chat chat) {
+    final state = context.read<AppState>();
+    final pinned = state.isPinned(chat.id);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(pinned
+                  ? Icons.push_pin_rounded
+                  : Icons.push_pin_outlined),
+              title: Text(pinned ? 'Nicht mehr anheften' : 'Anheften'),
+              onTap: () {
+                Navigator.pop(ctx);
+                state.togglePin(chat.id);
+              },
+            ),
+            if (!chat.self)
+              ListTile(
+                leading: Icon(chat.muted
+                    ? Icons.notifications_active_rounded
+                    : Icons.notifications_off_rounded),
+                title: Text(
+                    chat.muted ? 'Stummschaltung aufheben' : 'Stummschalten'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await state.toggleMute(chat.id, !chat.muted);
+                  } on ApiException catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(e.message)));
+                    }
+                  }
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.open_in_new_rounded),
+              title: const Text('Öffnen'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openChatById(chat.id);
+              },
+            ),
+          ],
+        ),
       ),
-      itemBuilder: (context, i) {
-        final chat = state.chats[i];
-        return ChatTile(chat: chat, onTap: () => _openChat(i));
-      },
     );
   }
 }

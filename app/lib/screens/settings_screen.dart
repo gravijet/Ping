@@ -11,6 +11,7 @@ import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
 import 'profile_edit_screen.dart';
+import 'saved_messages_screen.dart';
 import 'security_screen.dart';
 import 'settings_sections.dart';
 
@@ -89,6 +90,9 @@ class SettingsScreen extends StatelessWidget {
           _navTile(context, Icons.chat_bubble_outline_rounded, 'Chats',
               'Schriftgröße, Hintergrund, Enter zum Senden',
               () => const ChatSettingsScreen()),
+          _navTile(context, Icons.bookmark_outline_rounded, 'Gespeichert',
+              'Markierte Nachrichten aus allen Chats',
+              () => const SavedMessagesScreen()),
           const Divider(),
           _SectionHeader('Konto & Sicherheit'),
           _navTile(context, Icons.shield_outlined, 'Sicherung & Login',
@@ -145,7 +149,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 2.0.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 2.1.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: const Icon(Icons.description_outlined),
@@ -154,7 +158,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '2.0.0',
+              applicationVersion: '2.1.0',
             ),
           ),
           const SizedBox(height: 8),
