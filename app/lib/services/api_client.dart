@@ -100,5 +100,24 @@ class ApiClient {
     throw ApiException(msg, res.statusCode);
   }
 
+  /// Hit the server's `/health` endpoint (which sits outside `/api`). Returns
+  /// the decoded JSON, or null on any failure. Used by the debug chat.
+  Future<Map<String, dynamic>?> health() async {
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    try {
+      final res = await _http
+          .get(Uri.parse('$root/health'))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (_) {
+      /* unreachable */
+    }
+    return null;
+  }
+
   void close() => _http.close();
 }

@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../services/contacts_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/invite_sheet.dart';
 
 /// Reads the device address book, matches it against Ping (privacy-preserving:
 /// nothing is stored server-side) and lets the user pick one — or several —
@@ -20,11 +21,16 @@ class ContactPickerScreen extends StatefulWidget {
   /// Ids already in the chat/group, shown as disabled ("Schon dabei").
   final Set<String> excludeIds;
 
+  /// When true, also list address-book contacts who are NOT on Ping yet, each
+  /// with an "Einladen" (SMS) action. Only used in single-select mode.
+  final bool allowInvite;
+
   const ContactPickerScreen({
     super.key,
     this.multiSelect = false,
     this.title = 'Kontakte',
     this.excludeIds = const {},
+    this.allowInvite = false,
   });
 
   @override
@@ -38,6 +44,7 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
   bool _denied = false;
   String? _error;
   List<ContactMatch> _matches = [];
+  List<LocalContact> _inviteCandidates = [];
   final Set<String> _selected = {};
   String _filter = '';
 
@@ -81,7 +88,31 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
       filtered.sort((a, b) => a.user.label.toLowerCase().compareTo(
             b.user.label.toLowerCase(),
           ));
-      if (mounted) setState(() => _matches = filtered);
+
+      // Work out who is NOT on Ping yet (for the invite list). Compare on the
+      // last 8 digits so different formattings of the same number still match.
+      List<LocalContact> invites = [];
+      if (widget.allowInvite && !widget.multiSelect) {
+        final onPing = <String>{};
+        for (final m in matches) {
+          final d = _digits(m.phone ?? '');
+          if (d.isNotEmpty) onPing.add(_tail(d));
+        }
+        for (final c in local) {
+          if (c.phones.isEmpty) continue;
+          final isOnPing = c.phones.any((p) {
+            final d = _digits(p);
+            return d.isNotEmpty && onPing.contains(_tail(d));
+          });
+          if (!isOnPing) invites.add(c);
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _matches = filtered;
+          _inviteCandidates = invites;
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -99,6 +130,27 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
     return _matches
         .where((m) => m.user.label.toLowerCase().contains(q))
         .toList();
+  }
+
+  List<LocalContact> get _visibleInvites {
+    if (_filter.isEmpty) return _inviteCandidates;
+    final q = _filter.toLowerCase();
+    return _inviteCandidates
+        .where((c) =>
+            c.displayName.toLowerCase().contains(q) ||
+            c.phones.any((p) => p.contains(q)))
+        .toList();
+  }
+
+  static String _digits(String s) => s.replaceAll(RegExp(r'\D'), '');
+  static String _tail(String d) => d.length > 8 ? d.substring(d.length - 8) : d;
+
+  void _invite(LocalContact c) {
+    showInviteSheet(
+      context,
+      phone: c.phones.isNotEmpty ? c.phones.first : null,
+      name: c.displayName,
+    );
   }
 
   void _onTap(ContactMatch m) {
@@ -180,21 +232,23 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
         ),
       );
     }
-    if (_matches.isEmpty) {
+    if (_matches.isEmpty && _inviteCandidates.isEmpty) {
       return _info(
         scheme,
         Icons.person_search_rounded,
         'Niemand aus deinen Kontakten ist hier',
         'Keiner deiner gespeicherten Kontakte hat (noch) ein Ping-Konto. '
-            'Lade sie ein oder starte einen Chat direkt per Nummer/E-Mail.',
+            'Lade sie ein oder starte einen Chat direkt per Nummer.',
       );
     }
     final state = context.read<AppState>();
-    final list = _visible;
-    return Column(
+    final matches = _visible;
+    final invites = widget.allowInvite ? _visibleInvites : const <LocalContact>[];
+
+    return ListView(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Row(
             children: [
               Icon(Icons.lock_rounded,
@@ -202,8 +256,7 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Nur Kontakte mit Ping-Konto werden angezeigt. Dein '
-                  'Adressbuch wird nicht gespeichert.',
+                  'Dein Adressbuch wird nur lokal abgeglichen und nie gespeichert.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -212,37 +265,68 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: ListView.builder(
-            itemCount: list.length,
-            itemBuilder: (context, i) {
-              final m = list[i];
-              final u = m.user;
-              final selected = _selected.contains(u.id);
-              return ListTile(
-                leading: PingAvatar(
-                  initials: u.initials,
-                  color: u.color,
-                  size: 46,
-                  online: u.online,
-                  imageUrl: state.avatarUrl(u),
-                  imageHeaders: state.authHeaders,
-                ),
-                title: Text(u.label,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(m.phone ?? 'Auf Ping'),
-                trailing: widget.multiSelect
-                    ? Checkbox(
-                        value: selected,
-                        onChanged: (_) => _onTap(m),
-                      )
-                    : const Icon(Icons.chevron_right_rounded),
-                onTap: () => _onTap(m),
-              );
-            },
+        if (matches.isNotEmpty)
+          _sectionHeader(scheme, 'Auf Ping (${matches.length})'),
+        for (final m in matches) _matchTile(state, m),
+        if (invites.isNotEmpty) ...[
+          _sectionHeader(scheme, 'Zu Ping einladen (${invites.length})'),
+          for (final c in invites) _inviteTile(scheme, c),
+        ],
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _sectionHeader(ColorScheme scheme, String label) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: scheme.primary,
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
           ),
         ),
-      ],
+      );
+
+  Widget _matchTile(AppState state, ContactMatch m) {
+    final u = m.user;
+    final selected = _selected.contains(u.id);
+    return ListTile(
+      leading: PingAvatar(
+        initials: u.initials,
+        color: u.color,
+        size: 46,
+        online: u.online,
+        imageUrl: state.avatarUrl(u),
+        imageHeaders: state.authHeaders,
+      ),
+      title:
+          Text(u.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(m.phone ?? 'Auf Ping'),
+      trailing: widget.multiSelect
+          ? Checkbox(value: selected, onChanged: (_) => _onTap(m))
+          : const Icon(Icons.chevron_right_rounded),
+      onTap: () => _onTap(m),
+    );
+  }
+
+  Widget _inviteTile(ColorScheme scheme, LocalContact c) {
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundColor: scheme.surfaceContainerHighest,
+        child: Icon(Icons.person_outline_rounded,
+            color: scheme.onSurfaceVariant),
+      ),
+      title: Text(c.displayName,
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(c.phones.isNotEmpty ? c.phones.first : ''),
+      trailing: OutlinedButton.icon(
+        onPressed: () => _invite(c),
+        icon: const Icon(Icons.person_add_alt_rounded, size: 16),
+        label: const Text('Einladen'),
+      ),
+      onTap: () => _invite(c),
     );
   }
 

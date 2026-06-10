@@ -100,6 +100,11 @@ class Message {
   final bool deleted;
   MessageStatus? status; // only meaningful for messages I sent
 
+  /// Emoji reactions on this message: emoji → count, plus the set of emojis the
+  /// current user reacted with (for highlighting their own picks).
+  final Map<String, int> reactions;
+  final Set<String> myReactions;
+
   /// A lightweight snapshot of the message this one replies to, supplied by the
   /// server so the quote always renders — even when the original is outside the
   /// loaded window. Null when this isn't a reply.
@@ -118,11 +123,35 @@ class Message {
     this.deleted = false,
     this.status,
     this.quoted,
+    this.reactions = const {},
+    this.myReactions = const {},
   });
 
+  bool get hasReactions => reactions.isNotEmpty;
   bool get isSystem => type == 'system';
   bool get isEdited => editedAt != null && !deleted;
   bool get isMedia => type != 'text' && type != 'system';
+
+  /// True when the message body is just a handful of emoji (no letters/digits).
+  /// Such messages are rendered "jumbo" without a bubble, like WhatsApp — which
+  /// is also how the built-in emoji stickers are sent.
+  bool get isEmojiOnly {
+    if (type != 'text' || deleted) return false;
+    final t = body.trim();
+    if (t.isEmpty) return false;
+    var graphemes = 0;
+    var sawPictograph = false;
+    for (final rune in t.runes) {
+      if (rune == 0x20 || rune == 0x200d || rune == 0xfe0f || rune == 0xfe0e) {
+        continue; // spaces, ZWJ and variation selectors don't count
+      }
+      // Any printable ASCII (letters, digits, punctuation) disqualifies it.
+      if (rune >= 0x21 && rune <= 0x7e) return false;
+      if (rune > 0x2000) sawPictograph = true;
+      graphemes++;
+    }
+    return sawPictograph && graphemes <= 8;
+  }
 
   DateTime get time => DateTime.fromMillisecondsSinceEpoch(createdAt);
 
@@ -153,6 +182,8 @@ class Message {
     int? editedAt,
     bool? deleted,
     MessageStatus? status,
+    Map<String, int>? reactions,
+    Set<String>? myReactions,
   }) =>
       Message(
         id: id,
@@ -167,7 +198,36 @@ class Message {
         deleted: deleted ?? this.deleted,
         status: status ?? this.status,
         quoted: quoted,
+        reactions: reactions ?? this.reactions,
+        myReactions: myReactions ?? this.myReactions,
       );
+
+  /// Serialise for the on-device cache (round-trips through [Message.fromJson]).
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'chatId': chatId,
+        'senderId': senderId,
+        'type': type,
+        'body': body,
+        if (attachment != null) 'attachment': attachment!.toJson(),
+        if (replyTo != null) 'replyTo': replyTo,
+        'createdAt': createdAt,
+        if (editedAt != null) 'editedAt': editedAt,
+        'deleted': deleted,
+        if (status != null && status != MessageStatus.sending &&
+            status != MessageStatus.failed)
+          'status': status!.name,
+        if (reactions.isNotEmpty) 'reactions': reactions,
+        if (myReactions.isNotEmpty) 'myReactions': myReactions.toList(),
+        if (quoted != null)
+          'quoted': {
+            'id': quoted!.id,
+            'senderId': quoted!.senderId,
+            'type': quoted!.type,
+            'body': quoted!.body,
+            'deleted': quoted!.deleted,
+          },
+      };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
         id: json['id'] as String,
@@ -185,6 +245,12 @@ class Message {
         status: json['status'] != null
             ? statusFromString(json['status'] as String)
             : null,
+        reactions: (json['reactions'] as Map?)?.map(
+                (k, v) => MapEntry(k as String, (v as num).toInt())) ??
+            const {},
+        myReactions:
+            ((json['myReactions'] as List?)?.cast<String>() ?? const [])
+                .toSet(),
         quoted: json['quoted'] != null
             ? Message._fromQuoted(
                 json['quoted'] as Map<String, dynamic>,

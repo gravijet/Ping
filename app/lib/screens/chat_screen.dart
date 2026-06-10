@@ -12,15 +12,17 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/chat.dart';
 import '../models/message.dart';
-import '../models/settings.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/avatar.dart';
+import '../widgets/chat_wallpaper.dart';
 import '../widgets/message_bubble.dart';
 import 'chat_info_screen.dart';
 import 'image_viewer_screen.dart';
+import 'sticker_draw_screen.dart';
+import 'video_player_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -275,9 +277,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       body: Column(
         children: [
           Expanded(
-            child: Container(
-              color: _wallpaperColor(state, context),
-              child: _buildMessageList(state, chat, messages),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ChatWallpaper(
+                    spec: state.wallpaperFor(widget.chatId),
+                    fallback: context.ping.wallpaper,
+                  ),
+                ),
+                _buildMessageList(state, chat, messages),
+              ],
             ),
           ),
           _TypingRow(chat: chat),
@@ -302,16 +311,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       ),
     );
-  }
-
-  Color _wallpaperColor(AppState state, BuildContext context) {
-    final palette = context.ping;
-    final idx = state.settings.wallpaper;
-    if (idx <= 0 || idx >= kChatWallpapers.length) return palette.wallpaper;
-    final base = Color(kChatWallpapers[idx]);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Color.alphaBlend(
-        base.withValues(alpha: isDark ? 0.45 : 0.14), palette.wallpaper);
   }
 
   PreferredSizeWidget _buildAppBar(AppState state, Chat chat) {
@@ -496,13 +495,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onOpenImage: _openImage,
       onOpenFile: _openFile,
       onPlayAudio: _playAudio,
+      onOpenVideo: _openVideo,
       textScale: state.settings.fontScale,
+      onToggleReaction: (emoji) =>
+          state.toggleReaction(widget.chatId, m.id, emoji),
     );
   }
 
   void _showMessageActions(Message m, bool isMine) {
     if (m.deleted || m.isSystem) return;
     final selfChat = _chat?.self ?? false;
+    final state = context.read<AppState>();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -510,6 +513,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            _ReactionPicker(
+              selected: m.myReactions,
+              onPick: (emoji) {
+                Navigator.pop(ctx);
+                state.toggleReaction(widget.chatId, m.id, emoji);
+              },
+            ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.reply_rounded),
               title: const Text('Antworten'),
@@ -663,6 +674,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 },
               ),
               _AttachOption(
+                icon: Icons.videocam_rounded,
+                color: const Color(0xFFEF5350),
+                label: 'Video',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _chooseVideoSource();
+                },
+              ),
+              _AttachOption(
+                icon: Icons.emoji_emotions_rounded,
+                color: const Color(0xFFFFA000),
+                label: 'Sticker',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openStickerSheet();
+                },
+              ),
+              _AttachOption(
                 icon: Icons.gif_box_rounded,
                 color: const Color(0xFF26A69A),
                 label: 'GIF',
@@ -741,6 +770,128 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           filename: file.name, kind: 'image');
     } catch (_) {
       _showError('Bild konnte nicht geladen werden.');
+    }
+  }
+
+  // A built-in set of emoji "stickers" — no external pack/file needed. Tapping
+  // one sends it as an emoji-only message, which renders large (jumbo) in the
+  // bubble. The "Zeichnen" action opens a canvas to draw a custom sticker.
+  static const _stickerEmojis = [
+    '😀','😂','🤣','😍','🥰','😎','🤩','😭','😅','😉',
+    '😴','🤔','🙄','😱','🥳','😡','😇','🤗','🤫','🤤',
+    '👍','👎','👏','🙏','🙌','💪','👌','🤝','✌️','🤞',
+    '❤️','🧡','💛','💚','💙','💜','🖤','💔','💕','💯',
+    '🔥','✨','🎉','🎊','⭐','🌟','💩','👀','🫶','🤙',
+    '🐶','🐱','🦄','🍕','🍔','☕','⚽','🎮','🚀','🌈',
+  ];
+
+  void _openStickerSheet() {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.55,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        builder: (c, controller) => Column(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.brush_rounded),
+              title: const Text('Eigenen Sticker zeichnen'),
+              subtitle: const Text('Mal etwas und sende es als Sticker'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _drawSticker();
+              },
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: GridView.count(
+                controller: controller,
+                crossAxisCount: 5,
+                padding: const EdgeInsets.all(12),
+                children: [
+                  for (final e in _stickerEmojis)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _sendEmojiSticker(e);
+                      },
+                      child: Center(
+                        child: Text(e, style: const TextStyle(fontSize: 38)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendEmojiSticker(String emoji) async {
+    final state = context.read<AppState>();
+    final reply = _replyTo;
+    setState(() => _replyTo = null);
+    try {
+      await state.sendMessage(widget.chatId, emoji, replyTo: reply?.id);
+      _scrollToBottom();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _drawSticker() async {
+    final bytes = await Navigator.of(context).push<Uint8List?>(
+      MaterialPageRoute(builder: (_) => const StickerDrawScreen()),
+    );
+    if (bytes == null || bytes.isEmpty || !mounted) return;
+    await _sendBytes(bytes, 'image/png',
+        filename: 'sticker.png', kind: 'image');
+  }
+
+  Future<void> _chooseVideoSource() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.videocam_rounded),
+              title: const Text('Video aufnehmen'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library_rounded),
+              title: const Text('Video aus Galerie'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    await _pickVideo(source);
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final file = await picker.pickVideo(
+          source: source, maxDuration: const Duration(minutes: 5));
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      await _sendBytes(bytes, file.mimeType ?? _mimeForFile(file.name),
+          filename: file.name, kind: 'video');
+    } catch (_) {
+      _showError('Video konnte nicht geladen werden.');
     }
   }
 
@@ -871,6 +1022,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final state = context.read<AppState>();
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ImageViewerScreen(
+        url: state.mediaUrl(att.url),
+        headers: state.authHeaders,
+      ),
+    ));
+  }
+
+  void _openVideo(Attachment att) {
+    final state = context.read<AppState>();
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => VideoPlayerScreen(
         url: state.mediaUrl(att.url),
         headers: state.authHeaders,
       ),
@@ -1462,6 +1623,48 @@ class _MessageInfoSheet extends StatelessWidget {
         r.read || r.delivered ? Icons.done_all_rounded : Icons.check_rounded,
         color: r.read ? scheme.primary : scheme.onSurfaceVariant,
         size: 18,
+      ),
+    );
+  }
+}
+
+/// A horizontal strip of quick emoji reactions shown at the top of a message's
+/// long-press menu. The viewer's existing reactions are highlighted.
+class _ReactionPicker extends StatelessWidget {
+  final Set<String> selected;
+  final void Function(String emoji) onPick;
+  const _ReactionPicker({required this.selected, required this.onPick});
+
+  static const _emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 56,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          for (final e in _emojis)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: GestureDetector(
+                onTap: () => onPick(e),
+                child: Container(
+                  width: 44,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: selected.contains(e)
+                        ? scheme.primary.withValues(alpha: 0.20)
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                  ),
+                  child: Text(e, style: const TextStyle(fontSize: 24)),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

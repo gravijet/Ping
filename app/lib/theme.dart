@@ -101,31 +101,184 @@ class PingPalette extends ThemeExtension<PingPalette> {
   }
 }
 
-/// Ping's visual identity: a clean, WhatsApp-style messenger built around a
-/// confident blue. One seed drives a harmonised Material 3 palette; the chat
-/// surfaces use [PingPalette] on top.
+/// A selectable look-and-feel. Each design drives the whole UI from a seed and
+/// accent: the Material colour scheme, the app-bar/brand colour, and the chat
+/// bubble + wallpaper tints — so switching design changes far more than just an
+/// accent colour. `id == 'custom'` carries a user-picked seed.
+@immutable
+class PingDesign {
+  final String id;
+  final String name;
+  final Color seed;
+  final Color accent;
+  final Color tertiary;
+
+  const PingDesign({
+    required this.id,
+    required this.name,
+    required this.seed,
+    required this.accent,
+    this.tertiary = const Color(0xFF00BFA6),
+  });
+
+  PingDesign withSeed(Color seed) => PingDesign(
+        id: 'custom',
+        name: 'Eigene Farbe',
+        seed: seed,
+        accent: seed,
+        tertiary: tertiary,
+      );
+}
+
+/// The built-in designs. The first is the classic Ping blue.
+const kPingDesigns = <PingDesign>[
+  PingDesign(
+      id: 'ocean',
+      name: 'Ozean',
+      seed: Color(0xFF0A84FF),
+      accent: Color(0xFF34B7F1)),
+  PingDesign(
+      id: 'midnight',
+      name: 'Mitternacht',
+      seed: Color(0xFF5E5CE6),
+      accent: Color(0xFF7E8CFF)),
+  PingDesign(
+      id: 'sunset',
+      name: 'Sonnenuntergang',
+      seed: Color(0xFFFF6F3C),
+      accent: Color(0xFFFF375F)),
+  PingDesign(
+      id: 'forest',
+      name: 'Wald',
+      seed: Color(0xFF2E9E5B),
+      accent: Color(0xFF66BB6A)),
+  PingDesign(
+      id: 'berry',
+      name: 'Beere',
+      seed: Color(0xFFBF5AF2),
+      accent: Color(0xFFFF2D55)),
+  PingDesign(
+      id: 'rose',
+      name: 'Rosé',
+      seed: Color(0xFFEC407A),
+      accent: Color(0xFFFF8FB1)),
+  PingDesign(
+      id: 'graphite',
+      name: 'Graphit',
+      seed: Color(0xFF546E7A),
+      accent: Color(0xFF78909C)),
+  PingDesign(
+      id: 'neon',
+      name: 'Neon',
+      seed: Color(0xFF00BFA6),
+      accent: Color(0xFF1DE9B6)),
+  PingDesign(
+      id: 'crimson',
+      name: 'Karmin',
+      seed: Color(0xFFE53935),
+      accent: Color(0xFFFF6E6E)),
+  PingDesign(
+      id: 'amber',
+      name: 'Bernstein',
+      seed: Color(0xFFFFB300),
+      accent: Color(0xFFFFD54F)),
+  PingDesign(
+      id: 'teal',
+      name: 'Türkis',
+      seed: Color(0xFF00ACC1),
+      accent: Color(0xFF4DD0E1)),
+  PingDesign(
+      id: 'lavender',
+      name: 'Lavendel',
+      seed: Color(0xFF9575CD),
+      accent: Color(0xFFB39DDB)),
+  PingDesign(
+      id: 'emerald',
+      name: 'Smaragd',
+      seed: Color(0xFF1B998B),
+      accent: Color(0xFF4ECDC4)),
+  PingDesign(
+      id: 'slate',
+      name: 'Schiefer',
+      seed: Color(0xFF455A64),
+      accent: Color(0xFF90A4AE)),
+];
+
+PingDesign designById(String? id, {int? customColor}) {
+  if (id == 'custom' && customColor != null) {
+    return kPingDesigns.first.withSeed(Color(customColor));
+  }
+  return kPingDesigns.firstWhere((d) => d.id == id,
+      orElse: () => kPingDesigns.first);
+}
+
+/// Ping's visual identity: a clean, WhatsApp-style messenger. A [PingDesign]
+/// seed drives a harmonised Material 3 palette; the chat surfaces use a
+/// [PingPalette] derived from the same seed on top.
 class PingTheme {
-  static const seed = Color(0xFF0A84FF); // vivid blue
+  static const seed = Color(0xFF0A84FF); // vivid blue (classic default)
   static const accent = Color(0xFF34B7F1); // sky-blue highlight
 
-  static ThemeData light() => _build(Brightness.light);
-  static ThemeData dark() => _build(Brightness.dark);
+  /// The bundled premium typeface used across the whole app — a big part of what
+  /// lifts Ping out of the default-Roboto "0815" look.
+  static const fontFamily = 'PlusJakartaSans';
 
-  static ThemeData _build(Brightness brightness) {
+  static ThemeData light([PingDesign? design]) =>
+      _build(Brightness.light, design ?? kPingDesigns.first);
+  static ThemeData dark([PingDesign? design]) =>
+      _build(Brightness.dark, design ?? kPingDesigns.first);
+
+  /// Derive the chat-surface palette (bubbles, wallpaper, app-bar) from a design
+  /// seed so every design has a distinct, cohesive look.
+  static PingPalette _paletteFor(PingDesign design, Brightness brightness) {
+    final seed = design.seed;
+    if (brightness == Brightness.light) {
+      return PingPalette(
+        bubbleOut: Color.alphaBlend(seed.withValues(alpha: 0.20), Colors.white),
+        bubbleIn: Colors.white,
+        bubbleOutText: const Color(0xFF0B1B2B),
+        bubbleInText: const Color(0xFF0B1B2B),
+        wallpaper:
+            Color.alphaBlend(seed.withValues(alpha: 0.08), const Color(0xFFECEFF3)),
+        composer:
+            Color.alphaBlend(seed.withValues(alpha: 0.05), Colors.white),
+        sentTick: const Color(0xFF8FA6BC),
+        readTick: design.accent,
+        brand: Color.alphaBlend(Colors.black.withValues(alpha: 0.12), seed),
+      );
+    }
+    const darkBase = Color(0xFF0B141A);
+    return PingPalette(
+      bubbleOut: Color.alphaBlend(seed.withValues(alpha: 0.55), darkBase),
+      bubbleIn: const Color(0xFF1F2C34),
+      bubbleOutText: const Color(0xFFEAF2FB),
+      bubbleInText: const Color(0xFFE6EBEF),
+      wallpaper: Color.alphaBlend(seed.withValues(alpha: 0.12), darkBase),
+      composer: Color.alphaBlend(seed.withValues(alpha: 0.10), darkBase),
+      sentTick: const Color(0xFF8696A0),
+      readTick: design.accent,
+      brand: Color.alphaBlend(Colors.black.withValues(alpha: 0.55), seed),
+    );
+  }
+
+  static ThemeData _build(Brightness brightness, PingDesign design) {
     final isLight = brightness == Brightness.light;
-    final palette = isLight ? PingPalette.light : PingPalette.dark;
+    final palette = _paletteFor(design, brightness);
 
     final scheme = ColorScheme.fromSeed(
-      seedColor: seed,
+      seedColor: design.seed,
       brightness: brightness,
-      primary: isLight ? const Color(0xFF0A84FF) : const Color(0xFF53A6FF),
-      secondary: const Color(0xFF34B7F1),
-      tertiary: const Color(0xFF00BFA6),
+      primary: isLight
+          ? design.seed
+          : Color.alphaBlend(Colors.white.withValues(alpha: 0.28), design.seed),
+      secondary: design.accent,
+      tertiary: design.tertiary,
     );
 
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
+      fontFamily: fontFamily,
       scaffoldBackgroundColor: scheme.surface,
       visualDensity: VisualDensity.standard,
     );
@@ -140,6 +293,7 @@ class PingTheme {
         scrolledUnderElevation: 2,
         centerTitle: false,
         titleTextStyle: const TextStyle(
+          fontFamily: fontFamily,
           color: Colors.white,
           fontSize: 20,
           fontWeight: FontWeight.w700,
@@ -153,7 +307,10 @@ class PingTheme {
         unselectedLabelColor: Color(0xCCFFFFFF),
         indicatorColor: Colors.white,
         indicatorSize: TabBarIndicatorSize.tab,
-        labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+        labelStyle: TextStyle(
+            fontFamily: fontFamily, fontWeight: FontWeight.w700, fontSize: 14),
+        unselectedLabelStyle:
+            TextStyle(fontFamily: fontFamily, fontWeight: FontWeight.w600, fontSize: 14),
         dividerColor: Colors.transparent,
       ),
       cardTheme: CardThemeData(
@@ -167,12 +324,14 @@ class PingTheme {
           minimumSize: const Size.fromHeight(52),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: fontFamily, fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: fontFamily, fontSize: 15, fontWeight: FontWeight.w600),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -228,17 +387,25 @@ class PingTheme {
 
   static TextTheme _textTheme(TextTheme base, ColorScheme scheme) {
     return base.copyWith(
+      headlineMedium: base.headlineMedium?.copyWith(
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.6,
+      ),
       headlineSmall: base.headlineSmall?.copyWith(
-        fontWeight: FontWeight.w700,
-        letterSpacing: -0.4,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.5,
       ),
       titleLarge: base.titleLarge?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.3,
+        letterSpacing: -0.4,
       ),
-      titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-      bodyMedium: base.bodyMedium?.copyWith(height: 1.35),
-      labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+      titleMedium: base.titleMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+      ),
+      bodyLarge: base.bodyLarge?.copyWith(height: 1.35, letterSpacing: -0.1),
+      bodyMedium: base.bodyMedium?.copyWith(height: 1.35, letterSpacing: -0.1),
+      labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700),
     );
   }
 }

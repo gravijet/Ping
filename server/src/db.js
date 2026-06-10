@@ -74,6 +74,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_chat
     ON messages(chat_id, created_at);
 
+  -- Emoji reactions on a message. One row per (message, user, emoji); a user can
+  -- react with several different emojis but only once each.
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+  CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id);
+
   -- Per-recipient delivery/read state. Sender is never a recipient row.
   CREATE TABLE IF NOT EXISTS message_status (
     message_id   TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -107,7 +118,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS statuses (
     id         TEXT PRIMARY KEY,
     user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type       TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text','image')),
+    type       TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text','image','video')),
     body       TEXT NOT NULL DEFAULT '',
     attachment TEXT,
     bg_color   TEXT,
@@ -130,6 +141,39 @@ db.exec(`
     created_at INTEGER NOT NULL,
     PRIMARY KEY (blocker_id, blocked_id)
   );
+
+  -- FCM device tokens for push notifications. A user may have several devices,
+  -- and a device token is globally unique, so the token itself is the PK.
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token      TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform   TEXT NOT NULL DEFAULT 'android',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
+
+  -- One-time SMS verification codes (server-side phone OTP). Keyed by the
+  -- canonical E.164 number; only the hash of the code is stored.
+  CREATE TABLE IF NOT EXISTS phone_codes (
+    phone      TEXT PRIMARY KEY,
+    code_hash  TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    last_sent  INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  -- History of admin broadcasts, so the portal can show what was sent.
+  CREATE TABLE IF NOT EXISTS broadcasts (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL,
+    delivered  INTEGER NOT NULL DEFAULT 0,
+    pushed     INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON broadcasts(created_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -178,6 +222,72 @@ function migrate() {
 }
 
 migrate();
+
+// Add columns that newer features need to pre-existing tables. Each check is a
+// no-op on fresh databases (the CREATE TABLE above already has the column).
+function ensureColumns() {
+  const chatCols = db.prepare('PRAGMA table_info(chats)').all().map((c) => c.name);
+  if (!chatCols.includes('avatar_mime')) {
+    db.exec('ALTER TABLE chats ADD COLUMN avatar_mime TEXT');
+  }
+  if (!chatCols.includes('avatar_version')) {
+    db.exec('ALTER TABLE chats ADD COLUMN avatar_version INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!chatCols.includes('description')) {
+    db.exec("ALTER TABLE chats ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+  }
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userCols.includes('message_storage')) {
+    // 'server' = keep history (default); 'local' = purge a user's sent messages
+    // from the server once every recipient has read them.
+    db.exec(
+      "ALTER TABLE users ADD COLUMN message_storage TEXT NOT NULL DEFAULT 'server'"
+    );
+  }
+  if (!userCols.includes('disabled')) {
+    // Admin "ban": a disabled account can't log in and existing sessions are
+    // rejected.
+    db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+  }
+}
+ensureColumns();
+
+// Older databases capped status.type at ('text','image'); rebuild the table so
+// video statuses are allowed. Rows are preserved (statuses are ephemeral anyway).
+function migrateStatusType() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='statuses'")
+    .get();
+  if (!row || /'video'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE statuses_new (
+        id         TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type       TEXT NOT NULL DEFAULT 'text' CHECK (type IN ('text','image','video')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        bg_color   TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      INSERT INTO statuses_new
+        SELECT id, user_id, type, body, attachment, bg_color, created_at, expires_at
+        FROM statuses;
+      DROP TABLE statuses;
+      ALTER TABLE statuses_new RENAME TO statuses;
+      CREATE INDEX IF NOT EXISTS idx_statuses_user ON statuses(user_id, created_at);
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateStatusType();
 
 export function now() {
   return Date.now();

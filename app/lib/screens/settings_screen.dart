@@ -4,8 +4,12 @@ import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
+import '../widgets/brand.dart';
+import '../widgets/invite_sheet.dart';
 import '../widgets/ping_logo.dart';
 import 'admin_screen.dart';
+import 'backup_screen.dart';
+import 'design_screen.dart';
 import 'profile_edit_screen.dart';
 import 'security_screen.dart';
 import 'settings_sections.dart';
@@ -20,7 +24,7 @@ class SettingsScreen extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Einstellungen')),
+      appBar: pingAppBar(context, title: const Text('Einstellungen')),
       body: ListView(
         children: [
           if (me != null)
@@ -69,8 +73,19 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           const Divider(),
+          ListTile(
+            leading: Icon(Icons.person_add_alt_rounded, color: scheme.primary),
+            title: const Text('Freunde einladen'),
+            subtitle: const Text('Per WhatsApp, Telegram, SMS oder Link'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showInviteSheet(context),
+          ),
+          const Divider(),
           _SectionHeader('Darstellung'),
           _ThemeSelector(state: state),
+          _navTile(context, Icons.palette_outlined, 'Design & Farben',
+              'Farbschema wählen oder eigene Farbe',
+              () => const DesignScreen()),
           _navTile(context, Icons.chat_bubble_outline_rounded, 'Chats',
               'Schriftgröße, Hintergrund, Enter zum Senden',
               () => const ChatSettingsScreen()),
@@ -90,6 +105,9 @@ class SettingsScreen extends StatelessWidget {
           _navTile(context, Icons.record_voice_over_outlined, 'Vorlesen',
               'Text-to-Speech, Sprache, Geschwindigkeit',
               () => const ReadAloudSettingsScreen()),
+          _navTile(context, Icons.backup_outlined, 'Backup',
+              'Tägliche Server-Sicherung & eigener Export',
+              () => const BackupScreen()),
           if (me?.isAdmin == true) ...[
             const Divider(),
             _SectionHeader('Verwaltung'),

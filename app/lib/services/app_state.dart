@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../theme.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../models/settings.dart';
@@ -11,14 +14,20 @@ import '../models/user.dart';
 import 'api_client.dart';
 import 'audio_player_service.dart';
 import 'media_service.dart';
+import 'local_message_store.dart';
 import 'notification_service.dart';
+import 'push_service.dart';
 import 'socket_service.dart';
+import 'starred_store.dart';
 import 'tts_service.dart';
+import 'wallpaper_service.dart';
 
 const _kToken = 'ping_token';
 const _kBaseUrl = 'ping_base_url';
 const _kThemeMode = 'ping_theme_mode';
 const _kSettings = 'ping_settings';
+const _kChatWallpapers = 'ping_chat_wallpapers';
+const _kPinnedChats = 'ping_pinned_chats';
 
 /// Friendly name shown instead of the raw server address by default, so the
 /// endpoint isn't advertised in the UI.
@@ -30,7 +39,7 @@ const serverLabel = 'Ping Cloud';
 String _resolveDefaultServer() {
   const override = String.fromEnvironment('PING_SERVER');
   if (override.isNotEmpty) return override;
-  const packed = 'aHR0cDovLzQ1LjE0MS4xMTYuMTU6NjEzMzc=';
+  const packed = 'aHR0cHM6Ly9waW5nLm91dGRleC1ob3N0aW5nLmRl';
   try {
     return utf8.decode(base64.decode(packed));
   } catch (_) {
@@ -54,9 +63,30 @@ class AppState extends ChangeNotifier {
   late ApiClient _api;
   late SocketService _socket;
   final NotificationService notifications = NotificationService();
+  final PushService push = PushService();
+  final WallpaperService wallpapers = WallpaperService();
+  String? _pushToken;
+
+  /// Per-chat wallpaper overrides (chatId → encoded WallpaperSpec). When a chat
+  /// has no entry the global [PingSettings.wallpaperSpec] is used.
+  final Map<String, String> _chatWallpapers = {};
+
+  /// Chats whose full history has been loaded into memory this session. Only
+  /// these are written back to the on-device cache — so an incoming message for
+  /// a not-yet-opened chat can't overwrite its cached history with a stub.
+  final Set<String> _loadedChats = {};
   final TtsController tts = TtsController();
   final AudioController audio = AudioController();
   final MediaService media = MediaService();
+  final LocalMessageStore localStore = LocalMessageStore();
+  final StarredStore starredStore = StarredStore();
+
+  /// Message ids the user has bookmarked (for the star in bubbles + the
+  /// "Gespeichert" screen). Hydrated from [starredStore] on launch.
+  final Set<String> starredIds = {};
+
+  /// Chats the user has pinned to the top of the list (device-local).
+  final Set<String> _pinnedChats = {};
 
   AuthStatus status = AuthStatus.unknown;
   PingUser? me;
@@ -139,6 +169,14 @@ class AppState extends ChangeNotifier {
     final token = prefs.getString(_kToken);
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
     settings = PingSettings.decode(prefs.getString(_kSettings));
+    _loadChatWallpapers(prefs);
+    _loadPinnedChats(prefs);
+    starredStore.ids().then((ids) {
+      starredIds
+        ..clear()
+        ..addAll(ids);
+      notifyListeners();
+    });
     await tts.configure(
       language: settings.ttsLanguage,
       rate: settings.ttsRate,
@@ -155,6 +193,8 @@ class AppState extends ChangeNotifier {
     );
 
     await notifications.init();
+    push.onToken = _onPushToken;
+    await push.start(notifications: notifications);
 
     if (token != null) {
       try {
@@ -175,19 +215,40 @@ class AppState extends ChangeNotifier {
 
   // ---- Auth ----------------------------------------------------------------
 
-  /// Register a new account: phone, email and password are all required (no
-  /// verification step).
+  /// Register a new account: phone, email and password are all required.
+  /// [verifyToken] is the server-issued proof from the SMS OTP flow (see
+  /// [requestPhoneCode]/[verifyPhoneCode]); [firebaseIdToken] is the legacy
+  /// Firebase alternative. Either, or neither (when verification isn't enforced).
   Future<void> register(
       String phone, String email, String password, String displayName,
-      {String? firebaseIdToken}) async {
+      {String? verifyToken, String? firebaseIdToken}) async {
     final res = await _api.post('/auth/register', {
       'phone': phone,
       'email': email,
       'password': password,
       'displayName': displayName,
+      if (verifyToken != null) 'verifyToken': verifyToken,
       if (firebaseIdToken != null) 'firebaseIdToken': firebaseIdToken,
     });
     await _handleAuthSuccess(res);
+  }
+
+  /// Ask the server to text a one-time verification code to [phone]. Returns the
+  /// decoded response: `{ expiresIn, devCode?, warning? }`. `devCode` is only
+  /// present when the server runs the test ('log') SMS provider.
+  Future<Map<String, dynamic>> requestPhoneCode(String phone) async {
+    final res = await _api.post('/auth/request-code', {'phone': phone});
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Confirm an SMS [code] for [phone]; returns a short-lived verification token
+  /// to pass to [register].
+  Future<String> verifyPhoneCode(String phone, String code) async {
+    final res = await _api.post('/auth/verify-code', {
+      'phone': phone,
+      'code': code,
+    });
+    return (res as Map)['verifyToken'] as String;
   }
 
   /// Log in with email or phone number + password.
@@ -213,12 +274,48 @@ class AppState extends ChangeNotifier {
   Future<void> _afterSignIn() async {
     _socket.connect(baseUrl, _api.token!);
     await notifications.requestPermission();
+    await _registerPushToken();
     await loadChats();
     await loadBlocks();
     await loadStatus();
   }
 
+  // ---- Push notifications --------------------------------------------------
+
+  void _onPushToken(String token) {
+    _pushToken = token;
+    _registerPushToken();
+  }
+
+  /// Tell the server about this device's FCM token so it can push new messages
+  /// and announcements when the app isn't open. No-op until we're signed in.
+  Future<void> _registerPushToken() async {
+    final t = _pushToken;
+    if (t == null || status != AuthStatus.signedIn || _api.token == null) return;
+    try {
+      await _api.post('/push/token', {'token': t, 'platform': 'android'});
+    } catch (_) {
+      // Push is best-effort; a failed registration shouldn't block sign-in.
+    }
+  }
+
+  Future<void> _unregisterPushToken() async {
+    final t = _pushToken ?? await push.currentToken();
+    if (t == null || _api.token == null) return;
+    try {
+      await _api.delete('/push/token', {'token': t});
+    } catch (_) {
+      // Ignore — the token will eventually be pruned server-side if stale.
+    }
+  }
+
   Future<void> logout() async {
+    await _unregisterPushToken();
+    await localStore.clearAll();
+    await starredStore.clearAll();
+    starredIds.clear();
+    _pinnedChats.clear();
+    _loadedChats.clear();
     _socket.disconnect();
     await _clearToken();
     await tts.stop();
@@ -284,6 +381,228 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- Chat wallpapers -----------------------------------------------------
+
+  void _loadChatWallpapers(SharedPreferences prefs) {
+    _chatWallpapers.clear();
+    final raw = prefs.getString(_kChatWallpapers);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      map.forEach((k, v) => _chatWallpapers[k] = v.toString());
+    } catch (_) {
+      /* corrupt — ignore */
+    }
+  }
+
+  /// The wallpaper spec in effect for a chat: its own override if set, else the
+  /// global one.
+  WallpaperSpec wallpaperFor(String chatId) {
+    final override = _chatWallpapers[chatId];
+    if (override != null) return WallpaperSpec.decode(override);
+    return WallpaperSpec.decode(settings.wallpaperSpec);
+  }
+
+  bool hasChatWallpaper(String chatId) => _chatWallpapers.containsKey(chatId);
+
+  /// Set (or, with null, clear) a per-chat wallpaper override.
+  Future<void> setChatWallpaper(String chatId, WallpaperSpec? spec) async {
+    if (spec == null) {
+      _chatWallpapers.remove(chatId);
+    } else {
+      _chatWallpapers[chatId] = spec.encode();
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kChatWallpapers, jsonEncode(_chatWallpapers));
+    notifyListeners();
+  }
+
+  /// Set the global default wallpaper used by every chat without an override.
+  Future<void> setGlobalWallpaper(WallpaperSpec spec) async {
+    await updateSettings(settings.copyWith(wallpaperSpec: spec.encode()));
+  }
+
+  // ---- Pinned chats --------------------------------------------------------
+
+  void _loadPinnedChats(SharedPreferences prefs) {
+    _pinnedChats.clear();
+    final raw = prefs.getStringList(_kPinnedChats);
+    if (raw != null) _pinnedChats.addAll(raw);
+  }
+
+  bool isPinned(String chatId) => _pinnedChats.contains(chatId);
+
+  /// Pin/unpin a chat to the top of the list (kept on this device only).
+  Future<void> togglePin(String chatId) async {
+    if (!_pinnedChats.remove(chatId)) _pinnedChats.add(chatId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kPinnedChats, _pinnedChats.toList());
+    _sortChats();
+    notifyListeners();
+  }
+
+  // ---- Starred ("Gespeichert") messages ------------------------------------
+
+  bool isStarred(String messageId) => starredIds.contains(messageId);
+
+  /// Bookmark or un-bookmark a message; the snapshot is stored on-device.
+  Future<void> toggleStar(Message message, String chatTitle) async {
+    final nowStarred = await starredStore.toggle(message, chatTitle);
+    if (nowStarred) {
+      starredIds.add(message.id);
+    } else {
+      starredIds.remove(message.id);
+    }
+    notifyListeners();
+  }
+
+  Future<List<StarredMessage>> starredMessages() => starredStore.load();
+
+  Future<void> unstar(String messageId) async {
+    await starredStore.remove(messageId);
+    starredIds.remove(messageId);
+    notifyListeners();
+  }
+
+  // ---- Forwarding ----------------------------------------------------------
+
+  /// Forward a message (text or media) to one or more chats. Media is re-sent by
+  /// reference to the same uploaded attachment, so nothing is uploaded twice.
+  Future<void> forwardMessage(Message m, List<String> chatIds) async {
+    for (final chatId in chatIds) {
+      if (m.attachment != null) {
+        await sendAttachment(chatId, m.attachment!,
+            caption: m.body.trim().isNotEmpty ? m.body.trim() : null);
+      } else if (m.body.trim().isNotEmpty) {
+        await sendMessage(chatId, m.body);
+      }
+    }
+  }
+
+  // ---- Appearance / design -------------------------------------------------
+
+  /// The active design (preset or custom seed colour) driving the whole theme.
+  PingDesign get design =>
+      designById(settings.designId, customColor: settings.customColor);
+
+  Future<void> setDesign(PingDesign d) async {
+    await updateSettings(settings.copyWith(
+      designId: d.id,
+      clearCustomColor: d.id != 'custom',
+    ));
+  }
+
+  /// Pick any colour as a custom design seed.
+  Future<void> setCustomColor(Color color) async {
+    await updateSettings(settings.copyWith(
+      designId: 'custom',
+      customColor: color.toARGB32(),
+    ));
+  }
+
+  // ---- Message storage mode ------------------------------------------------
+
+  bool get localStorageOnly => me?.messageStorage == 'local';
+
+  /// Switch between 'server' (keep history) and 'local' (server purges your sent
+  /// messages once everyone has read them; this device keeps the copy).
+  Future<void> setMessageStorage(String mode) async {
+    final res = await _api.post('/me/message-storage', {'mode': mode});
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    notifyListeners();
+  }
+
+  // ---- Backup / export -----------------------------------------------------
+
+  /// Download the full account + chat history from the server and write it to a
+  /// JSON file on the device. Returns the saved file path.
+  Future<String> exportDataToFile() async {
+    final data = await _api.get('/me/export');
+    final dir = await getApplicationDocumentsDirectory();
+    final ts = DateTime.now()
+        .toIso8601String()
+        .replaceAll(RegExp(r'[:.]'), '-')
+        .split('-')
+        .take(5)
+        .join('-');
+    final file = File('${dir.path}/ping-backup-$ts.json');
+    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
+    return file.path;
+  }
+
+  // ---- Debug chat (*0111) --------------------------------------------------
+
+  /// Handle a command typed into the hidden debug chat (reached by starting a
+  /// chat with `*0111`). Returns non-sensitive diagnostic info only — never
+  /// tokens, passwords or other secrets.
+  Future<String> debugCommand(String raw) async {
+    final cmd = raw.trim().toLowerCase();
+    switch (cmd) {
+      case '/help':
+      case 'help':
+      case '?':
+        return 'Verfügbare Befehle:\n'
+            '/me — dein Konto\n'
+            '/app — App & Einstellungen\n'
+            '/server — Server & Verbindung\n'
+            '/chats — Chat-Statistik\n'
+            '/push — Benachrichtigungen\n'
+            '/ping — Server-Latenz messen\n'
+            '/help — diese Übersicht';
+      case '/me':
+        final m = me;
+        if (m == null) return 'Nicht angemeldet.';
+        return '👤 Konto\n'
+            'Name: ${m.displayName}\n'
+            'Telefon: ${m.phone}\n'
+            'ID: ${m.id}\n'
+            'Admin: ${m.isAdmin ? 'ja' : 'nein'}\n'
+            'Profilbild: ${m.hasAvatar ? 'gesetzt' : 'keins'}\n'
+            'Info: ${m.about.isEmpty ? '—' : m.about}';
+      case '/app':
+        final s = settings;
+        return '📱 App\n'
+            'Design: ${design.name}\n'
+            'Hintergrund: ${WallpaperSpec.decode(s.wallpaperSpec).kind.name}\n'
+            'Schriftgröße: ${(s.fontScale * 100).round()}%\n'
+            'Mit Enter senden: ${s.enterToSend ? 'an' : 'aus'}\n'
+            'Benachrichtigungen: ${s.notificationsEnabled ? 'an' : 'aus'}\n'
+            'Vorlesen: ${s.ttsEnabled ? 'an' : 'aus'}\n'
+            'Eigene Chat-Hintergründe: ${_chatWallpapers.length}';
+      case '/server':
+        final h = await _api.health();
+        return '🌐 Server\n'
+            'Adresse: $baseUrl\n'
+            'Live-Verbindung: ${socketConnected ? 'verbunden' : 'getrennt'}\n'
+            'Erreichbar: ${h != null ? 'ja' : 'nein'}\n'
+            'Version: ${h?['version'] ?? 'unbekannt'}';
+      case '/chats':
+        final groups = chats.where((c) => c.isGroup).length;
+        final direct = chats.where((c) => !c.isGroup).length;
+        return '💬 Chats\n'
+            'Gesamt: ${chats.length}\n'
+            'Direkt: $direct\n'
+            'Gruppen: $groups\n'
+            'Status-Updates anderer: ${statusOthers.length}\n'
+            'Eigene Status: ${statusMine.length}\n'
+            'Blockiert: ${blockedIds.length}';
+      case '/push':
+        final token = await push.currentToken();
+        return '🔔 Benachrichtigungen\n'
+            'Push-Token: ${token != null && token.isNotEmpty ? 'registriert' : 'keins'}\n'
+            'Lokale Hinweise: ${settings.notificationsEnabled ? 'an' : 'aus'}';
+      case '/ping':
+        final sw = Stopwatch()..start();
+        final h = await _api.health();
+        sw.stop();
+        return h != null
+            ? '🏓 Server in ${sw.elapsedMilliseconds} ms erreicht.'
+            : '🏓 Server nicht erreichbar (${sw.elapsedMilliseconds} ms Timeout).';
+      default:
+        return 'Unbekannter Befehl: "$raw"\nTippe /help für die Übersicht.';
+    }
+  }
+
   Future<void> updateProfile(
       {String? displayName, String? about, String? avatarColor}) async {
     final res = await _api.patch('/me', {
@@ -344,6 +663,15 @@ class AppState extends ChangeNotifier {
 
   Future<List<Message>> loadMessages(String chatId, {bool reset = false}) async {
     final existing = _messages[chatId] ?? [];
+    // On a fresh open, show the on-device cache immediately (instant + offline),
+    // then reconcile with the server below.
+    if (reset && existing.isEmpty) {
+      final cached = await localStore.load(chatId);
+      if (cached.isNotEmpty) {
+        _messages[chatId] = cached;
+        notifyListeners();
+      }
+    }
     final before =
         (!reset && existing.isNotEmpty) ? existing.first.createdAt : null;
     final res = await _api.get('/chats/$chatId/messages', {
@@ -354,12 +682,39 @@ class AppState extends ChangeNotifier {
         .map((e) => Message.fromJson(e as Map<String, dynamic>))
         .toList();
     if (reset) {
-      _messages[chatId] = fetched;
+      // Merge with the local cache so messages the server has already purged
+      // (in "nur lokal" storage mode) still show from this device's copy.
+      _messages[chatId] = _mergeMessages(fetched, await localStore.load(chatId));
     } else {
-      _messages[chatId] = [...fetched, ...existing];
+      _messages[chatId] = _mergeMessages([...fetched, ...existing], const []);
     }
+    _loadedChats.add(chatId);
+    _persistLocal(chatId);
     notifyListeners();
     return fetched;
+  }
+
+  /// Combine message lists, de-duped by id (server copy wins) and sorted oldest
+  /// first.
+  List<Message> _mergeMessages(List<Message> primary, List<Message> extra) {
+    final byId = <String, Message>{};
+    for (final m in primary) {
+      byId[m.id] = m;
+    }
+    for (final m in extra) {
+      byId.putIfAbsent(m.id, () => m);
+    }
+    final all = byId.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return all;
+  }
+
+  void _persistLocal(String chatId) {
+    // Only persist chats we've fully loaded, so a stray incoming message for a
+    // not-yet-opened chat can't overwrite its cached history with a stub.
+    if (!_loadedChats.contains(chatId)) return;
+    final list = _messages[chatId];
+    if (list != null) localStore.save(chatId, list);
   }
 
   /// Optimistically append the message, then reconcile with the server.
@@ -488,6 +843,43 @@ class AppState extends ChangeNotifier {
     final res = await _api.delete('/chats/$chatId/messages/$messageId');
     _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
     notifyListeners();
+  }
+
+  /// Toggle an emoji reaction on a message. Optimistically updates the local
+  /// counts; the server also broadcasts a `message-updated` event that
+  /// reconciles every device.
+  Future<void> toggleReaction(
+      String chatId, String messageId, String emoji) async {
+    final list = _messages[chatId];
+    if (list != null) {
+      final i = list.indexWhere((m) => m.id == messageId);
+      if (i != -1) {
+        final m = list[i];
+        final counts = Map<String, int>.from(m.reactions);
+        final mine = Set<String>.from(m.myReactions);
+        if (mine.contains(emoji)) {
+          mine.remove(emoji);
+          final n = (counts[emoji] ?? 1) - 1;
+          if (n <= 0) {
+            counts.remove(emoji);
+          } else {
+            counts[emoji] = n;
+          }
+        } else {
+          mine.add(emoji);
+          counts[emoji] = (counts[emoji] ?? 0) + 1;
+        }
+        list[i] = m.copyWith(reactions: counts, myReactions: mine);
+        notifyListeners();
+      }
+    }
+    try {
+      await _api.post('/chats/$chatId/messages/$messageId/reactions', {
+        'emoji': emoji,
+      });
+    } catch (_) {
+      // The server broadcast (message-updated) will correct any drift; ignore.
+    }
   }
 
   Future<Chat> openDirectChat(PingUser user) async {
@@ -922,6 +1314,7 @@ class AppState extends ChangeNotifier {
     final list = _messages.putIfAbsent(msg.chatId, () => []);
     if (list.any((m) => m.id == msg.id)) return; // de-dupe
     list.add(msg);
+    _persistLocal(msg.chatId);
   }
 
   void _replaceMessage(Message msg) {
@@ -933,6 +1326,7 @@ class AppState extends ChangeNotifier {
     if (ci != -1 && chats[ci].lastMessage?.id == msg.id) {
       chats[ci].lastMessage = msg;
     }
+    _persistLocal(msg.chatId);
   }
 
   void _bumpChat(String chatId, Message msg) {
@@ -955,8 +1349,12 @@ class AppState extends ChangeNotifier {
 
   void _sortChats() {
     chats.sort((a, b) {
-      // The "note to self" chat is pinned to the very top.
+      // The "note to self" chat sits at the very top.
       if (a.self != b.self) return a.self ? -1 : 1;
+      // Then pinned chats, above everything else.
+      final ap = isPinned(a.id);
+      final bp = isPinned(b.id);
+      if (ap != bp) return ap ? -1 : 1;
       final at = a.lastMessage?.createdAt ?? a.updatedAt;
       final bt = b.lastMessage?.createdAt ?? b.updatedAt;
       return bt.compareTo(at);

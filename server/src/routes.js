@@ -1,18 +1,25 @@
+import os from 'node:os';
 import express, { Router } from 'express';
 import {
   hashPassword,
   verifyPassword,
   signToken,
+  signPhoneToken,
+  verifyPhoneToken,
   requireAuth,
   requireAdmin,
 } from './auth.js';
 import { config } from './config.js';
 import { normalizePhone } from './phone.js';
+import { verifyFirebaseIdToken } from './firebaseAuth.js';
+import { requestCode, verifyCode } from './otp.js';
 import { detectImageMime, saveAvatar, readAvatar, deleteAvatar } from './avatars.js';
 import {
   parse,
   registerSchema,
   loginSchema,
+  requestCodeSchema,
+  verifyCodeSchema,
   updateProfileSchema,
   securitySchema,
   messageBodySchema,
@@ -22,9 +29,12 @@ import {
   lookupSchema,
   matchSchema,
   createGroupChatSchema,
+  reactionSchema,
   adminCreateSchema,
   adminUpdateSchema,
   adminBroadcastSchema,
+  pushTokenSchema,
+  messageStorageSchema,
 } from './validation.js';
 import {
   createUser,
@@ -36,7 +46,10 @@ import {
   setEmail,
   setPassword,
   setName,
+  setAbout,
   setAdmin,
+  setDisabled,
+  setMessageStorage,
   deleteUser,
   countUsers,
   countChats,
@@ -44,6 +57,17 @@ import {
   countMessages,
   countActiveStatuses,
   countAdmins,
+  countUsersSince,
+  countMessagesSince,
+  countPushTokens,
+  countBlocks,
+  countUploads,
+  totalUploadBytes,
+  usersPerDay,
+  messagesPerDay,
+  userActivity,
+  recordBroadcast,
+  listBroadcasts,
   listUsers,
   matchContacts,
   blockUser,
@@ -60,20 +84,29 @@ import {
   getChat,
   isMember,
   getMemberIds,
+  getMembers,
+  getMemberRole,
   getPeerIds,
   addMember,
   removeMember,
   setMuted,
+  updateGroupMeta,
+  setChatAvatar,
   getUserChats,
   chatView,
   createMessage,
   getMessage,
   editMessage,
   deleteMessage,
+  toggleReaction,
   getHistory,
   messageView,
   markChatRead,
+  messageReceipts,
   detachCreatedChats,
+  adminListChats,
+  adminDeleteChat,
+  adminChatMessages,
 } from './chatRepo.js';
 import {
   saveUpload,
@@ -93,6 +126,13 @@ import {
   statusViewers,
 } from './statusRepo.js';
 import { broadcastToChat, sendToUser, isOnline, onlineUserIds } from './hub.js';
+import { sendPushToUsers } from './push.js';
+import { listBackups, backupNow } from './backup.js';
+import {
+  savePushToken,
+  removeUserPushToken,
+  allPushTokens,
+} from './pushRepo.js';
 
 export const router = Router();
 
@@ -111,7 +151,110 @@ function broadcastProfile(user) {
   }
 }
 
+// A short, notification-friendly preview of a message (no message body leaks
+// for media — just an icon + label, matching the in-app preview style).
+function messagePreview(msg) {
+  const text = (msg.body || '').trim();
+  if (text) return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  const att = msg.attachment
+    ? typeof msg.attachment === 'string'
+      ? JSON.parse(msg.attachment)
+      : msg.attachment
+    : null;
+  const kind = att?.kind || msg.type;
+  switch (kind) {
+    case 'image':
+      return '📷 Foto';
+    case 'gif':
+      return '🎬 GIF';
+    case 'video':
+      return '🎥 Video';
+    case 'voice':
+    case 'audio':
+      return '🎤 Sprachnachricht';
+    case 'file':
+      return '📎 Datei';
+    default:
+      return 'Neue Nachricht';
+  }
+}
+
+// Send a push to chat members who don't have the app open (no live socket) and
+// haven't muted the chat — so a new message still pings their phone. The sender
+// and anyone currently connected over WebSocket are skipped (they already get
+// it live / are looking at the app). Fire-and-forget.
+function pushForMessage(chat, msg, senderId) {
+  const sender = getUserById(senderId);
+  const isGroup = chat.type === 'group';
+  const targets = getMembers(chat.id)
+    .filter((m) => m.user_id !== senderId && !m.muted && !isOnline(m.user_id))
+    .map((m) => m.user_id);
+  if (targets.length === 0) return;
+  const senderName = sender?.display_name || 'Ping';
+  const preview = messagePreview(msg);
+  const title = isGroup ? chat.name || 'Gruppe' : senderName;
+  const body = isGroup ? `${senderName}: ${preview}` : preview;
+  sendPushToUsers(targets, {
+    title,
+    body,
+    data: {
+      type: 'message',
+      chatId: chat.id,
+      messageId: msg.id,
+      senderId,
+    },
+  }).catch(() => {});
+}
+
 // ---- Auth ------------------------------------------------------------------
+
+// Send a one-time SMS code to a phone number (server-side verification). With
+// the default 'log' SMS provider the code comes back in `devCode` so the flow is
+// testable without a paid gateway; wire up SMS_PROVIDER=twilio|http to send real
+// texts. See server/.env.example.
+router.post(
+  '/auth/request-code',
+  h(async (req, res) => {
+    const { phone } = parse(requestCodeSchema, req.body);
+    const normalized = normalizePhone(phone);
+    if (!normalized) {
+      return res.status(400).json({
+        error:
+          'Diese Handynummer können wir nicht erkennen. Probier es im Format +43 660 1234567.',
+      });
+    }
+    const result = await requestCode(normalized);
+    if (!result.ok) {
+      return res.status(429).json({
+        error: `Bitte warte ${result.retryInSec}s, bevor du einen neuen Code anforderst.`,
+        retryInSec: result.retryInSec,
+      });
+    }
+    res.json({
+      ok: true,
+      phone: normalized,
+      expiresIn: result.expiresInSec,
+      ...(result.devCode ? { devCode: result.devCode } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
+    });
+  })
+);
+
+// Check an SMS code and, on success, hand back a short-lived verification token
+// that /auth/register accepts as proof the number belongs to this device.
+router.post(
+  '/auth/verify-code',
+  h(async (req, res) => {
+    const { phone, code } = parse(verifyCodeSchema, req.body);
+    const normalized = normalizePhone(phone);
+    if (!normalized || !verifyCode(normalized, code)) {
+      return res
+        .status(400)
+        .json({ error: 'Der Code stimmt nicht oder ist abgelaufen.' });
+    }
+    res.json({ ok: true, phone: normalized, verifyToken: signPhoneToken(normalized) });
+  })
+);
 
 // Register straight away — phone, email and password, no verification step.
 router.post(
@@ -135,6 +278,46 @@ router.post(
         .status(409)
         .json({ error: 'Diese E-Mail-Adresse ist schon registriert.' });
     }
+    // Proof that the number really belongs to this device. Two accepted forms:
+    //   1. A server verification token from the SMS OTP flow (/auth/verify-code).
+    //   2. A Firebase phone-auth ID token (Play Integrity-backed on Android).
+    // Whether proof is mandatory is controlled by REQUIRE_PHONE_VERIFICATION.
+    const verifyTokenStr =
+      typeof req.body?.verifyToken === 'string' ? req.body.verifyToken : null;
+    const firebaseIdToken =
+      typeof req.body?.firebaseIdToken === 'string'
+        ? req.body.firebaseIdToken
+        : null;
+    let phoneVerified = false;
+    if (verifyTokenStr) {
+      const vphone = verifyPhoneToken(verifyTokenStr);
+      if (!vphone || normalizePhone(vphone) !== normalized) {
+        return res.status(400).json({
+          error: 'Die verifizierte Nummer passt nicht zur angegebenen Nummer.',
+        });
+      }
+      phoneVerified = true;
+    } else if (firebaseIdToken) {
+      try {
+        const payload = await verifyFirebaseIdToken(firebaseIdToken);
+        const verified = normalizePhone(payload.phone_number || '');
+        if (!verified || verified !== normalized) {
+          return res.status(400).json({
+            error: 'Die verifizierte Nummer passt nicht zur angegebenen Nummer.',
+          });
+        }
+        phoneVerified = true;
+      } catch {
+        return res.status(401).json({
+          error: 'Die Telefon-Verifizierung ist ungültig oder abgelaufen.',
+        });
+      }
+    }
+    if (!phoneVerified && config.requirePhoneVerification) {
+      return res.status(401).json({
+        error: 'Bitte verifiziere zuerst deine Telefonnummer.',
+      });
+    }
     const passwordHash = await hashPassword(password);
     const user = createUser({ phone: normalized, email, passwordHash, displayName });
     res.status(201).json({ token: signToken(user), user: privateUser(user) });
@@ -155,6 +338,9 @@ router.post(
       return res
         .status(401)
         .json({ error: 'Nummer/E-Mail oder Passwort stimmt nicht.' });
+    }
+    if (user.disabled) {
+      return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
     }
     res.json({ token: signToken(user), user: privateUser(user) });
   })
@@ -371,6 +557,8 @@ router.get(
   '/chats',
   requireAuth,
   h(async (req, res) => {
+    // Everyone always has a "note to self" chat available by default.
+    getOrCreateDirectChat(req.user.id, req.user.id);
     const chats = getUserChats(req.user.id)
       .map((c) => chatView(c, req.user.id))
       .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -396,10 +584,11 @@ router.post(
         .status(404)
         .json({ error: 'Diese Person ist (noch) nicht bei Ping. Lade sie ein!' });
     }
-    if (other.id === req.user.id) {
-      return res.status(400).json({ error: 'Mit dir selbst kannst du nicht chatten.' });
-    }
+    // A chat with yourself ("Notiz an mich") is allowed and useful — note,
+    // forward, save things to yourself, just like WhatsApp.
     const chat = getOrCreateDirectChat(req.user.id, other.id);
+    // For a real peer, let them know; for a self-chat this just syncs our own
+    // other devices (idempotent on the client).
     sendToUser(other.id, 'chat-created', { chat: chatView(chat, other.id) });
     res.status(201).json({ chat: chatView(chat, req.user.id) });
   })
@@ -437,6 +626,27 @@ function memberGuard(req, res, next) {
   }
   req.chat = chat;
   next();
+}
+
+// For group-management actions: must be a group and the caller must be its
+// owner (admin). Writes the error response and returns false when not allowed.
+function requireGroupOwner(req, res) {
+  if (req.chat.type !== 'group') {
+    res.status(400).json({ error: 'Das geht nur in Gruppen.' });
+    return false;
+  }
+  if (getMemberRole(req.chat.id, req.user.id) !== 'owner') {
+    res.status(403).json({ error: 'Das dürfen nur Gruppen-Admins.' });
+    return false;
+  }
+  return true;
+}
+
+// Push the freshened chat view to every member (clients upsert it).
+function broadcastChatUpdate(chat) {
+  for (const memberId of getMemberIds(chat.id)) {
+    sendToUser(memberId, 'chat-created', { chat: chatView(chat, memberId) });
+  }
 }
 
 router.get(
@@ -506,6 +716,7 @@ router.post(
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
     }
+    pushForMessage(req.chat, msg, req.user.id);
     res.status(201).json({ message: messageView(msg, req.user.id) });
   })
 );
@@ -554,6 +765,27 @@ router.delete(
   })
 );
 
+// Toggle an emoji reaction on a message. Broadcasts the updated message to the
+// whole chat (reusing the standard message-updated event), so reaction chips
+// appear live for everyone.
+router.post(
+  '/chats/:id/messages/:msgId/reactions',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const { emoji } = parse(reactionSchema, req.body);
+    const { added } = toggleReaction(msg.id, req.user.id, emoji);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ ok: true, added, message: messageView(msg, req.user.id) });
+  })
+);
+
 router.post(
   '/chats/:id/read',
   requireAuth,
@@ -561,6 +793,34 @@ router.post(
   h(async (req, res) => {
     markChatRead(req.chat.id, req.user.id);
     res.json({ ok: true });
+  })
+);
+
+// "Message info": who received/read one of *your own* messages, and when.
+// Only the author may see this (just like WhatsApp's message info).
+router.get(
+  '/chats/:id/messages/:msgId/receipts',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    if (msg.sender_id !== req.user.id) {
+      return res
+        .status(403)
+        .json({ error: 'Die Lese-Info sieht nur der Absender.' });
+    }
+    const receipts = messageReceipts(msg.id)
+      .map((r) => {
+        const u = getUserById(r.user_id);
+        return u
+          ? { user: publicUser(u), deliveredAt: r.delivered_at, readAt: r.read_at }
+          : null;
+      })
+      .filter(Boolean);
+    res.json({ receipts });
   })
 );
 
@@ -602,6 +862,138 @@ router.post(
       }
     }
     res.json({ added: added.map(publicUser) });
+  })
+);
+
+// Rename a group and/or change its description (owner only).
+router.patch(
+  '/chats/:id',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!requireGroupOwner(req, res)) return;
+    const name =
+      typeof req.body?.name === 'string' ? req.body.name.trim() : undefined;
+    const description =
+      typeof req.body?.description === 'string'
+        ? req.body.description.trim()
+        : undefined;
+    if (name !== undefined && (name.length < 1 || name.length > 80)) {
+      return res
+        .status(400)
+        .json({ error: 'Der Gruppenname muss 1–80 Zeichen haben.' });
+    }
+    if (description !== undefined && description.length > 500) {
+      return res
+        .status(400)
+        .json({ error: 'Die Beschreibung darf höchstens 500 Zeichen haben.' });
+    }
+    const renamed = name !== undefined && name !== req.chat.name;
+    const updated = updateGroupMeta(req.chat.id, { name, description });
+    if (renamed) {
+      const sys = createMessage({
+        chatId: req.chat.id,
+        senderId: req.user.id,
+        type: 'system',
+        body: `${req.user.display_name} hat die Gruppe in „${name}" umbenannt.`,
+      });
+      for (const memberId of getMemberIds(req.chat.id)) {
+        sendToUser(memberId, 'message', { message: messageView(sys, memberId) });
+      }
+    }
+    broadcastChatUpdate(updated);
+    res.json({ chat: chatView(updated, req.user.id) });
+  })
+);
+
+// Set the group picture (owner only). Raw image bytes in the body.
+router.post(
+  '/chats/:id/avatar',
+  requireAuth,
+  memberGuard,
+  express.raw({ type: () => true, limit: config.maxAvatarBytes }),
+  h(async (req, res) => {
+    if (!requireGroupOwner(req, res)) return;
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'Kein Bild empfangen.' });
+    }
+    const mime = detectImageMime(buf);
+    if (!mime) {
+      return res
+        .status(400)
+        .json({ error: 'Nur JPG-, PNG- oder WebP-Bilder werden unterstützt.' });
+    }
+    // Group avatars share the avatar store but live under a "chat_" key so they
+    // can never collide with a user's avatar file.
+    saveAvatar(`chat_${req.chat.id}`, buf);
+    const updated = setChatAvatar(req.chat.id, mime);
+    broadcastChatUpdate(updated);
+    res.json({ chat: chatView(updated, req.user.id) });
+  })
+);
+
+router.delete(
+  '/chats/:id/avatar',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!requireGroupOwner(req, res)) return;
+    deleteAvatar(`chat_${req.chat.id}`);
+    const updated = setChatAvatar(req.chat.id, null);
+    broadcastChatUpdate(updated);
+    res.json({ chat: chatView(updated, req.user.id) });
+  })
+);
+
+// Serve a group picture (any member may view it).
+router.get(
+  '/chats/:id/avatar',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!req.chat.avatar_mime) {
+      return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    }
+    const buf = readAvatar(`chat_${req.chat.id}`);
+    if (!buf) return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    res.set('Content-Type', req.chat.avatar_mime);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.send(buf);
+  })
+);
+
+// Remove a member from a group (owner only).
+router.delete(
+  '/chats/:id/members/:userId',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!requireGroupOwner(req, res)) return;
+    const targetId = req.params.userId;
+    if (targetId === req.user.id) {
+      return res.status(400).json({
+        error: 'Dich selbst kannst du nicht entfernen — verlasse die Gruppe.',
+      });
+    }
+    if (!isMember(req.chat.id, targetId)) {
+      return res.status(404).json({ error: 'Diese Person ist nicht in der Gruppe.' });
+    }
+    const target = getUserById(targetId);
+    const sys = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'system',
+      body: `${req.user.display_name} hat ${target?.display_name || 'jemanden'} entfernt.`,
+    });
+    // Notify everyone (incl. the soon-to-be-removed member) of the system note.
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(sys, memberId) });
+    }
+    removeMember(req.chat.id, targetId);
+    sendToUser(targetId, 'chat-removed', { chatId: req.chat.id });
+    broadcastChatUpdate(req.chat);
+    res.json({ ok: true });
   })
 );
 
@@ -697,7 +1089,10 @@ router.post(
       req.body || {}
     );
     const att = attachment
-      ? { ...attachment, kind: attachment.kind || 'image' }
+      ? {
+          ...attachment,
+          kind: attachment.kind || (type === 'video' ? 'video' : 'image'),
+        }
       : null;
     const row = createStatus({
       userId: req.user.id,
@@ -819,6 +1214,71 @@ router.post(
   })
 );
 
+// ---- Message storage preference -------------------------------------------
+
+// Switch between keeping message history on the server (default) and "nur
+// lokal": the server purges your sent messages once every recipient has read
+// them, and your device keeps the only copy.
+router.post(
+  '/me/message-storage',
+  requireAuth,
+  h(async (req, res) => {
+    const { mode } = parse(messageStorageSchema, req.body);
+    const updated = setMessageStorage(req.user.id, mode);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+// ---- Data export (personal backup) ----------------------------------------
+
+// Download everything the signed-in user can see: their account plus every
+// chat they're in with its message history. A personal, portable backup.
+router.get(
+  '/me/export',
+  requireAuth,
+  h(async (req, res) => {
+    const uid = req.user.id;
+    const chatsOut = [];
+    for (const chat of getUserChats(uid)) {
+      const messages = getHistory(chat.id, { limit: 10000 }).map((m) =>
+        messageView(m, uid)
+      );
+      chatsOut.push({ chat: chatView(chat, uid), messages });
+    }
+    res.json({
+      exportedAt: Date.now(),
+      account: privateUser(getUserById(uid)),
+      chats: chatsOut,
+    });
+  })
+);
+
+// ---- Push notification tokens ---------------------------------------------
+
+// Register (or refresh) this device's FCM token so the server can push new
+// messages / announcements when the app isn't open.
+router.post(
+  '/push/token',
+  requireAuth,
+  h(async (req, res) => {
+    const { token, platform } = parse(pushTokenSchema, req.body);
+    savePushToken(token, req.user.id, platform || 'android');
+    res.json({ ok: true });
+  })
+);
+
+// Drop a token (logout / notifications disabled). Removing by value is enough;
+// scope it to the user so one account can't delete another's token.
+router.delete(
+  '/push/token',
+  requireAuth,
+  h(async (req, res) => {
+    const { token } = parse(pushTokenSchema, req.body);
+    removeUserPushToken(req.user.id, token);
+    res.json({ ok: true });
+  })
+);
+
 // ---- Admin portal API (admin token or a signed-in admin user) --------------
 
 router.get(
@@ -837,17 +1297,141 @@ router.get(
   })
 );
 
-// Push a live announcement to everyone who is currently connected.
+// Rich dashboard payload: headline counters, 7-day activity series and live
+// system health — everything the admin overview tab renders in one round-trip.
+router.get(
+  '/admin/overview',
+  requireAdmin,
+  h(async (_req, res) => {
+    const day = 86_400_000;
+    const tNow = Date.now();
+    res.json({
+      stats: {
+        users: countUsers(),
+        online: onlineUserIds().length,
+        admins: countAdmins(),
+        chats: countChats(),
+        groups: countGroups(),
+        messages: countMessages(),
+        statuses: countActiveStatuses(),
+        pushTokens: countPushTokens(),
+        blocks: countBlocks(),
+        uploads: countUploads(),
+        uploadBytes: totalUploadBytes(),
+        newUsers24h: countUsersSince(tNow - day),
+        newUsers7d: countUsersSince(tNow - 7 * day),
+        messages24h: countMessagesSince(tNow - day),
+        messages7d: countMessagesSince(tNow - 7 * day),
+      },
+      charts: {
+        usersPerDay: usersPerDay(7),
+        messagesPerDay: messagesPerDay(7),
+      },
+      system: systemHealth(),
+    });
+  })
+);
+
+function systemHealth() {
+  const mem = process.memoryUsage();
+  return {
+    version: '2.0.0',
+    node: process.version,
+    platform: `${os.type()} ${os.release()}`,
+    uptimeSec: Math.round(process.uptime()),
+    rssMb: Math.round(mem.rss / 1024 / 1024),
+    heapMb: Math.round(mem.heapUsed / 1024 / 1024),
+    loadAvg: os.loadavg().map((n) => Math.round(n * 100) / 100),
+    totalMemMb: Math.round(os.totalmem() / 1024 / 1024),
+    freeMemMb: Math.round(os.freemem() / 1024 / 1024),
+    smsProvider: config.smsProvider,
+    pushEnabled: allPushTokens().length >= 0, // table exists; FCM gating is separate
+    requirePhoneVerification: config.requirePhoneVerification,
+  };
+}
+
+router.get(
+  '/admin/system',
+  requireAdmin,
+  h(async (_req, res) => res.json({ system: systemHealth(), backups: listBackups().length }))
+);
+
+// Push a live announcement to everyone who is currently connected, AND a phone
+// push notification to everyone who isn't (so admin messages reach people even
+// when the app is closed).
 router.post(
   '/admin/broadcast',
   requireAdmin,
   h(async (req, res) => {
     const { title, body } = parse(adminBroadcastSchema, req.body);
-    const ids = onlineUserIds();
-    for (const id of ids) {
+    const online = new Set(onlineUserIds());
+    for (const id of online) {
       sendToUser(id, 'announcement', { title: title || 'Ping', body });
     }
-    res.json({ ok: true, delivered: ids.length });
+    // Push to offline devices (online users already saw the live announcement).
+    const offline = [
+      ...new Set(allPushTokens().map((r) => r.user_id)),
+    ].filter((id) => !online.has(id));
+    const pushed = await sendPushToUsers(offline, {
+      title: title || 'Ping',
+      body,
+      data: { type: 'announcement' },
+    });
+    recordBroadcast({ title: title || '', body, delivered: online.size, pushed });
+    res.json({ ok: true, delivered: online.size, pushed });
+  })
+);
+
+// Recent broadcasts (for the portal's "sent" history).
+router.get(
+  '/admin/broadcasts',
+  requireAdmin,
+  h(async (_req, res) => res.json({ broadcasts: listBroadcasts(30) }))
+);
+
+// ---- Admin: chat moderation ----
+router.get(
+  '/admin/chats',
+  requireAdmin,
+  h(async (req, res) => {
+    const q = (req.query.q || '').toString();
+    res.json({ chats: adminListChats(q) });
+  })
+);
+
+router.get(
+  '/admin/chats/:id/messages',
+  requireAdmin,
+  h(async (req, res) => {
+    const chat = getChat(req.params.id);
+    if (!chat) return res.status(404).json({ error: 'Diesen Chat gibt es nicht.' });
+    res.json({ messages: adminChatMessages(req.params.id, 50) });
+  })
+);
+
+router.delete(
+  '/admin/chats/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const ok = adminDeleteChat(req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Diesen Chat gibt es nicht.' });
+    res.status(204).end();
+  })
+);
+
+// List automatic DB backup snapshots, and trigger one on demand.
+router.get(
+  '/admin/backups',
+  requireAdmin,
+  h(async (_req, res) => res.json({ backups: listBackups() }))
+);
+
+router.post(
+  '/admin/backups',
+  requireAdmin,
+  h(async (_req, res) => {
+    const file = backupNow();
+    res.json({ ok: !!file, file: file ? file.split('/').pop() : null });
   })
 );
 
@@ -894,19 +1478,82 @@ router.post(
   })
 );
 
+// Detailed view of one user (activity counters + online state).
+router.get(
+  '/admin/users/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    res.json({
+      user: { ...adminUser(user), online: isOnline(user.id) },
+      activity: userActivity(user.id),
+    });
+  })
+);
+
 router.patch(
   '/admin/users/:id',
   requireAdmin,
   h(async (req, res) => {
-    const { displayName, password, isAdmin } = parse(adminUpdateSchema, req.body);
+    const { displayName, password, isAdmin, email, about, disabled } = parse(
+      adminUpdateSchema,
+      req.body
+    );
     let user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    if (email !== undefined) {
+      const existing = getUserByEmail(email);
+      if (existing && existing.id !== user.id) {
+        return res.status(409).json({ error: 'Diese E-Mail-Adresse wird schon verwendet.' });
+      }
+      user = setEmail(user.id, email);
+    }
     if (displayName !== undefined) user = setName(user.id, displayName);
+    if (about !== undefined) user = setAbout(user.id, about);
     if (isAdmin !== undefined) user = setAdmin(user.id, isAdmin);
+    if (disabled !== undefined) user = setDisabled(user.id, disabled);
     if (password !== undefined) {
       user = setPassword(user.id, await hashPassword(password));
     }
     res.json({ user: adminUser(user) });
+  })
+);
+
+// Send a direct announcement to one user (live + push) — admin "nudge".
+router.post(
+  '/admin/users/:id/message',
+  requireAdmin,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    const { title, body } = parse(adminBroadcastSchema, req.body);
+    sendToUser(user.id, 'announcement', { title: title || 'Ping', body });
+    const pushed = await sendPushToUsers([user.id], {
+      title: title || 'Ping',
+      body,
+      data: { type: 'announcement' },
+    });
+    res.json({ ok: true, pushed });
+  })
+);
+
+// Export all users as CSV (for backups / GDPR / spreadsheets).
+router.get(
+  '/admin/users.csv',
+  requireAdmin,
+  h(async (_req, res) => {
+    const rows = listUsers('').map((u) => adminUser(u));
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = 'id,name,phone,email,admin,disabled,created_at,last_seen';
+    const lines = rows.map((u) =>
+      [u.id, u.displayName, u.phone, u.email, u.isAdmin, u.disabled, new Date(u.createdAt).toISOString(), new Date(u.lastSeen).toISOString()]
+        .map(esc)
+        .join(',')
+    );
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="ping-users.csv"');
+    res.send([header, ...lines].join('\n'));
   })
 );
 

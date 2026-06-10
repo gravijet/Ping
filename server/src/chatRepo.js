@@ -12,9 +12,14 @@ const s = {
     VALUES (?, ?, ?, ?)`),
   removeMember: db.prepare('DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?'),
   isMember: db.prepare('SELECT 1 FROM chat_members WHERE chat_id = ? AND user_id = ?'),
-  members: db.prepare('SELECT user_id, role FROM chat_members WHERE chat_id = ?'),
+  members: db.prepare('SELECT user_id, role, muted FROM chat_members WHERE chat_id = ?'),
   memberIds: db.prepare('SELECT user_id FROM chat_members WHERE chat_id = ?'),
   setMuted: db.prepare('UPDATE chat_members SET muted = ? WHERE chat_id = ? AND user_id = ?'),
+  memberRole: db.prepare('SELECT role FROM chat_members WHERE chat_id = ? AND user_id = ?'),
+  setChatMeta: db.prepare('UPDATE chats SET name = ?, description = ? WHERE id = ?'),
+  setChatAvatarStmt: db.prepare(
+    'UPDATE chats SET avatar_mime = ?, avatar_version = avatar_version + 1 WHERE id = ?'
+  ),
   userChats: db.prepare(`
     SELECT c.* FROM chats c
     JOIN chat_members m ON m.chat_id = c.id
@@ -23,6 +28,15 @@ const s = {
 
 export function directKey(a, b) {
   return [a, b].sort().join(':');
+}
+
+// True for the "note to self" chat — a direct chat whose only participant is the
+// viewer. Detected via the direct_key (me:me) rather than "has no other member",
+// so a normal 1:1 whose peer deleted their account is NOT mistaken for a self-chat.
+export function isSelfChat(chat, viewerId) {
+  return (
+    chat.type === 'direct' && chat.direct_key === directKey(viewerId, viewerId)
+  );
 }
 
 // Returns the existing direct chat for a pair, or creates it. Idempotent.
@@ -58,6 +72,26 @@ export function createGroupChat({ name, ownerId, memberIds = [] }) {
 
 export const getChat = (id) => s.chatById.get(id);
 export const isMember = (chatId, userId) => !!s.isMember.get(chatId, userId);
+export const getMemberRole = (chatId, userId) =>
+  s.memberRole.get(chatId, userId)?.role || null;
+
+// Rename / re-describe a group. Unspecified fields keep their current value.
+export function updateGroupMeta(chatId, { name, description }) {
+  const c = s.chatById.get(chatId);
+  if (!c) return null;
+  s.setChatMeta.run(
+    name ?? c.name,
+    description ?? c.description ?? '',
+    chatId
+  );
+  return s.chatById.get(chatId);
+}
+
+// Set/clear a group's uploaded picture; bumps avatar_version to bust caches.
+export function setChatAvatar(chatId, mime) {
+  s.setChatAvatarStmt.run(mime, chatId);
+  return s.chatById.get(chatId);
+}
 export const getMembers = (chatId) => s.members.all(chatId);
 export const getMemberIds = (chatId) => s.memberIds.all(chatId).map((r) => r.user_id);
 export const addMember = (chatId, userId, role = 'member') =>
@@ -103,6 +137,84 @@ export function detachCreatedChats(userId) {
   }
 }
 
+// ---- Admin: chat moderation ------------------------------------------------
+
+// List chats for the admin portal with member + message counts and a readable
+// title. Direct chats are titled from their two participants.
+export function adminListChats(q = '', limit = 200) {
+  const chats = db
+    .prepare('SELECT * FROM chats ORDER BY created_at DESC LIMIT ?')
+    .all(limit);
+  const memberCount = db.prepare(
+    'SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?'
+  );
+  const msgCount = db.prepare(
+    'SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?'
+  );
+  const lastAt = db.prepare(
+    'SELECT MAX(created_at) AS t FROM messages WHERE chat_id = ?'
+  );
+  const memberNames = db.prepare(`
+    SELECT u.display_name FROM chat_members m JOIN users u ON u.id = m.user_id
+    WHERE m.chat_id = ? ORDER BY u.display_name LIMIT 4`);
+  const needle = q.trim().toLowerCase();
+  const rows = chats.map((c) => {
+    const names = memberNames.all(c.id).map((r) => r.display_name);
+    const title =
+      c.type === 'group'
+        ? c.name || 'Gruppe'
+        : names.join(' · ') || 'Direkt-Chat';
+    return {
+      id: c.id,
+      type: c.type,
+      title,
+      members: memberCount.get(c.id).n,
+      messages: msgCount.get(c.id).n,
+      lastActivity: lastAt.get(c.id).t || c.created_at,
+      createdAt: c.created_at,
+    };
+  });
+  return needle
+    ? rows.filter((r) => r.title.toLowerCase().includes(needle))
+    : rows;
+}
+
+export function adminDeleteChat(id) {
+  // Messages, members and status rows all cascade off the chat row.
+  return db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes > 0;
+}
+
+// Recent messages of a chat for the admin moderation peek: newest first, with a
+// short text/attachment preview and the sender's name.
+export function adminChatMessages(chatId, limit = 40) {
+  const rows = db
+    .prepare(
+      `SELECT m.*, u.display_name AS sender_name FROM messages m
+       LEFT JOIN users u ON u.id = m.sender_id
+       WHERE m.chat_id = ? ORDER BY m.created_at DESC LIMIT ?`
+    )
+    .all(chatId, Math.min(limit, 100));
+  return rows.map((m) => {
+    let preview = m.deleted_at ? '⌫ gelöscht' : (m.body || '');
+    if (!preview && m.attachment) {
+      try {
+        const a = JSON.parse(m.attachment);
+        preview = `[${a.kind || m.type}]`;
+      } catch {
+        preview = `[${m.type}]`;
+      }
+    }
+    return {
+      id: m.id,
+      sender: m.sender_name || (m.type === 'system' ? 'System' : 'Unbekannt'),
+      type: m.type,
+      preview: preview.length > 200 ? preview.slice(0, 200) + '…' : preview,
+      createdAt: m.created_at,
+      deleted: !!m.deleted_at,
+    };
+  });
+}
+
 // Build the rich chat view the client renders in the list: title, avatar,
 // last message, unread count and (for direct chats) the other participant.
 export function chatView(chat, viewerId) {
@@ -122,14 +234,28 @@ export function chatView(chat, viewerId) {
   base.muted = !!(muteRow && muteRow.muted);
 
   if (chat.type === 'direct') {
-    const otherId = memberIds.find((m) => m !== viewerId);
-    const other = otherId ? publicUser(getUserById(otherId)) : null;
-    base.title = other ? other.displayName : 'Unbekannt';
-    base.avatarColor = other ? other.avatarColor : chat.avatar_color;
-    base.otherUser = other;
+    if (isSelfChat(chat, viewerId)) {
+      // "Note to self": render with the viewer's own identity; the client shows
+      // a "Notiz an mich" label on top of this.
+      const meU = publicUser(getUserById(viewerId));
+      base.self = true;
+      base.title = meU ? meU.displayName : 'Notiz an mich';
+      base.avatarColor = meU ? meU.avatarColor : chat.avatar_color;
+      base.otherUser = meU;
+    } else {
+      const otherId = memberIds.find((m) => m !== viewerId);
+      const other = otherId ? publicUser(getUserById(otherId)) : null;
+      base.self = false;
+      base.title = other ? other.displayName : 'Unbekannt';
+      base.avatarColor = other ? other.avatarColor : chat.avatar_color;
+      base.otherUser = other;
+    }
   } else {
     base.title = chat.name;
     base.avatarColor = chat.avatar_color;
+    base.description = chat.description || '';
+    base.hasAvatar = !!chat.avatar_mime;
+    base.avatarVersion = chat.avatar_version || 0;
     base.members = memberIds.map((id) => publicUser(getUserById(id))).filter(Boolean);
     base.ownerId = memberRows.find((m) => m.role === 'owner')?.user_id || null;
   }
@@ -203,6 +329,13 @@ export function deleteMessage(id) {
   return m.byId.get(id);
 }
 
+/// Hard-delete a message row (used by "nur lokal" storage: the server drops the
+/// message once every recipient has read it). Replies referencing it keep
+/// working via ON DELETE SET NULL on reply_to.
+export function purgeMessage(id) {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
 export function getHistory(chatId, { before, limit = 40 } = {}) {
   const rows = m.history.all(chatId, before ?? Number.MAX_SAFE_INTEGER, Math.min(limit, 100));
   return rows.reverse();
@@ -256,6 +389,18 @@ export function receiptState(messageId) {
   return 'sent';
 }
 
+// Per-recipient delivery/read timestamps for one message — powers the "message
+// info" sheet (who has received and read it, and when). Sorted read-first.
+export function messageReceipts(messageId) {
+  return db
+    .prepare(
+      `SELECT user_id, delivered_at, read_at FROM message_status
+       WHERE message_id = ?
+       ORDER BY read_at IS NULL, read_at DESC, delivered_at DESC`
+    )
+    .all(messageId);
+}
+
 // A compact snapshot of a quoted (replied-to) message so the client can always
 // render the reply preview — even when the original is outside the loaded
 // window or was sent long ago. The body is trimmed; deleted originals are blank.
@@ -270,6 +415,46 @@ export function quotedView(replyToId) {
     deleted: !!o.deleted_at,
     body: text.length > 160 ? `${text.slice(0, 160)}…` : text,
   };
+}
+
+// Toggle an emoji reaction by [userId] on [messageId]: adds it if absent, removes
+// it if present. Returns { added, reactions } where reactions is { emoji: count }.
+export function toggleReaction(messageId, userId, emoji) {
+  const existing = db
+    .prepare(
+      'SELECT 1 FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
+    )
+    .get(messageId, userId, emoji);
+  if (existing) {
+    db.prepare(
+      'DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?'
+    ).run(messageId, userId, emoji);
+    return { added: false, reactions: reactionCounts(messageId) };
+  }
+  db.prepare(
+    'INSERT OR IGNORE INTO message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)'
+  ).run(messageId, userId, emoji, now());
+  return { added: true, reactions: reactionCounts(messageId) };
+}
+
+function reactionCounts(messageId) {
+  const rows = db
+    .prepare(
+      'SELECT emoji, COUNT(*) AS n FROM message_reactions WHERE message_id = ? GROUP BY emoji ORDER BY n DESC'
+    )
+    .all(messageId);
+  const out = {};
+  for (const r of rows) out[r.emoji] = r.n;
+  return out;
+}
+
+function myReactions(messageId, viewerId) {
+  return db
+    .prepare(
+      'SELECT emoji FROM message_reactions WHERE message_id = ? AND user_id = ?'
+    )
+    .all(messageId, viewerId)
+    .map((r) => r.emoji);
 }
 
 export function messageView(msg, viewerId) {
@@ -289,5 +474,8 @@ export function messageView(msg, viewerId) {
     deleted: !!msg.deleted_at,
     // Only the author cares about the receipt ticks on their own bubble.
     status: msg.sender_id === viewerId ? receiptState(msg.id) : null,
+    // Emoji reactions: global counts + the viewer's own picks (for highlighting).
+    reactions: msg.deleted_at ? {} : reactionCounts(msg.id),
+    myReactions: msg.deleted_at ? [] : myReactions(msg.id, viewerId),
   };
 }

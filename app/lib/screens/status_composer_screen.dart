@@ -348,6 +348,7 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
   Future<void> _post() async {
     setState(() => _busy = true);
     try {
+      final state = context.read<AppState>();
       final bytes = await File(widget.path).readAsBytes();
       if (bytes.length > 30 * 1024 * 1024) {
         if (mounted) {
@@ -357,7 +358,6 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
         }
         return;
       }
-      final state = context.read<AppState>();
       final att = await state.uploadAttachment(
         bytes,
         widget.contentType,

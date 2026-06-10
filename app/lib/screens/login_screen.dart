@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../theme.dart';
 import '../widgets/ping_logo.dart';
 import 'phone_verify_screen.dart';
 
@@ -48,16 +49,16 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       if (_register) {
         final phoneRaw = _phone.text.trim();
-        String? idToken;
-        // On Android we prove phone ownership via Firebase before creating the
-        // account (Play Integrity-backed; the code is often auto-detected).
+        String? verifyToken;
+        // On mobile we prove phone ownership via an SMS code before creating the
+        // account. The server texts the code (or returns it in test mode).
         if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          idToken = await Navigator.of(context).push<String>(
+          verifyToken = await Navigator.of(context).push<String>(
             MaterialPageRoute(
-              builder: (_) => PhoneVerifyScreen(e164Phone: _toE164(phoneRaw)),
+              builder: (_) => PhoneVerifyScreen(phone: phoneRaw),
             ),
           );
-          if (idToken == null) {
+          if (verifyToken == null) {
             // Verification was cancelled or failed — don't create the account.
             if (mounted) setState(() => _busy = false);
             return;
@@ -68,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _email.text.trim(),
           _password.text,
           _name.text.trim(),
-          firebaseIdToken: idToken,
+          verifyToken: verifyToken,
         );
       } else {
         await state.login(_login.text.trim(), _password.text);
@@ -84,56 +85,80 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  /// Turn user input into an E.164 number for Firebase, mirroring the server's
-  /// normalisation (default country = Austria, +43).
-  String _toE164(String input, {String cc = '43'}) {
-    final hasPlus = input.trim().startsWith('+');
-    final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
-    if (hasPlus) return '+$digits';
-    if (digits.startsWith('00')) return '+${digits.substring(2)}';
-    if (digits.startsWith('0')) {
-      return '+$cc${digits.replaceFirst(RegExp(r'^0+'), '')}';
-    }
-    return '+$cc$digits';
-  }
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Form(
-                key: _formKey,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(scheme.surface, context.ping.brand, 0.22) ?? scheme.surface,
+              scheme.surface,
+            ],
+            stops: const [0, 0.55],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _header(scheme),
-                    const SizedBox(height: 32),
-                    _modeToggle(scheme),
-                    const SizedBox(height: 24),
-                    if (_register) ..._registerFields() else ..._loginFields(),
-                    const SizedBox(height: 22),
-                    FilledButton(
-                      onPressed: _busy ? null : _submit,
-                      child: _busy
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2.4, color: Colors.white),
-                            )
-                          : Text(_register ? 'Konto erstellen' : 'Anmelden'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: _busy ? null : _editServer,
-                      icon: const Icon(Icons.dns_outlined, size: 18),
-                      label: const Text('Server-Adresse'),
+                    const SizedBox(height: 26),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerLowest,
+                        borderRadius: BorderRadius.circular(26),
+                        border: Border.all(
+                            color: scheme.outlineVariant.withValues(alpha: 0.4)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.10),
+                            blurRadius: 34,
+                            offset: const Offset(0, 16),
+                          ),
+                        ],
+                      ),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _modeToggle(scheme),
+                            const SizedBox(height: 22),
+                            if (_register)
+                              ..._registerFields()
+                            else
+                              ..._loginFields(),
+                            const SizedBox(height: 22),
+                            FilledButton(
+                              onPressed: _busy ? null : _submit,
+                              child: _busy
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2.4, color: Colors.white),
+                                    )
+                                  : Text(_register ? 'Konto erstellen' : 'Anmelden'),
+                            ),
+                            const SizedBox(height: 4),
+                            TextButton.icon(
+                              onPressed: _busy ? null : _editServer,
+                              icon: const Icon(Icons.dns_outlined, size: 18),
+                              label: const Text('Server-Adresse'),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -285,7 +310,25 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _header(ColorScheme scheme) {
     return Column(
       children: [
-        const PingLogo(size: 84),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [context.ping.brand, scheme.secondary],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: context.ping.brand.withValues(alpha: 0.45),
+                blurRadius: 30,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: const PingLogo(size: 56, tile: false, glyphColor: Colors.white),
+        ),
         const SizedBox(height: 18),
         Text(
           'Willkommen bei Ping',

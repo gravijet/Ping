@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -8,6 +9,7 @@ import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/app_state.dart';
+import 'services/push_service.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -20,8 +22,11 @@ Future<void> main() async {
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     try {
       await Firebase.initializeApp();
+      // Handle push messages that arrive while the app is in the background or
+      // terminated (the OS shows the notification; this keeps FCM delivering).
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     } catch (_) {
-      // Verification will be unavailable; the app still works otherwise.
+      // Verification/push will be unavailable; the app still works otherwise.
     }
   }
 
@@ -40,11 +45,13 @@ class PingApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeMode = context.select<AppState, ThemeMode>((s) => s.themeMode);
+    // Rebuild themes whenever the chosen design (preset or custom seed) changes.
+    final design = context.select<AppState, PingDesign>((s) => s.design);
     return MaterialApp(
       title: 'Ping',
       debugShowCheckedModeBanner: false,
-      theme: PingTheme.light(),
-      darkTheme: PingTheme.dark(),
+      theme: PingTheme.light(design),
+      darkTheme: PingTheme.dark(design),
       themeMode: themeMode,
       home: const _Root(),
     );

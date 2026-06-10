@@ -1,7 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { verifyToken } from './auth.js';
 import { config } from './config.js';
-import { getUserById, publicUser, touchLastSeen } from './repo.js';
+import { getUserById, publicUser, touchLastSeen, getMessageStorage } from './repo.js';
 import {
   getMemberIds,
   isMember,
@@ -10,6 +10,7 @@ import {
   receiptState,
   getMessage,
   getUserChats,
+  purgeMessage,
 } from './chatRepo.js';
 
 // Tracks every live socket per user. A user can be connected from several
@@ -208,6 +209,7 @@ async function handleMessage(ws, msg) {
         if (!silent) notifyReceipts(senders);
         // Let other devices of THIS user clear the unread badge too.
         sendToUser(userId, 'read-self', { chatId, messageIds });
+        purgeFullyReadLocalMessages(messageIds);
       }
       break;
     }
@@ -216,6 +218,19 @@ async function handleMessage(ws, msg) {
       break;
     default:
       send(ws, 'error', { message: `Unbekannter Nachrichtentyp: ${type}` });
+  }
+}
+
+// For senders who opted into "nur lokal" storage, drop a message from the
+// server once every recipient has read it (the clients keep their own copy).
+function purgeFullyReadLocalMessages(messageIds) {
+  for (const id of messageIds) {
+    const m = getMessage(id);
+    if (!m || !m.sender_id) continue;
+    if (receiptState(id) !== 'read') continue;
+    if (getMessageStorage(m.sender_id) === 'local') {
+      purgeMessage(id);
+    }
   }
 }
 

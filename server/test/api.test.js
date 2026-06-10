@@ -88,14 +88,14 @@ test('register requires phone, email, password and name', async () => {
   assert.equal(weak.status, 400);
 
   const ok = await register('0170 1111111', 'anna@example.com', 'Anna');
-  assert.equal(ok.user.phone, '+491701111111');
+  assert.equal(ok.user.phone, '+431701111111');
   assert.equal(ok.user.email, 'anna@example.com');
   assert.ok(ok.token);
 });
 
 test('duplicate phone or email is rejected', async () => {
-  await register('+491702222222', 'dup@example.com', 'First');
-  // Same number, national notation -> normalises to the same +49… -> conflict.
+  await register('+431702222222', 'dup@example.com', 'First');
+  // Same number, national notation -> normalises to the same +43… -> conflict.
   const dupPhone = await api('/api/auth/register', {
     method: 'POST',
     body: { phone: '0170 2222222', email: 'other@example.com', password: 'secret1', displayName: 'X' },
@@ -109,7 +109,7 @@ test('duplicate phone or email is rejected', async () => {
 });
 
 test('login by email and by phone, wrong password fails', async () => {
-  await register('+491703333333', 'login@example.com', 'Lo', 'hunter2');
+  await register('+431703333333', 'login@example.com', 'Lo', 'hunter2');
   const byEmail = await api('/api/auth/login', {
     method: 'POST',
     body: { login: 'login@example.com', password: 'hunter2' },
@@ -151,7 +151,7 @@ test('public views never leak phone or email; lookup is phone-only', async () =>
 
 test('contact match returns only registered contacts and echoes identifiers', async () => {
   const me = await register('+491700000010', 'me@example.com', 'Me');
-  const friend = await register('+491700000011', 'friend@example.com', 'Friend');
+  const friend = await register('+431700000011', 'friend@example.com', 'Friend');
 
   const r = await api('/api/contacts/match', {
     method: 'POST',
@@ -164,12 +164,12 @@ test('contact match returns only registered contacts and echoes identifiers', as
   assert.equal(r.status, 200);
   assert.equal(r.json.users.length, 1);
   assert.equal(r.json.users[0].user.id, friend.user.id);
-  assert.equal(r.json.users[0].phone, '+491700000011');
+  assert.equal(r.json.users[0].phone, '+431700000011');
 });
 
 test('start a direct chat by phone or user id', async () => {
   const a = await register('+491700000020', 'a20@example.com', 'A20');
-  const b = await register('+491700000021', 'b21@example.com', 'B21');
+  const b = await register('+431700000021', 'b21@example.com', 'B21');
 
   const byPhone = await api('/api/chats/direct', {
     method: 'POST', token: a.token, body: { phone: '0170 0000021' },
@@ -461,7 +461,7 @@ test('the admin portal page is served', async () => {
   const res = await fetch(base + '/admin');
   assert.equal(res.status, 200);
   const html = await res.text();
-  assert.match(html, /Admin-Portal/);
+  assert.match(html, /Ping · Admin/);
 });
 
 test('unauthorized requests are blocked', async () => {
@@ -607,4 +607,391 @@ test('a signed-in admin user can use the admin API without the token', async () 
   });
   assert.equal(bc.status, 200);
   assert.equal(typeof bc.json.delivered, 'number');
+});
+
+test('group owner can rename, set a picture and remove members; others cannot', async () => {
+  const owner = await register('+431700000300', 'gowner@example.com', 'GOwner');
+  const m1 = await register('+431700000301', 'gm1@example.com', 'GM1');
+  const m2 = await register('+431700000302', 'gm2@example.com', 'GM2');
+
+  const created = await api('/api/chats/group', {
+    method: 'POST',
+    token: owner.token,
+    body: { name: 'Crew', memberIds: [m1.user.id, m2.user.id] },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  const chatId = created.json.chat.id;
+
+  // Owner renames + describes the group.
+  const renamed = await api(`/api/chats/${chatId}`, {
+    method: 'PATCH',
+    token: owner.token,
+    body: { name: 'Best Crew', description: 'Unsere Gruppe' },
+  });
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.json));
+  assert.equal(renamed.json.chat.title, 'Best Crew');
+  assert.equal(renamed.json.chat.description, 'Unsere Gruppe');
+
+  // A non-owner member may not edit.
+  const forbidden = await api(`/api/chats/${chatId}`, {
+    method: 'PATCH',
+    token: m1.token,
+    body: { name: 'Hijack' },
+  });
+  assert.equal(forbidden.status, 403);
+
+  // Owner sets a group picture (valid PNG header).
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const up = await fetch(base + `/api/chats/${chatId}/avatar`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'image/png',
+      authorization: `Bearer ${owner.token}`,
+    },
+    body: png,
+  });
+  assert.equal(up.status, 200);
+  const upJson = await up.json();
+  assert.equal(upJson.chat.hasAvatar, true);
+
+  // The picture is served back to a member.
+  const pic = await fetch(base + `/api/chats/${chatId}/avatar`, {
+    headers: { authorization: `Bearer ${m1.token}` },
+  });
+  assert.equal(pic.status, 200);
+
+  // Owner removes m2; m2 disappears from the member list.
+  const removed = await api(`/api/chats/${chatId}/members/${m2.user.id}`, {
+    method: 'DELETE',
+    token: owner.token,
+  });
+  assert.equal(removed.status, 200);
+  const afterRemove = await api(`/api/chats/${chatId}`, { token: owner.token });
+  assert.ok(!afterRemove.json.chat.memberIds.includes(m2.user.id));
+
+  // A non-owner cannot remove members.
+  const cantRemove = await api(`/api/chats/${chatId}/members/${m1.user.id}`, {
+    method: 'DELETE',
+    token: m1.token,
+  });
+  assert.equal(cantRemove.status, 403);
+});
+
+test('push tokens register and unregister; auth required', async () => {
+  const u = await register('+491700000990', 'push@example.com', 'Push User');
+
+  // Needs auth.
+  const noAuth = await api('/api/push/token', {
+    method: 'POST',
+    body: { token: 'tok-abc', platform: 'android' },
+  });
+  assert.equal(noAuth.status, 401);
+
+  // Register a token (push may be disabled server-side; this just stores it).
+  const reg = await api('/api/push/token', {
+    method: 'POST',
+    token: u.token,
+    body: { token: 'tok-abc', platform: 'android' },
+  });
+  assert.equal(reg.status, 200);
+  assert.equal(reg.json.ok, true);
+
+  // A bad payload is rejected.
+  const bad = await api('/api/push/token', {
+    method: 'POST',
+    token: u.token,
+    body: { platform: 'android' },
+  });
+  assert.equal(bad.status, 400);
+
+  // Unregister.
+  const del = await api('/api/push/token', {
+    method: 'DELETE',
+    token: u.token,
+    body: { token: 'tok-abc' },
+  });
+  assert.equal(del.status, 200);
+});
+
+test('personal data export returns account + chats', async () => {
+  const a = await register('+491700000700', 'exp-a@example.com', 'Exp A');
+  const b = await register('+491700000701', 'exp-b@example.com', 'Exp B');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST',
+    token: a.token,
+    body: { userId: b.user.id },
+  });
+  await api(`/api/chats/${chat.json.chat.id}/messages`, {
+    method: 'POST',
+    token: a.token,
+    body: { body: 'hallo export' },
+  });
+
+  const noAuth = await api('/api/me/export');
+  assert.equal(noAuth.status, 401);
+
+  const exp = await api('/api/me/export', { token: a.token });
+  assert.equal(exp.status, 200);
+  assert.equal(exp.json.account.id, a.user.id);
+  assert.ok(Array.isArray(exp.json.chats));
+  const exported = exp.json.chats.find((c) => c.chat.id === chat.json.chat.id);
+  assert.ok(exported, 'the chat should be in the export');
+  assert.ok(exported.messages.some((m) => m.body === 'hallo export'));
+});
+
+test('local storage mode purges a sent message after all recipients read it', async () => {
+  const a = await register('+491700000800', 'store-a@example.com', 'Store A');
+  const b = await register('+491700000801', 'store-b@example.com', 'Store B');
+
+  const mode = await api('/api/me/message-storage', {
+    method: 'POST',
+    token: a.token,
+    body: { mode: 'local' },
+  });
+  assert.equal(mode.status, 200);
+  assert.equal(mode.json.user.messageStorage, 'local');
+
+  const chat = await api('/api/chats/direct', {
+    method: 'POST',
+    token: a.token,
+    body: { userId: b.user.id },
+  });
+  const chatId = chat.json.chat.id;
+
+  const bWs = await connect(b.token);
+  await waitFor(bWs, 'ready');
+
+  const sent = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST',
+    token: a.token,
+    body: { body: 'vergänglich' },
+  });
+  const msgId = sent.json.message.id;
+
+  // B reads the chat → the message is now read by everyone → server purges it.
+  bWs.send(JSON.stringify({ type: 'read', payload: { chatId } }));
+  await new Promise((r) => setTimeout(r, 250));
+
+  const hist = await api(`/api/chats/${chatId}/messages`, { token: a.token });
+  assert.ok(
+    !hist.json.messages.some((m) => m.id === msgId),
+    'the message should be gone from the server'
+  );
+  bWs.close();
+});
+
+test('admin can list and trigger DB backups', async () => {
+  const list = await api('/api/admin/backups', { admin: ADMIN });
+  assert.equal(list.status, 200);
+  assert.ok(Array.isArray(list.json.backups));
+
+  const made = await api('/api/admin/backups', {
+    method: 'POST',
+    admin: ADMIN,
+  });
+  assert.equal(made.status, 200);
+  assert.equal(made.json.ok, true);
+});
+
+test('SMS OTP: request a code, verify it, and register with the token', async () => {
+  const phone = '+436601234567';
+  const req = await api('/api/auth/request-code', {
+    method: 'POST',
+    body: { phone },
+  });
+  assert.equal(req.status, 200, JSON.stringify(req.json));
+  assert.ok(req.json.devCode, 'log provider should expose the code for testing');
+
+  // A wrong code is rejected.
+  const bad = await api('/api/auth/verify-code', {
+    method: 'POST',
+    body: { phone, code: '000000' },
+  });
+  assert.equal(bad.status, 400);
+
+  // The real code yields a verify token.
+  const ok = await api('/api/auth/verify-code', {
+    method: 'POST',
+    body: { phone, code: req.json.devCode },
+  });
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.ok(ok.json.verifyToken);
+
+  // Registering with the token succeeds and the number matches.
+  const reg = await api('/api/auth/register', {
+    method: 'POST',
+    body: {
+      phone,
+      email: 'otp@example.com',
+      displayName: 'Otto',
+      password: 'secret1',
+      verifyToken: ok.json.verifyToken,
+    },
+  });
+  assert.equal(reg.status, 201, JSON.stringify(reg.json));
+  assert.equal(reg.json.user.phone, phone);
+});
+
+test('SMS OTP: resend is throttled', async () => {
+  const phone = '+436609998877';
+  const first = await api('/api/auth/request-code', { method: 'POST', body: { phone } });
+  assert.equal(first.status, 200);
+  const again = await api('/api/auth/request-code', { method: 'POST', body: { phone } });
+  assert.equal(again.status, 429);
+  assert.ok(again.json.retryInSec >= 0);
+});
+
+test('admin overview returns stats, charts and system health', async () => {
+  const r = await api('/api/admin/overview', { admin: ADMIN });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.ok(typeof r.json.stats.users === 'number');
+  assert.ok(Array.isArray(r.json.charts.usersPerDay));
+  assert.equal(r.json.charts.usersPerDay.length, 7);
+  assert.ok(r.json.system.node.startsWith('v'));
+  assert.ok(typeof r.json.system.uptimeSec === 'number');
+});
+
+test('admin can list chats and delete one', async () => {
+  const a = await register('0680 1000001', 'chatadm-a@example.com', 'CA');
+  const b = await register('0680 1000002', 'chatadm-b@example.com', 'CB');
+  const lookup = await api('/api/users/lookup', {
+    method: 'POST',
+    token: a.token,
+    body: { phone: '0680 1000002' },
+  });
+  const chat = await api('/api/chats/direct', {
+    method: 'POST',
+    token: a.token,
+    body: { userId: lookup.json.user.id },
+  });
+  const chatId = chat.json.chat.id;
+
+  const list = await api('/api/admin/chats', { admin: ADMIN });
+  assert.equal(list.status, 200);
+  assert.ok(list.json.chats.some((c) => c.id === chatId));
+
+  const del = await api(`/api/admin/chats/${chatId}`, { method: 'DELETE', admin: ADMIN });
+  assert.equal(del.status, 204);
+
+  const list2 = await api('/api/admin/chats', { admin: ADMIN });
+  assert.ok(!list2.json.chats.some((c) => c.id === chatId));
+});
+
+test('admin broadcast is recorded in history', async () => {
+  const sent = await api('/api/admin/broadcast', {
+    method: 'POST',
+    admin: ADMIN,
+    body: { title: 'Hallo', body: 'Test-Durchsage' },
+  });
+  assert.equal(sent.status, 200);
+  const hist = await api('/api/admin/broadcasts', { admin: ADMIN });
+  assert.equal(hist.status, 200);
+  assert.ok(hist.json.broadcasts.some((b) => b.body === 'Test-Durchsage'));
+});
+
+test('landing page and APK download endpoints respond', async () => {
+  const home = await fetch(base + '/');
+  assert.equal(home.status, 200);
+  const html = await home.text();
+  assert.ok(html.includes('Ping'));
+
+  const info = await fetch(base + '/download/info');
+  // 200 with metadata when a build is published, 404 otherwise — both are valid.
+  assert.ok(info.status === 200 || info.status === 404);
+});
+
+test('admin can disable a user, blocking login and existing sessions', async () => {
+  const u = await register('0681 2000003', 'ban-me@example.com', 'Banned');
+  // Token works before the ban.
+  const okBefore = await api('/api/me', { token: u.token });
+  assert.equal(okBefore.status, 200);
+
+  // Find + disable.
+  const list = await api('/api/admin/users?q=ban-me@example.com', { admin: ADMIN });
+  const id = list.json.users.find((x) => x.email === 'ban-me@example.com').id;
+  const dis = await api(`/api/admin/users/${id}`, {
+    method: 'PATCH', admin: ADMIN, body: { disabled: true },
+  });
+  assert.equal(dis.json.user.disabled, true);
+
+  // Existing token is now rejected, and login is blocked.
+  const okAfter = await api('/api/me', { token: u.token });
+  assert.equal(okAfter.status, 403);
+  const login = await api('/api/auth/login', {
+    method: 'POST', body: { login: 'ban-me@example.com', password: 'secret1' },
+  });
+  assert.equal(login.status, 403);
+
+  // Re-enabling restores access.
+  await api(`/api/admin/users/${id}`, { method: 'PATCH', admin: ADMIN, body: { disabled: false } });
+  const reLogin = await api('/api/auth/login', {
+    method: 'POST', body: { login: 'ban-me@example.com', password: 'secret1' },
+  });
+  assert.equal(reLogin.status, 200);
+});
+
+test('admin can message a single user and export users as CSV', async () => {
+  const u = await register('0681 2000004', 'csv@example.com', 'CsvUser');
+  const list = await api('/api/admin/users?q=csv@example.com', { admin: ADMIN });
+  const id = list.json.users.find((x) => x.email === 'csv@example.com').id;
+
+  const msg = await api(`/api/admin/users/${id}/message`, {
+    method: 'POST', admin: ADMIN, body: { title: 'Hi', body: 'Direkte Nachricht' },
+  });
+  assert.equal(msg.status, 200);
+  assert.equal(msg.json.ok, true);
+
+  const csvRes = await fetch(base + '/api/admin/users.csv', {
+    headers: { 'x-admin-token': ADMIN },
+  });
+  assert.equal(csvRes.status, 200);
+  const csv = await csvRes.text();
+  assert.match(csv, /csv@example.com/);
+  assert.match(csv, /^id,name,phone,email/);
+});
+
+test('admin can peek a chat\'s recent messages', async () => {
+  const a = await register('0681 3000001', 'peek-a@example.com', 'PA');
+  const b = await register('0681 3000002', 'peek-b@example.com', 'PB');
+  const lookup = await api('/api/users/lookup', {
+    method: 'POST', token: a.token, body: { phone: '0681 3000002' },
+  });
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { userId: lookup.json.user.id },
+  });
+  const chatId = chat.json.chat.id;
+  await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'Hallo Welt' },
+  });
+
+  const peek = await api(`/api/admin/chats/${chatId}/messages`, { admin: ADMIN });
+  assert.equal(peek.status, 200);
+  assert.ok(peek.json.messages.some((m) => m.preview === 'Hallo Welt'));
+});
+
+test('emoji reactions toggle and broadcast', async () => {
+  const a = await register('0688 4000001', 'react-a@example.com', 'RA');
+  const b = await register('0688 4000002', 'react-b@example.com', 'RB');
+  const look = await api('/api/users/lookup', { method: 'POST', token: a.token, body: { phone: '0688 4000002' } });
+  const chat = await api('/api/chats/direct', { method: 'POST', token: a.token, body: { userId: look.json.user.id } });
+  const chatId = chat.json.chat.id;
+  const sent = await api(`/api/chats/${chatId}/messages`, { method: 'POST', token: a.token, body: { body: 'Reagier mal' } });
+  const msgId = sent.json.message.id;
+
+  // B reacts ❤️
+  const r1 = await api(`/api/chats/${chatId}/messages/${msgId}/reactions`, { method: 'POST', token: b.token, body: { emoji: '❤️' } });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.json.added, true);
+  assert.equal(r1.json.message.reactions['❤️'], 1);
+
+  // A sees it in history, with myReactions empty for A.
+  const hist = await api(`/api/chats/${chatId}/messages`, { token: a.token });
+  const m = hist.json.messages.find((x) => x.id === msgId);
+  assert.equal(m.reactions['❤️'], 1);
+  assert.deepEqual(m.myReactions, []);
+
+  // B toggles ❤️ off.
+  const r2 = await api(`/api/chats/${chatId}/messages/${msgId}/reactions`, { method: 'POST', token: b.token, body: { emoji: '❤️' } });
+  assert.equal(r2.json.added, false);
+  assert.equal(r2.json.message.reactions['❤️'], undefined);
 });

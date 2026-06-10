@@ -6,9 +6,52 @@ import '../models/chat.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../services/wallpaper_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/wallpaper_picker.dart';
 import '../utils/format.dart';
 import 'add_members_screen.dart';
+
+/// Bottom sheet to set or clear a chat's own wallpaper. Picking "Standard"
+/// (the default swatch) clears the override so the chat inherits the global
+/// wallpaper again.
+void _editChatWallpaper(BuildContext context, AppState state, String chatId) {
+  showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (ctx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 4, 0, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Text('Hintergrund für diesen Chat',
+                  style: Theme.of(ctx).textTheme.titleMedium),
+            ),
+            WallpaperPicker(
+              current: state.hasChatWallpaper(chatId)
+                  ? state.wallpaperFor(chatId)
+                  : WallpaperSpec.defaultBg,
+              defaultLabel: 'Global',
+              onPick: (spec) {
+                // Default swatch → inherit the global wallpaper again.
+                if (spec.kind == WallpaperKind.defaultBg) {
+                  state.setChatWallpaper(chatId, null);
+                } else {
+                  state.setChatWallpaper(chatId, spec);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 
 class ChatInfoScreen extends StatelessWidget {
   final String chatId;
@@ -130,6 +173,15 @@ class ChatInfoScreen extends StatelessWidget {
                 : 'Du wirst über neue Nachrichten informiert.'),
             value: chat.muted,
             onChanged: (v) => state.toggleMute(chat.id, v),
+          ),
+          ListTile(
+            leading: const Icon(Icons.wallpaper_rounded),
+            title: const Text('Hintergrund für diesen Chat'),
+            subtitle: Text(state.hasChatWallpaper(chat.id)
+                ? 'Eigener Hintergrund festgelegt'
+                : 'Globaler Hintergrund wird verwendet'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _editChatWallpaper(context, state, chat.id),
           ),
           if (!chat.isGroup && chat.otherUser != null) ...[
             const Divider(height: 24),

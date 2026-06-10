@@ -16,6 +16,7 @@ class PingUser {
   final String? email;
   final bool hasPassword;
   final bool isAdmin;
+  final String messageStorage; // 'server' (default) | 'local'
 
   const PingUser({
     required this.id,
@@ -30,6 +31,7 @@ class PingUser {
     this.email,
     this.hasPassword = false,
     this.isAdmin = false,
+    this.messageStorage = 'server',
   });
 
   Color get color {
@@ -69,6 +71,7 @@ class PingUser {
     String? email,
     bool? hasPassword,
     bool? isAdmin,
+    String? messageStorage,
   }) =>
       PingUser(
         id: id,
@@ -83,6 +86,7 @@ class PingUser {
         email: email ?? this.email,
         hasPassword: hasPassword ?? this.hasPassword,
         isAdmin: isAdmin ?? this.isAdmin,
+        messageStorage: messageStorage ?? this.messageStorage,
       );
 
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
@@ -98,6 +102,7 @@ class PingUser {
         email: json['email'] as String?,
         hasPassword: (json['hasPassword'] ?? false) as bool,
         isAdmin: (json['isAdmin'] ?? false) as bool,
+        messageStorage: (json['messageStorage'] ?? 'server') as String,
       );
 }
 

@@ -40,6 +40,7 @@ const stmts = {
   setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
   setAdmin: db.prepare('UPDATE users SET is_admin = ? WHERE id = ?'),
   setName: db.prepare('UPDATE users SET display_name = ? WHERE id = ?'),
+  setMessageStorage: db.prepare('UPDATE users SET message_storage = ? WHERE id = ?'),
   deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
   count: db.prepare('SELECT COUNT(*) AS n FROM users'),
   allUsers: db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 500'),
@@ -110,6 +111,17 @@ export function setName(id, displayName) {
   return stmts.userById.get(id);
 }
 
+export function setMessageStorage(id, mode) {
+  stmts.setMessageStorage.run(mode, id);
+  return stmts.userById.get(id);
+}
+
+/** A user's message storage preference: 'server' (default) or 'local'. */
+export function getMessageStorage(id) {
+  const u = stmts.userById.get(id);
+  return u?.message_storage || 'server';
+}
+
 export const deleteUser = (id) => stmts.deleteUser.run(id);
 export const countUsers = () => stmts.count.get().n;
 
@@ -133,6 +145,97 @@ export const listUsers = (q) => {
   }
   return stmts.allUsers.all();
 };
+
+export function setAbout(id, about) {
+  db.prepare('UPDATE users SET about = ? WHERE id = ?').run(about, id);
+  return stmts.userById.get(id);
+}
+
+export function setDisabled(id, disabled) {
+  db.prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
+  return stmts.userById.get(id);
+}
+
+// ---- Admin analytics -------------------------------------------------------
+
+const analytics = {
+  usersSince: db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at >= ?'),
+  usersBetween: db.prepare(
+    'SELECT COUNT(*) AS n FROM users WHERE created_at >= ? AND created_at < ?'
+  ),
+  msgsSince: db.prepare(
+    'SELECT COUNT(*) AS n FROM messages WHERE created_at >= ? AND deleted_at IS NULL'
+  ),
+  msgsBetween: db.prepare(
+    'SELECT COUNT(*) AS n FROM messages WHERE created_at >= ? AND created_at < ? AND deleted_at IS NULL'
+  ),
+  pushTokens: db.prepare('SELECT COUNT(*) AS n FROM push_tokens'),
+  blocks: db.prepare('SELECT COUNT(*) AS n FROM blocks'),
+  uploads: db.prepare('SELECT COUNT(*) AS n FROM uploads'),
+  uploadBytes: db.prepare('SELECT COALESCE(SUM(size),0) AS n FROM uploads'),
+  msgsByUser: db.prepare(
+    'SELECT COUNT(*) AS n FROM messages WHERE sender_id = ? AND deleted_at IS NULL'
+  ),
+  chatsByUser: db.prepare(
+    'SELECT COUNT(*) AS n FROM chat_members WHERE user_id = ?'
+  ),
+};
+
+export const countUsersSince = (ts) => analytics.usersSince.get(ts).n;
+export const countMessagesSince = (ts) => analytics.msgsSince.get(ts).n;
+export const countPushTokens = () => analytics.pushTokens.get().n;
+export const countBlocks = () => analytics.blocks.get().n;
+export const countUploads = () => analytics.uploads.get().n;
+export const totalUploadBytes = () => analytics.uploadBytes.get().n;
+
+function startOfTodayUtc() {
+  const d = new Date();
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+// Daily buckets (oldest → newest) for the dashboard sparkline charts.
+function perDay(stmt, days) {
+  const dayMs = 86_400_000;
+  const start = startOfTodayUtc();
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const from = start - i * dayMs;
+    out.push({ day: from, n: stmt.get(from, from + dayMs).n });
+  }
+  return out;
+}
+export const usersPerDay = (days = 7) => perDay(analytics.usersBetween, days);
+export const messagesPerDay = (days = 7) => perDay(analytics.msgsBetween, days);
+
+// Per-user activity summary for the admin user detail view.
+export function userActivity(id) {
+  return {
+    messages: analytics.msgsByUser.get(id).n,
+    chats: analytics.chatsByUser.get(id).n,
+  };
+}
+
+// ---- Admin broadcast history ----------------------------------------------
+
+const broadcastStmts = {
+  insert: db.prepare(`
+    INSERT INTO broadcasts (id, title, body, delivered, pushed, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)`),
+  list: db.prepare('SELECT * FROM broadcasts ORDER BY created_at DESC LIMIT ?'),
+};
+
+export function recordBroadcast({ title = '', body, delivered = 0, pushed = 0 }) {
+  broadcastStmts.insert.run(uid(), title, body, delivered, pushed, now());
+}
+export const listBroadcasts = (limit = 30) =>
+  broadcastStmts.list.all(limit).map((b) => ({
+    id: b.id,
+    title: b.title,
+    body: b.body,
+    delivered: b.delivered,
+    pushed: b.pushed,
+    createdAt: b.created_at,
+  }));
 
 // Privacy: match a batch of normalized phones / lowercased emails against
 // registered users. Nothing is stored — this only runs in memory for this call.
@@ -179,6 +282,7 @@ export function privateUser(u) {
     phone: u.phone,
     email: u.email,
     isAdmin: !!u.is_admin,
+    messageStorage: u.message_storage || 'server',
   };
 }
 
@@ -194,6 +298,7 @@ export function adminUser(u) {
     avatarColor: u.avatar_color,
     hasAvatar: !!u.avatar_mime,
     isAdmin: !!u.is_admin,
+    disabled: !!u.disabled,
     createdAt: u.created_at,
     lastSeen: u.last_seen,
   };

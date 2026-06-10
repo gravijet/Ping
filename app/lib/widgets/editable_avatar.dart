@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -51,6 +52,37 @@ class _EditableAvatarState extends State<EditableAvatar> {
     }
   }
 
+  /// Pick an animated GIF as the avatar. Uses the file picker (not image_picker)
+  /// so the animation is preserved instead of being re-encoded to a still JPEG.
+  Future<void> _pickGif() async {
+    setState(() => _busy = true);
+    final state = context.read<AppState>();
+    try {
+      final res = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['gif'],
+        withData: true,
+      );
+      final f = (res == null || res.files.isEmpty) ? null : res.files.first;
+      if (f == null || f.bytes == null) {
+        if (mounted) setState(() => _busy = false);
+        return;
+      }
+      await state.uploadAvatar(f.bytes!, 'image/gif');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Animiertes Profilbild aktualisiert.')),
+        );
+      }
+    } on ApiException catch (e) {
+      _error(e.message);
+    } catch (_) {
+      _error('Das GIF konnte nicht ausgewählt werden.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _remove() async {
     setState(() => _busy = true);
     try {
@@ -92,6 +124,15 @@ class _EditableAvatarState extends State<EditableAvatar> {
               onTap: () {
                 Navigator.pop(ctx);
                 _pick(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.gif_box_rounded),
+              title: const Text('Animiertes GIF'),
+              subtitle: const Text('Bewegtes Profilbild'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickGif();
               },
             ),
             if (hasAvatar)

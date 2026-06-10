@@ -15,7 +15,12 @@ class PingSettings {
   // Chats
   final bool enterToSend;
   final double fontScale; // 0.85 .. 1.4
-  final int wallpaper; // index into kChatWallpapers
+  final int wallpaper; // legacy preset index into kChatWallpapers
+  final String wallpaperSpec; // global chat background (see WallpaperSpec)
+
+  // Appearance / design
+  final String designId; // id of a PingDesign preset, or 'custom'
+  final int? customColor; // seed colour (ARGB) when designId == 'custom'
 
   // Read aloud (text-to-speech)
   final bool ttsEnabled; // show "read aloud" actions
@@ -33,6 +38,9 @@ class PingSettings {
     this.enterToSend = false,
     this.fontScale = 1.0,
     this.wallpaper = 0,
+    this.wallpaperSpec = '',
+    this.designId = 'ocean',
+    this.customColor,
     this.ttsEnabled = false,
     this.ttsAutoRead = false,
     this.ttsLanguage = 'de-DE',
@@ -49,6 +57,10 @@ class PingSettings {
     bool? enterToSend,
     double? fontScale,
     int? wallpaper,
+    String? wallpaperSpec,
+    String? designId,
+    int? customColor,
+    bool clearCustomColor = false,
     bool? ttsEnabled,
     bool? ttsAutoRead,
     String? ttsLanguage,
@@ -64,6 +76,10 @@ class PingSettings {
         enterToSend: enterToSend ?? this.enterToSend,
         fontScale: fontScale ?? this.fontScale,
         wallpaper: wallpaper ?? this.wallpaper,
+        wallpaperSpec: wallpaperSpec ?? this.wallpaperSpec,
+        designId: designId ?? this.designId,
+        customColor:
+            clearCustomColor ? null : (customColor ?? this.customColor),
         ttsEnabled: ttsEnabled ?? this.ttsEnabled,
         ttsAutoRead: ttsAutoRead ?? this.ttsAutoRead,
         ttsLanguage: ttsLanguage ?? this.ttsLanguage,
@@ -80,6 +96,9 @@ class PingSettings {
         'enterToSend': enterToSend,
         'fontScale': fontScale,
         'wallpaper': wallpaper,
+        'wallpaperSpec': wallpaperSpec,
+        'designId': designId,
+        'customColor': customColor,
         'ttsEnabled': ttsEnabled,
         'ttsAutoRead': ttsAutoRead,
         'ttsLanguage': ttsLanguage,
@@ -96,6 +115,13 @@ class PingSettings {
         enterToSend: j['enterToSend'] ?? false,
         fontScale: (j['fontScale'] as num?)?.toDouble() ?? 1.0,
         wallpaper: j['wallpaper'] ?? 0,
+        designId: (j['designId'] as String?) ?? 'ocean',
+        customColor: j['customColor'] as int?,
+        wallpaperSpec: (j['wallpaperSpec'] as String?) ??
+            // Migrate the legacy preset index into the new spec form.
+            ((j['wallpaper'] ?? 0) is int && (j['wallpaper'] ?? 0) > 0
+                ? 'color:${j['wallpaper']}'
+                : ''),
         ttsEnabled: j['ttsEnabled'] ?? false,
         ttsAutoRead: j['ttsAutoRead'] ?? false,
         ttsLanguage: j['ttsLanguage'] ?? 'de-DE',

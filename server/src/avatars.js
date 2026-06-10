@@ -20,12 +20,16 @@ export function detectImageMime(buf) {
   ) {
     return 'image/png';
   }
-  // RIFF....WEBP
+  // RIFF....WEBP (also covers animated WebP)
   if (
     buf.toString('ascii', 0, 4) === 'RIFF' &&
     buf.toString('ascii', 8, 12) === 'WEBP'
   ) {
     return 'image/webp';
+  }
+  // GIF87a / GIF89a — enables animated profile & group pictures.
+  if (buf.toString('ascii', 0, 4) === 'GIF8') {
+    return 'image/gif';
   }
   return null;
 }

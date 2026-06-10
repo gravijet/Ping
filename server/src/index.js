@@ -8,6 +8,8 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { router } from './routes.js';
 import { createHub } from './hub.js';
+import { startBackupScheduler } from './backup.js';
+import { mountDownloads } from './download.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -22,7 +24,19 @@ export function createApp() {
         directives: {
           ...helmet.contentSecurityPolicy.getDefaultDirectives(),
           'script-src': ["'self'", "'unsafe-inline'"],
-          'style-src': ["'self'", "'unsafe-inline'"],
+          // Allow Google Fonts on the landing page + admin portal for nicer type.
+          'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
+          'img-src': ["'self'", 'data:'],
+          // Helmet enables `upgrade-insecure-requests` by default, which makes
+          // the browser rewrite the admin portal's same-origin `fetch('/api/…')`
+          // calls to https://. When Ping is served over plain HTTP (a self-hosted
+          // server without TLS in front) there is no https listener, so every
+          // request dies with a network-level "Failed to fetch" — which is exactly
+          // what shows up the moment you try to log into /admin. Dropping the
+          // directive lets the portal talk to its own origin over http. (When TLS
+          // *is* terminated in front, requests are already https, so this is safe.)
+          'upgrade-insecure-requests': null,
         },
       },
     })
@@ -37,6 +51,9 @@ export function createApp() {
   app.get(['/admin', '/admin/'], (_req, res) =>
     res.sendFile(path.join(publicDir, 'admin.html'))
   );
+
+  // Public landing page + APK download (root domain auto-downloads the latest build).
+  mountDownloads(app, publicDir);
 
   app.use(express.json({ limit: '64kb' }));
 
@@ -98,6 +115,7 @@ if (isMain) {
     console.log(`Ping server läuft auf http://${config.host}:${config.port}`);
     console.log(`WebSocket: ws://${config.host}:${config.port}/ws`);
   });
+  startBackupScheduler();
 
   const shutdown = () => {
     console.log('\nServer wird beendet …');

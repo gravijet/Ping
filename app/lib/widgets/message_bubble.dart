@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/message.dart';
 import '../services/audio_player_service.dart';
@@ -20,6 +21,12 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onSwipeReply;
 
+  /// Double-tap the bubble — quick ❤️ reaction (like Instagram/iMessage).
+  final VoidCallback? onDoubleTap;
+
+  /// This message is bookmarked → show a little star in the footer.
+  final bool starred;
+
   /// Tapped the reply quote — jump to the original message.
   final VoidCallback? onTapQuote;
 
@@ -36,6 +43,9 @@ class MessageBubble extends StatelessWidget {
   final void Function(Attachment att)? onOpenVideo;
   final double textScale;
 
+  /// Tapped an existing reaction chip → toggle that emoji for me.
+  final void Function(String emoji)? onToggleReaction;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -47,6 +57,8 @@ class MessageBubble extends StatelessWidget {
     this.repliedToSender,
     this.onLongPress,
     this.onSwipeReply,
+    this.onDoubleTap,
+    this.starred = false,
     this.onTapQuote,
     this.highlighted = false,
     this.resolveUrl,
@@ -57,6 +69,7 @@ class MessageBubble extends StatelessWidget {
     this.onPlayAudio,
     this.onOpenVideo,
     this.textScale = 1.0,
+    this.onToggleReaction,
   });
 
   @override
@@ -64,108 +77,169 @@ class MessageBubble extends StatelessWidget {
     if (message.isSystem) return _SystemBubble(text: message.body);
 
     final palette = context.ping;
+    final scheme = Theme.of(context).colorScheme;
     final bg = isMine ? palette.bubbleOut : palette.bubbleIn;
     final fg = isMine ? palette.bubbleOutText : palette.bubbleInText;
-    const radius = Radius.circular(16);
+    const radius = Radius.circular(18);
+    const tailRadius = Radius.circular(3);
 
     final hasMedia = message.attachment != null && !message.deleted;
     final hasText = message.body.trim().isNotEmpty;
+    // Emoji-only messages render large and bubble-less, like a sticker.
+    final jumbo = !hasMedia && message.isEmojiOnly && repliedTo == null;
 
-    return AnimatedContainer(
+    // A whisper of the accent at the tail corner gives my own bubbles depth —
+    // the difference between a flat box and something that feels designed.
+    final tailColor =
+        isMine ? (Color.lerp(bg, scheme.secondary, 0.16) ?? bg) : bg;
+    final gradient = (isMine && !jumbo)
+        ? LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [bg, tailColor],
+          )
+        : null;
+
+    final bubble = Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.80,
+      ),
+      padding:
+          EdgeInsets.fromLTRB(hasMedia ? 5 : 12, 7, hasMedia ? 5 : 12, 7),
+      decoration: BoxDecoration(
+        color: jumbo ? Colors.transparent : (gradient == null ? bg : null),
+        gradient: gradient,
+        borderRadius: BorderRadius.only(
+          topLeft: radius,
+          topRight: radius,
+          bottomLeft: isMine ? radius : tailRadius,
+          bottomRight: isMine ? tailRadius : radius,
+        ),
+        boxShadow: jumbo
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1.5),
+                ),
+              ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showSenderName && !isMine)
+            Padding(
+              padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 1, 0, 3),
+              child: Text(
+                senderName ?? '',
+                style: TextStyle(
+                  color: senderColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          if (repliedTo != null)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: hasMedia ? 6 : 0),
+              child: _ReplyQuote(
+                message: repliedTo!,
+                sender: repliedToSender,
+                mine: isMine,
+                onTap: onTapQuote,
+              ),
+            ),
+          if (hasMedia) _media(context, fg),
+          if (message.deleted)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.block_rounded,
+                    size: 16, color: fg.withValues(alpha: 0.7)),
+                const SizedBox(width: 6),
+                Text(
+                  'Diese Nachricht wurde gelöscht',
+                  style: TextStyle(
+                    color: fg.withValues(alpha: 0.7),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            )
+          else if (hasText)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  hasMedia ? 6 : 0, hasMedia ? 6 : 0, hasMedia ? 6 : 0, 0),
+              child: Text(
+                message.body,
+                style: TextStyle(
+                    color: fg,
+                    fontSize: (jumbo ? 44 : 15.5) * textScale,
+                    height: jumbo ? 1.1 : 1.3),
+              ),
+            ),
+          Padding(
+            padding:
+                EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 2, hasMedia ? 4 : 0, 0),
+            child: _footer(fg),
+          ),
+        ],
+      ),
+    );
+
+    // A little painted tail flick tucked into the bottom corner — the detail
+    // that reads as "real chat app" rather than a generic list of boxes.
+    final withTail = jumbo
+        ? bubble
+        : Stack(
+            clipBehavior: Clip.none,
+            children: [
+              bubble,
+              Positioned(
+                bottom: 0,
+                left: isMine ? null : -6,
+                right: isMine ? -6 : null,
+                child: CustomPaint(
+                  size: const Size(9, 14),
+                  painter: _BubbleTail(color: tailColor, mine: isMine),
+                ),
+              ),
+            ],
+          );
+
+    final content = AnimatedContainer(
       duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 9),
       color: highlighted
-          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.16)
+          ? scheme.primary.withValues(alpha: 0.16)
           : Colors.transparent,
       child: Align(
         alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-        child: GestureDetector(
-          onLongPress: onLongPress,
-        child: Container(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.80,
-          ),
-          margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 9),
-          padding: EdgeInsets.fromLTRB(
-              hasMedia ? 5 : 11, 6, hasMedia ? 5 : 11, 6),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.only(
-              topLeft: radius,
-              topRight: radius,
-              bottomLeft: isMine ? radius : const Radius.circular(4),
-              bottomRight: isMine ? const Radius.circular(4) : radius,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment:
+              isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onLongPress: onLongPress,
+              onDoubleTap: onDoubleTap,
+              child: withTail,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 1.5,
-                offset: const Offset(0, 1),
+            if (message.hasReactions && !message.deleted)
+              _ReactionChips(
+                message: message,
+                isMine: isMine,
+                onToggle: onToggleReaction,
               ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showSenderName && !isMine)
-                Padding(
-                  padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 1, 0, 3),
-                  child: Text(
-                    senderName ?? '',
-                    style: TextStyle(
-                      color: senderColor,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              if (repliedTo != null)
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: hasMedia ? 6 : 0),
-                  child: _ReplyQuote(
-                    message: repliedTo!,
-                    sender: repliedToSender,
-                    mine: isMine,
-                    onTap: onTapQuote,
-                  ),
-                ),
-              if (hasMedia) _media(context, fg),
-              if (message.deleted)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.block_rounded,
-                        size: 16, color: fg.withValues(alpha: 0.7)),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Diese Nachricht wurde gelöscht',
-                      style: TextStyle(
-                        color: fg.withValues(alpha: 0.7),
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
-                )
-              else if (hasText)
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                      hasMedia ? 6 : 0, hasMedia ? 6 : 0, hasMedia ? 6 : 0, 0),
-                  child: Text(
-                    message.body,
-                    style: TextStyle(
-                        color: fg, fontSize: 15.5 * textScale, height: 1.3),
-                  ),
-                ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 2, hasMedia ? 4 : 0, 0),
-                child: _footer(fg),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
-      ),
     );
+
+    if (onSwipeReply == null || message.deleted) return content;
+    return _SwipeToReply(onReply: onSwipeReply!, child: content);
   }
 
   Widget _footer(Color fg) {
@@ -173,6 +247,12 @@ class MessageBubble extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
+        if (starred)
+          Padding(
+            padding: const EdgeInsets.only(right: 5),
+            child: Icon(Icons.star_rounded,
+                size: 13, color: fg.withValues(alpha: 0.8)),
+          ),
         if (message.isEdited)
           Padding(
             padding: const EdgeInsets.only(right: 5),
@@ -370,6 +450,59 @@ class _VoiceAttachment extends StatelessWidget {
   }
 }
 
+class _VideoAttachment extends StatelessWidget {
+  final Attachment att;
+  final VoidCallback onTap;
+  const _VideoAttachment({required this.att, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: 240,
+          height: 150,
+          color: Colors.black87,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Icon(Icons.play_circle_fill_rounded,
+                  color: Colors.white, size: 56),
+              Positioned(
+                left: 8,
+                bottom: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.videocam_rounded,
+                          color: Colors.white, size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        att.name ?? 'Video',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _FileAttachment extends StatelessWidget {
   final Attachment att;
   final Color fg;
@@ -480,6 +613,183 @@ class _ReplyQuote extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The little emoji-reaction pills shown just under a bubble. The viewer's own
+/// reactions are highlighted; tapping one toggles it.
+class _ReactionChips extends StatelessWidget {
+  final Message message;
+  final bool isMine;
+  final void Function(String emoji)? onToggle;
+  const _ReactionChips({
+    required this.message,
+    required this.isMine,
+    this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final entries = message.reactions.entries.toList();
+    return Padding(
+      padding: const EdgeInsets.only(left: 12, right: 12, top: 2, bottom: 2),
+      child: Wrap(
+        spacing: 5,
+        runSpacing: 4,
+        alignment: isMine ? WrapAlignment.end : WrapAlignment.start,
+        children: [
+          for (final e in entries)
+            GestureDetector(
+              onTap: onToggle == null ? null : () => onToggle!(e.key),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: message.myReactions.contains(e.key)
+                      ? scheme.primary.withValues(alpha: 0.22)
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: message.myReactions.contains(e.key)
+                        ? scheme.primary.withValues(alpha: 0.7)
+                        : scheme.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(e.key, style: const TextStyle(fontSize: 13)),
+                    if (e.value > 1) ...[
+                      const SizedBox(width: 3),
+                      Text(
+                        '${e.value}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Swipe a bubble to the right to reply — the gesture WhatsApp users reach for
+/// instinctively. A reply glyph fades in as you drag and the action fires past a
+/// threshold, then the bubble springs back.
+class _SwipeToReply extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onReply;
+  const _SwipeToReply({required this.child, required this.onReply});
+
+  @override
+  State<_SwipeToReply> createState() => _SwipeToReplyState();
+}
+
+class _SwipeToReplyState extends State<_SwipeToReply> {
+  static const _trigger = 56.0;
+  double _dx = 0;
+  bool _fired = false;
+
+  void _update(DragUpdateDetails d) {
+    setState(() {
+      _dx = (_dx + d.delta.dx).clamp(0.0, 96.0);
+      if (_dx >= _trigger && !_fired) {
+        _fired = true;
+        HapticFeedback.selectionClick();
+      } else if (_dx < _trigger) {
+        _fired = false;
+      }
+    });
+  }
+
+  void _end(DragEndDetails _) {
+    if (_dx >= _trigger) widget.onReply();
+    setState(() {
+      _dx = 0;
+      _fired = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final progress = (_dx / _trigger).clamp(0.0, 1.0);
+    return GestureDetector(
+      onHorizontalDragUpdate: _update,
+      onHorizontalDragEnd: _end,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 18,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Opacity(
+                opacity: progress,
+                child: Transform.scale(
+                  scale: 0.6 + 0.4 * progress,
+                  child: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.reply_rounded,
+                        size: 18, color: scheme.primary),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedContainer(
+            duration:
+                _dx == 0 ? const Duration(milliseconds: 180) : Duration.zero,
+            curve: Curves.easeOut,
+            transform: Matrix4.translationValues(_dx, 0, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The small curved tail flick tucked into a bubble's bottom corner.
+class _BubbleTail extends CustomPainter {
+  final Color color;
+  final bool mine;
+  const _BubbleTail({required this.color, required this.mine});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+    final w = size.width;
+    final h = size.height;
+    final path = Path();
+    if (mine) {
+      path.moveTo(0, 0);
+      path.quadraticBezierTo(0, h * 0.78, w, h);
+      path.quadraticBezierTo(w * 0.42, h * 0.55, 0, h * 0.42);
+    } else {
+      path.moveTo(w, 0);
+      path.quadraticBezierTo(w, h * 0.78, 0, h);
+      path.quadraticBezierTo(w * 0.58, h * 0.55, w, h * 0.42);
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_BubbleTail old) => old.color != color || old.mine != mine;
 }
 
 class _SystemBubble extends StatelessWidget {

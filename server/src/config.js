@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Centralised runtime configuration. Everything is overridable through the
 // environment so the same build runs locally, in CI and in production.
@@ -52,8 +53,8 @@ export const config = {
   authRateMax: Number(process.env.AUTH_RATE_MAX) || 40,
 
   // Numbers entered without a country code are assumed to belong to this one
-  // (49 = Germany). Always overridable per input by typing +<cc>.
-  defaultCountryCode: (process.env.DEFAULT_COUNTRY_CODE || '49').replace(/\D/g, ''),
+  // (43 = Austria). Always overridable per input by typing +<cc>.
+  defaultCountryCode: (process.env.DEFAULT_COUNTRY_CODE || '43').replace(/\D/g, ''),
 
   // Max avatar upload size.
   maxAvatarBytes: Number(process.env.MAX_AVATAR_BYTES) || 5 * 1024 * 1024,
@@ -68,9 +69,81 @@ export const config = {
   // Contacts are matched in memory and never stored.
   maxContactMatch: Number(process.env.MAX_CONTACT_MATCH) || 2000,
 
+  // ---- Firebase phone verification -----------------------------------------
+  // The Firebase project whose ID tokens we accept as proof of phone ownership.
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID || 'ping-gj',
+  // When true, /auth/register refuses accounts without a valid Firebase phone
+  // token. Keep it off until the verifying app build is rolled out, then flip
+  // REQUIRE_PHONE_VERIFICATION=1 to enforce it.
+  requirePhoneVerification:
+    /^(1|true|yes)$/i.test(process.env.REQUIRE_PHONE_VERIFICATION || ''),
+
+  // ---- Firebase Cloud Messaging (push notifications) -----------------------
+  // Path to the Firebase service-account JSON (Project settings → Service
+  // accounts → "Generate new private key"). When present the server can send
+  // FCM push notifications for new messages / admin broadcasts to devices that
+  // don't currently have the app open. Without it push simply stays disabled
+  // (everything else keeps working over the live WebSocket).
+  firebaseServiceAccountPath:
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'firebase-service-account.json'),
+
+  // ---- Backups -------------------------------------------------------------
+  // Automatic daily snapshots of the SQLite database (via VACUUM INTO, which is
+  // consistent even while the server is running). Stored next to the DB unless
+  // overridden. Set BACKUP_ENABLED=0 to turn the scheduler off.
+  backupEnabled: !/^(0|false|no)$/i.test(process.env.BACKUP_ENABLED || ''),
+  backupDir:
+    process.env.BACKUP_DIR ||
+    (isMemoryDb
+      ? path.join(os.tmpdir(), 'ping-backups')
+      : path.join(path.dirname(path.resolve(dbFile)), 'backups')),
+  // How many daily snapshots to keep before pruning the oldest.
+  backupKeep: Number(process.env.BACKUP_KEEP) || 14,
+  // How often to snapshot (default 24h).
+  backupIntervalMs: Number(process.env.BACKUP_INTERVAL_MS) || 24 * 60 * 60 * 1000,
+
   // ---- Admin portal --------------------------------------------------------
   // Secret that unlocks /admin and the /api/admin/* endpoints. Required in
   // production; without it the admin portal stays disabled. In dev it defaults
   // to a known value so the portal works out of the box.
   adminToken: process.env.ADMIN_TOKEN || (isProd ? null : 'ping-admin-dev'),
+
+  // ---- App download (landing page + APK) -----------------------------------
+  // Where the public landing page picks up the latest Android build. The newest
+  // *.apk in this directory is what visitors download from `/` and `/download`.
+  // Defaults to server/public/downloads. Use `scripts/publish-apk.sh` to copy a
+  // fresh release build in.
+  apkDir:
+    process.env.APK_DIR ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'downloads'),
+  // The public URL of this deployment (used in invite links / landing copy).
+  publicUrl: (process.env.PUBLIC_URL || 'https://example.invalid').replace(/\/$/, ''),
+
+  // ---- SMS phone verification (server-side OTP) ----------------------------
+  // Ping can verify a phone number itself by texting a one-time code, instead of
+  // relying on Firebase. Pick a provider via SMS_PROVIDER:
+  //   'log'    – (default) no real SMS; the code is written to the server log and,
+  //              unless SMS_EXPOSE_CODE=0, returned in the API response so you can
+  //              test the whole flow before wiring up a paid gateway.
+  //   'twilio' – Twilio REST API. Needs SMS_TWILIO_SID, SMS_TWILIO_TOKEN, SMS_FROM.
+  //   'http'   – any generic HTTP SMS gateway: POSTs {"to","text"} as JSON to
+  //              SMS_HTTP_URL (optionally with an Authorization: SMS_HTTP_AUTH).
+  smsProvider: (process.env.SMS_PROVIDER || 'log').toLowerCase(),
+  smsFrom: process.env.SMS_FROM || 'Ping',
+  twilioSid: process.env.SMS_TWILIO_SID || '',
+  twilioToken: process.env.SMS_TWILIO_TOKEN || '',
+  smsHttpUrl: process.env.SMS_HTTP_URL || '',
+  smsHttpAuth: process.env.SMS_HTTP_AUTH || '',
+  // Return the code in the request response (handy for the 'log' provider and
+  // local testing). Defaults on whenever the provider can't actually deliver SMS.
+  smsExposeCode: process.env.SMS_EXPOSE_CODE
+    ? /^(1|true|yes)$/i.test(process.env.SMS_EXPOSE_CODE)
+    : (process.env.SMS_PROVIDER || 'log').toLowerCase() === 'log',
+  // One-time code shape + lifetime.
+  otpLength: Number(process.env.OTP_LENGTH) || 6,
+  otpTtlMs: Number(process.env.OTP_TTL_MS) || 5 * 60 * 1000,
+  otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS) || 5,
+  // Don't let the same number request a fresh code more often than this.
+  otpResendMs: Number(process.env.OTP_RESEND_MS) || 30 * 1000,
 };

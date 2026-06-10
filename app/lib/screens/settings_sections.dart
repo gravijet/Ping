@@ -5,7 +5,9 @@ import '../models/settings.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../services/wallpaper_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/wallpaper_picker.dart';
 
 // ---- Privacy ---------------------------------------------------------------
 
@@ -37,6 +39,28 @@ class PrivacySettingsScreen extends StatelessWidget {
             subtitle: const Text('Zeige „online" und „zuletzt online" an.'),
             value: s.showOnline,
             onChanged: (v) => update(s.copyWith(showOnline: v)),
+          ),
+          const Divider(),
+          SwitchListTile(
+            secondary: const Icon(Icons.cloud_off_rounded),
+            title: const Text('Nachrichten nur lokal speichern'),
+            subtitle: Text(state.localStorageOnly
+                ? 'Deine gesendeten Nachrichten werden vom Server gelöscht, '
+                    'sobald alle sie gelesen haben. Nur dieses Gerät behält eine '
+                    'Kopie — Verlauf auf neuen Geräten geht verloren.'
+                : 'Nachrichten bleiben auf dem Server (Standard) und sind auf '
+                    'allen deinen Geräten verfügbar.'),
+            value: state.localStorageOnly,
+            onChanged: (v) async {
+              try {
+                await state.setMessageStorage(v ? 'local' : 'server');
+              } on ApiException catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(e.message)));
+                }
+              }
+            },
           ),
           const Divider(),
           ListTile(
@@ -239,41 +263,21 @@ class ChatSettingsScreen extends StatelessWidget {
           ),
           const Divider(),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
             child: Text('Chat-Hintergrund',
                 style: Theme.of(context).textTheme.titleSmall),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (var i = 0; i < kChatWallpapers.length; i++)
-                  GestureDetector(
-                    onTap: () => update(s.copyWith(wallpaper: i)),
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: i == 0
-                            ? scheme.surfaceContainerHighest
-                            : Color(kChatWallpapers[i]),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: s.wallpaper == i
-                              ? scheme.primary
-                              : Colors.transparent,
-                          width: 3,
-                        ),
-                      ),
-                      child: i == 0
-                          ? const Icon(Icons.block_rounded, size: 18)
-                          : null,
-                    ),
-                  ),
-              ],
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Text(
+              'Gilt für alle Chats. Pro Chat lässt sich der Hintergrund in den '
+              'Chat-Infos überschreiben. Bild, GIF oder Video möglich.',
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
             ),
+          ),
+          WallpaperPicker(
+            current: WallpaperSpec.decode(s.wallpaperSpec),
+            onPick: (spec) => state.setGlobalWallpaper(spec),
           ),
           const SizedBox(height: 24),
         ],

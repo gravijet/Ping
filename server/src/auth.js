@@ -26,6 +26,25 @@ export function verifyToken(token) {
   }
 }
 
+// A short-lived token proving the holder verified [phone] via the SMS OTP flow.
+// Registration accepts it as proof of phone ownership (an alternative to the
+// Firebase ID token).
+export function signPhoneToken(phone) {
+  return jwt.sign({ purpose: 'phone_verify', phone }, config.jwtSecret, {
+    expiresIn: '20m',
+  });
+}
+
+// Returns the verified phone number for a valid phone-verify token, else null.
+export function verifyPhoneToken(token) {
+  try {
+    const payload = jwt.verify(token, config.jwtSecret);
+    return payload?.purpose === 'phone_verify' ? payload.phone : null;
+  } catch {
+    return null;
+  }
+}
+
 const findUser = db.prepare('SELECT * FROM users WHERE id = ?');
 
 // Express middleware: requires a valid Bearer token and loads the user.
@@ -44,6 +63,9 @@ export function requireAuth(req, res, next) {
   const user = findUser.get(payload.sub);
   if (!user) {
     return res.status(401).json({ error: 'Dieses Konto existiert nicht mehr.' });
+  }
+  if (user.disabled) {
+    return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
   }
   req.user = user;
   next();

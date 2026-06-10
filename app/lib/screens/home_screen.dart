@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/app_state.dart';
+import '../widgets/brand.dart';
 import '../widgets/chat_tile.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
@@ -90,7 +91,8 @@ class _HomeScreenState extends State<HomeScreen>
     final onStatus = _tabs.index == 1;
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: pingAppBar(
+        context,
         titleSpacing: 16,
         title: const Text('Ping'),
         actions: [
@@ -135,16 +137,18 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       ),
       floatingActionButton: onStatus
-          ? FloatingActionButton(
+          ? PingGradientFab(
+              heroTag: 'fab',
               onPressed: () => showAddStatusSheet(context),
-              child: const Icon(Icons.add_a_photo_rounded),
+              icon: Icons.add_a_photo_rounded,
             )
-          : FloatingActionButton.extended(
+          : PingGradientFab(
+              heroTag: 'fab',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const NewChatScreen()),
               ),
-              icon: const Icon(Icons.edit_rounded),
-              label: const Text('Neuer Chat'),
+              icon: Icons.edit_rounded,
+              label: 'Neuer Chat',
             ),
       body: TabBarView(
         controller: _tabs,

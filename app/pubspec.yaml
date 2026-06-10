@@ -28,6 +28,7 @@ dependencies:
   path_provider: ^2.1.5
   firebase_core: ^4.10.0
   firebase_auth: ^6.5.2
+  firebase_messaging: ^16.0.5
   video_player: ^2.11.1
 
 dev_dependencies:
@@ -37,3 +38,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf

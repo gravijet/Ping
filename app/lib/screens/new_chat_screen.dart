@@ -5,8 +5,11 @@ import '../models/chat.dart';
 import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../widgets/brand.dart';
+import '../widgets/invite_sheet.dart';
 import 'chat_screen.dart';
 import 'contact_picker_screen.dart';
+import 'debug_chat_screen.dart';
 import 'new_group_screen.dart';
 
 /// Starting point for a new conversation: pick from your contacts that are on
@@ -32,7 +35,10 @@ class NewChatScreen extends StatelessWidget {
   Future<void> _fromContacts(BuildContext context) async {
     final user = await Navigator.of(context).push<PingUser>(
       MaterialPageRoute(
-        builder: (_) => const ContactPickerScreen(title: 'Chat starten'),
+        builder: (_) => const ContactPickerScreen(
+          title: 'Chat starten',
+          allowInvite: true,
+        ),
       ),
     );
     if (user == null || !context.mounted) return;
@@ -51,6 +57,13 @@ class NewChatScreen extends StatelessWidget {
       builder: (_) => const _PhoneDialog(),
     );
     if (phone == null || !context.mounted) return;
+    // Hidden diagnostics console.
+    if (phone.replaceAll(' ', '') == '*0111') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DebugChatScreen()),
+      );
+      return;
+    }
     final state = context.read<AppState>();
     await _openChat(context, () => state.startDirectByPhone(phone));
   }
@@ -59,7 +72,7 @@ class NewChatScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Neuer Chat')),
+      appBar: pingAppBar(context, title: const Text('Neuer Chat')),
       body: ListView(
         children: [
           _tile(
@@ -91,6 +104,13 @@ class NewChatScreen extends StatelessWidget {
             () => Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const NewGroupScreen()),
             ),
+          ),
+          _tile(
+            scheme,
+            Icons.person_add_alt_rounded,
+            'Freunde einladen',
+            'Per WhatsApp, Telegram, SMS oder Link',
+            () => showInviteSheet(context),
           ),
           const Divider(height: 1),
           Padding(

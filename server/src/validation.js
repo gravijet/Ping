@@ -49,6 +49,16 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Bitte gib dein Passwort ein.'),
 });
 
+// SMS one-time-code verification.
+export const requestCodeSchema = z.object({ phone: phoneInputSchema });
+export const verifyCodeSchema = z.object({
+  phone: phoneInputSchema,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{4,8}$/, 'Bitte gib den Code aus der SMS ein.'),
+});
+
 export const updateProfileSchema = z.object({
   displayName: displayNameSchema.optional(),
   about: aboutSchema.optional(),
@@ -113,7 +123,7 @@ export const messageSendSchema = z
 // A status update ("story"): coloured text card, or an image with a caption.
 export const statusSchema = z
   .object({
-    type: z.enum(['text', 'image']).optional(),
+    type: z.enum(['text', 'image', 'video']).optional(),
     body: z.string().max(700, 'Der Status ist zu lang.').optional(),
     attachment: attachmentSchema.optional(),
     bgColor: avatarColorSchema.optional(),
@@ -121,9 +131,10 @@ export const statusSchema = z
   .refine(
     (d) => {
       const t = d.type || 'text';
-      return t === 'image' ? !!d.attachment : !!d.body && d.body.trim().length > 0;
+      // Text needs a body; image/video need an attachment.
+      return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
     },
-    { message: 'Ein Status braucht Text oder ein Bild.' }
+    { message: 'Ein Status braucht Text, ein Bild oder ein Video.' }
   );
 
 // Start a direct chat by user id or phone number. Discovery by email was
@@ -169,12 +180,18 @@ export const adminUpdateSchema = z
     displayName: displayNameSchema.optional(),
     password: passwordSchema.optional(),
     isAdmin: z.boolean().optional(),
+    email: emailSchema.optional(),
+    about: aboutSchema.optional(),
+    disabled: z.boolean().optional(),
   })
   .refine(
     (d) =>
       d.displayName !== undefined ||
       d.password !== undefined ||
-      d.isAdmin !== undefined,
+      d.isAdmin !== undefined ||
+      d.email !== undefined ||
+      d.about !== undefined ||
+      d.disabled !== undefined,
     { message: 'Nichts zu ändern.' }
   );
 
@@ -185,6 +202,21 @@ export const adminBroadcastSchema = z.object({
     .trim()
     .min(1, 'Bitte gib eine Nachricht ein.')
     .max(2000, 'Die Durchsage ist zu lang.'),
+});
+
+export const messageStorageSchema = z.object({
+  mode: z.enum(['server', 'local']),
+});
+
+// A single emoji reaction. We keep it short (an emoji can be several code units
+// with ZWJ/skin-tone modifiers) but never a long string.
+export const reactionSchema = z.object({
+  emoji: z.string().trim().min(1, 'Emoji fehlt.').max(16, 'Ungültiges Emoji.'),
+});
+
+export const pushTokenSchema = z.object({
+  token: z.string().trim().min(1, 'Token fehlt.').max(4096),
+  platform: z.enum(['android', 'ios', 'web']).optional(),
 });
 
 // Parse with a schema and throw a structured 400-style error on failure.

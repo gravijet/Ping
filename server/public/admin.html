@@ -5,328 +5,422 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Ping · Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg: #0b1622; --card: #11202f; --card2: #17293b; --line: #22384c;
-      --text: #eaf2fb; --muted: #93a7bd; --primary: #1d9bf0;
-      --primary2: #0a84ff; --accent: #38bdf8; --danger: #ef4444; --ok: #22c55e;
+    :root{
+      --bg:#060b14; --panel:rgba(255,255,255,.045); --panel2:rgba(255,255,255,.07);
+      --line:rgba(255,255,255,.10); --text:#eaf2fb; --muted:#90a4be;
+      --brand:#0a84ff; --brand2:#34b7f1; --accent:#6c5cff; --pink:#ff4d8d;
+      --danger:#f0506e; --ok:#22c55e; --warn:#f59e0b;
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: radial-gradient(1200px 600px at 18% -10%, #123249, var(--bg)); color: var(--text);
-      min-height: 100vh;
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Plus Jakarta Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text);
+      background:
+        radial-gradient(1000px 560px at 0% -8%, rgba(108,92,255,.20), transparent 60%),
+        radial-gradient(900px 520px at 100% 0%, rgba(52,183,241,.14), transparent 55%),
+        var(--bg);
+      min-height:100vh;-webkit-font-smoothing:antialiased}
+    a{color:var(--brand2)}
+    button,input,select,textarea{font:inherit}
+
+    /* ---------- login ---------- */
+    .login-wrap{min-height:100vh;display:grid;place-items:center;padding:22px}
+    .login-card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:24px;
+      padding:30px;backdrop-filter:blur(16px);box-shadow:0 30px 80px rgba(0,0,0,.5)}
+    .login-card .logo{margin:0 auto 16px}
+    .logo{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--accent));box-shadow:0 10px 30px rgba(10,132,255,.5)}
+    .logo svg{width:30px;height:30px}
+    .login-card h1{text-align:center;font-size:22px;margin:0 0 4px}
+    .login-card .muted{text-align:center}
+    .muted{color:var(--muted)}
+    label{display:block;font-size:12.5px;color:var(--muted);margin:14px 0 6px;font-weight:600}
+    input,select,textarea{width:100%;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);padding:11px 13px;outline:none;transition:border-color .2s,box-shadow .2s}
+    input:focus,textarea:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(10,132,255,.25)}
+    textarea{resize:vertical;min-height:64px}
+    .btn{cursor:pointer;border:none;border-radius:12px;padding:11px 16px;font-weight:700;color:#fff;
+      background:linear-gradient(135deg,var(--brand),var(--accent));box-shadow:0 10px 26px rgba(10,132,255,.35);transition:transform .14s,box-shadow .14s}
+    .btn:hover{transform:translateY(-1px);box-shadow:0 14px 32px rgba(10,132,255,.5)}
+    .btn.sec{background:var(--panel2);border:1px solid var(--line);color:var(--text);box-shadow:none}
+    .btn.danger{background:linear-gradient(135deg,#f0506e,#ff4d8d);box-shadow:none}
+    .btn.ghost{background:transparent;color:var(--muted);box-shadow:none}
+    .btn.sm{padding:7px 11px;font-size:13px;border-radius:10px}
+    .btn:disabled{opacity:.5;cursor:default}
+
+    /* ---------- app shell ---------- */
+    .shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+    .side{position:sticky;top:0;height:100vh;border-right:1px solid var(--line);padding:22px 16px;display:flex;flex-direction:column;
+      background:rgba(255,255,255,.02);backdrop-filter:blur(8px)}
+    .side .brand{display:flex;align-items:center;gap:12px;padding:0 8px 18px}
+    .side .brand .logo{width:42px;height:42px;border-radius:12px}
+    .side .brand b{font-size:18px;letter-spacing:-.3px}
+    .nav{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+    .navitem{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:12px;color:var(--muted);font-weight:600;cursor:pointer;font-size:14.5px;transition:.18s}
+    .navitem .i{width:20px;text-align:center;font-size:16px}
+    .navitem:hover{background:var(--panel);color:var(--text)}
+    .navitem.active{background:linear-gradient(135deg,rgba(10,132,255,.9),rgba(108,92,255,.9));color:#fff;box-shadow:0 8px 22px rgba(10,132,255,.35)}
+    .side .foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line)}
+    .main{padding:26px 30px 70px;max-width:1180px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px}
+    .topbar h2{margin:0;font-size:24px;letter-spacing:-.5px}
+    .topbar .muted{font-size:13.5px}
+    @media(max-width:840px){
+      .shell{grid-template-columns:1fr}
+      .side{position:static;height:auto;flex-direction:row;align-items:center;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
+      .side .brand{padding:0 12px 0 4px}.side .brand b{display:none}
+      .nav{flex-direction:row;margin:0}.navitem .lbl{display:none}.navitem{padding:10px}.side .foot{margin:0 0 0 auto;border:none;padding:0}
+      .main{padding:18px}
     }
-    a { color: var(--accent); }
-    .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 18px 64px; }
-    .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
-    .logo { width: 46px; height: 46px; border-radius: 14px;
-      background: linear-gradient(135deg, var(--primary2), var(--accent));
-      display: grid; place-items: center; box-shadow: 0 8px 24px rgba(10,132,255,.35); }
-    .logo svg { width: 26px; height: 26px; }
-    h1 { font-size: 22px; margin: 0; letter-spacing: -.3px; }
-    h2 { letter-spacing: -.2px; }
-    .muted { color: var(--muted); }
-    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px; margin-top: 18px; }
-    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
-    input, button, select, textarea {
-      font: inherit; border-radius: 11px; border: 1px solid var(--line);
-      background: var(--card2); color: var(--text); padding: 10px 12px;
-    }
-    input, textarea { width: 100%; }
-    textarea { resize: vertical; min-height: 64px; }
-    button { cursor: pointer; border: none; background: var(--primary2); color: white; font-weight: 600; }
-    button.secondary { background: var(--card2); border: 1px solid var(--line); }
-    button.danger { background: var(--danger); }
-    button.ghost { background: transparent; color: var(--muted); }
-    button:disabled { opacity: .5; cursor: default; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
-    .row > div { flex: 1; min-width: 160px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
-    .stat { background: var(--card2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
-    .stat .n { font-size: 28px; font-weight: 800; letter-spacing: -.5px; }
-    .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
-    .stat .n.on { color: #4ade80; }
-    table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 14px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-    th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
-    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-    .pill.admin { background: rgba(29,155,240,.22); color: #9bd3ff; }
-    .pill.on { background: rgba(34,197,94,.2); color: #86efac; }
-    .pill.off { background: rgba(147,167,189,.15); color: var(--muted); }
-    .actions { display: flex; gap: 6px; justify-content: flex-end; }
-    .actions button { padding: 6px 9px; font-size: 13px; }
-    .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-      background: var(--card2); border: 1px solid var(--line); padding: 12px 18px; border-radius: 12px;
-      opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
-    .toast.show { opacity: 1; }
-    .note { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
-    .hidden { display: none; }
-    .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+    /* ---------- cards / stats ---------- */
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;margin-top:18px;backdrop-filter:blur(10px)}
+    .card h3{margin:0 0 14px;font-size:16px}
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+    .stat{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px 18px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s}
+    .stat:hover{transform:translateY(-3px);border-color:rgba(52,183,241,.35)}
+    .stat .ic{position:absolute;right:14px;top:14px;font-size:20px;opacity:.5}
+    .stat .n{font-size:30px;font-weight:800;letter-spacing:-1px}
+    .stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;font-weight:600}
+    .stat .d{font-size:12px;margin-top:8px;color:var(--ok);font-weight:600}
+    .stat .n.on{color:#4ade80}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    @media(max-width:820px){.two{grid-template-columns:1fr}}
+
+    /* ---------- charts ---------- */
+    .chart{position:relative;height:170px;padding:18px 4px 26px;display:flex;align-items:flex-end;gap:10px}
+    .gridlines{position:absolute;inset:18px 4px 26px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+    .gridlines div{border-top:1px dashed rgba(255,255,255,.07);height:0}
+    .bar{flex:1;border-radius:9px 9px 5px 5px;min-height:5px;position:relative;background:linear-gradient(180deg,var(--brand2),var(--brand));transition:height .5s cubic-bezier(.2,.7,.2,1);cursor:default}
+    .bar.alt{background:linear-gradient(180deg,#9a8bff,var(--accent))}
+    .bar:hover{filter:brightness(1.15)}
+    .bar .v{position:absolute;top:-20px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--text);font-weight:700;opacity:0;transition:.2s}
+    .bar:hover .v,.bar.show .v{opacity:1}
+    .bar .x{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted)}
+
+    /* ---------- tables ---------- */
+    .toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:6px}
+    .toolbar>div{flex:1;min-width:160px}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+    th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
+    tbody tr{transition:background .15s}
+    tbody tr.click{cursor:pointer}
+    tbody tr:hover td{background:rgba(255,255,255,.035)}
+    .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+    .pill.admin{background:rgba(108,92,255,.25);color:#cfc9ff}
+    .pill.on{background:rgba(34,197,94,.2);color:#86efac}
+    .pill.off{background:rgba(144,164,190,.14);color:var(--muted)}
+    .pill.ban{background:rgba(240,80,110,.22);color:#ffb3c0}
+    .pill.grp{background:rgba(52,183,241,.18);color:#9ad8f5}
+    .rowact{display:flex;gap:6px;justify-content:flex-end}
+    .empty{color:var(--muted);font-size:13.5px;margin-top:14px}
+    .scroll{overflow-x:auto}
+
+    /* ---------- modal ---------- */
+    .overlay{position:fixed;inset:0;background:rgba(3,6,12,.66);backdrop-filter:blur(4px);display:grid;place-items:center;z-index:60;padding:18px;animation:fade .2s}
+    @keyframes fade{from{opacity:0}to{opacity:1}}
+    .modal{background:#0c1622;border:1px solid var(--line);border-radius:22px;padding:24px;max-width:520px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 40px 90px rgba(0,0,0,.6)}
+    .modal .mh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+    .modal .mh h3{margin:0;font-size:20px}
+    .kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+    .kv span{color:var(--muted)}
+    .msgline{padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+    .msgline .who{font-weight:700;font-size:12.5px;color:var(--brand2)}
+    .msgline .meta{color:var(--muted);font-size:11.5px;float:right}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+    .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);opacity:0;background:#0f1d2c;border:1px solid var(--line);padding:13px 20px;border-radius:13px;font-size:14px;transition:.25s;pointer-events:none;z-index:80}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    .hidden{display:none}
+    .row-inline{display:flex;gap:10px;flex-wrap:wrap}
+    .row-inline>*{flex:1;min-width:150px}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="brand">
-      <div class="logo">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".95"/>
-          <circle cx="9" cy="10.5" r="1.4" fill="#0a84ff"/>
-          <circle cx="13" cy="10.5" r="1.4" fill="#0a84ff"/>
-          <circle cx="17" cy="10.5" r="1.4" fill="#0a84ff"/>
-        </svg>
-      </div>
-      <div>
-        <h1>Ping · Admin-Portal</h1>
-        <div class="muted">Nutzer, Statistik &amp; Durchsagen</div>
-      </div>
-    </div>
-
-    <!-- Login -->
-    <div id="login" class="card hidden">
-      <h2 style="margin-top:0">Anmelden</h2>
-      <p class="note">Gib das Admin-Token ein (Server-Umgebungsvariable <code>ADMIN_TOKEN</code>).</p>
-      <label for="token">Admin-Token</label>
+  <!-- LOGIN -->
+  <div id="login" class="login-wrap hidden">
+    <div class="login-card">
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".96"/><circle cx="9" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="13" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="17" cy="10.5" r="1.5" fill="#0a84ff"/></svg></div>
+      <h1>Ping · Admin</h1>
+      <p class="muted">Melde dich mit dem Admin-Token an.</p>
+      <label>Admin-Token</label>
       <input id="token" type="password" placeholder="••••••••" autocomplete="off" />
-      <div style="margin-top:12px"><button id="loginBtn">Entsperren</button></div>
-      <p id="loginErr" class="note" style="color:var(--danger)"></p>
-    </div>
-
-    <!-- Dashboard -->
-    <div id="dash" class="hidden">
-      <div class="card">
-        <div class="head" style="margin-bottom:14px">
-          <h2 style="margin:0">Übersicht</h2>
-          <button class="ghost" id="logoutBtn">Abmelden</button>
-        </div>
-        <div class="stats" id="stats"></div>
-      </div>
-
-      <div class="card">
-        <h2 style="margin-top:0">📣 Durchsage an alle Online-Nutzer</h2>
-        <div class="row">
-          <div style="flex:0 0 220px"><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
-          <div><label>Nachricht</label><input id="b_body" placeholder="z. B. Wartung um 22 Uhr" /></div>
-          <button id="broadcastBtn">Senden</button>
-        </div>
-        <p class="note">Die Durchsage erscheint sofort bei allen verbundenen Apps.</p>
-      </div>
-
-      <div class="card">
-        <h2 style="margin-top:0">Nutzer anlegen</h2>
-        <div class="grid">
-          <div><label>Name</label><input id="c_name" placeholder="Anna Beispiel" /></div>
-          <div><label>Handynummer</label><input id="c_phone" placeholder="+49 170 1234567" /></div>
-          <div><label>E-Mail</label><input id="c_email" placeholder="user@example.invalid" /></div>
-          <div><label>Passwort</label><input id="c_pw" type="text" placeholder="mind. 6 Zeichen" /></div>
-        </div>
-        <div style="margin-top:12px; display:flex; gap:12px; align-items:center">
-          <label style="display:flex; gap:8px; align-items:center; margin:0; color:var(--text)">
-            <input id="c_admin" type="checkbox" style="width:auto" /> Als Admin anlegen
-          </label>
-          <button id="createBtn">Anlegen</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="row" style="margin-bottom:8px">
-          <div>
-            <label>Suche (Name, E-Mail, Nummer)</label>
-            <input id="q" placeholder="suchen …" />
-          </div>
-          <button class="secondary" id="reloadBtn">Aktualisieren</button>
-        </div>
-        <div style="overflow-x:auto">
-          <table>
-            <thead>
-              <tr><th>Name</th><th>Nummer</th><th>E-Mail</th><th>Status</th><th>Erstellt</th><th></th></tr>
-            </thead>
-            <tbody id="rows"></tbody>
-          </table>
-        </div>
-        <p id="empty" class="note hidden" style="margin-top:14px">Keine Nutzer gefunden.</p>
-      </div>
-
-      <div class="card">
-        <h2 style="margin-top:0">🔒 Datenschutz</h2>
-        <p class="note">
-          Dieses Portal zeigt personenbezogene Daten (Nummer, E-Mail) und ist nur über das
-          geheime Admin-Token oder ein Admin-Konto erreichbar. Greife nur darauf zu, wenn es
-          für die Verwaltung nötig ist, gib das Token nicht weiter, und nutze in Produktion
-          ausschließlich HTTPS. Kontaktlisten der App werden serverseitig nie gespeichert.
-        </p>
-      </div>
+      <div style="margin-top:16px"><button class="btn" id="loginBtn" style="width:100%">Entsperren</button></div>
+      <p id="loginErr" class="muted" style="color:var(--danger);text-align:center"></p>
     </div>
   </div>
 
+  <!-- DASHBOARD -->
+  <div id="dash" class="shell hidden">
+    <aside class="side">
+      <div class="brand">
+        <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".96"/><circle cx="9" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="13" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="17" cy="10.5" r="1.5" fill="#0a84ff"/></svg></div>
+        <b>Ping Admin</b>
+      </div>
+      <div class="nav">
+        <div class="navitem active" data-tab="overview"><span class="i">📊</span><span class="lbl">Übersicht</span></div>
+        <div class="navitem" data-tab="users"><span class="i">👤</span><span class="lbl">Nutzer</span></div>
+        <div class="navitem" data-tab="chats"><span class="i">💬</span><span class="lbl">Chats</span></div>
+        <div class="navitem" data-tab="broadcast"><span class="i">📣</span><span class="lbl">Durchsagen</span></div>
+        <div class="navitem" data-tab="system"><span class="i">🖥️</span><span class="lbl">System</span></div>
+      </div>
+      <div class="foot"><button class="btn ghost" id="logoutBtn">⎋ Abmelden</button></div>
+    </aside>
+
+    <main class="main">
+      <!-- OVERVIEW -->
+      <section data-pane="overview">
+        <div class="topbar"><div><h2>Übersicht</h2><div class="muted">Live-Statistik &amp; Aktivität</div></div>
+          <button class="btn sec sm" data-reload="overview">↻ Aktualisieren</button></div>
+        <div class="stats" id="stats"></div>
+        <div class="card two">
+          <div><h3>Neue Nutzer · 7 Tage</h3><div class="chart" id="chartUsers"></div></div>
+          <div><h3>Nachrichten · 7 Tage</h3><div class="chart" id="chartMsgs"></div></div>
+        </div>
+      </section>
+
+      <!-- USERS -->
+      <section data-pane="users" class="hidden">
+        <div class="topbar"><div><h2>Nutzer</h2><div class="muted">Konten verwalten, sperren, anschreiben</div></div>
+          <div style="display:flex;gap:8px"><a class="btn sec sm" id="csvBtn">⬇ CSV</a><button class="btn sec sm" data-reload="users">↻</button></div></div>
+        <div class="card">
+          <h3>Nutzer anlegen</h3>
+          <div class="grid2">
+            <div><label>Name</label><input id="c_name" placeholder="Anna Beispiel" /></div>
+            <div><label>Handynummer</label><input id="c_phone" placeholder="+43 660 1234567" /></div>
+            <div><label>E-Mail</label><input id="c_email" placeholder="user@example.invalid" /></div>
+            <div><label>Passwort</label><input id="c_pw" type="text" placeholder="mind. 6 Zeichen" /></div>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:14px;align-items:center">
+            <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="c_admin" type="checkbox" style="width:auto" /> Als Admin</label>
+            <button class="btn" id="createBtn">Anlegen</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="toolbar"><div><label>Suche (Name, E-Mail, Nummer)</label><input id="q" placeholder="suchen …" /></div></div>
+          <div class="scroll"><table><thead><tr><th>Name</th><th>Nummer</th><th>E-Mail</th><th>Status</th><th>Erstellt</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+          <p id="empty" class="empty hidden">Keine Nutzer gefunden.</p>
+        </div>
+      </section>
+
+      <!-- CHATS -->
+      <section data-pane="chats" class="hidden">
+        <div class="topbar"><div><h2>Chats</h2><div class="muted">Moderation – Inhalte ansehen, Chats entfernen</div></div>
+          <button class="btn sec sm" data-reload="chats">↻</button></div>
+        <div class="card">
+          <div class="toolbar"><div><label>Chats durchsuchen</label><input id="cq" placeholder="Titel suchen …" /></div></div>
+          <div class="scroll"><table><thead><tr><th>Titel</th><th>Typ</th><th>Mitglieder</th><th>Nachrichten</th><th>Letzte Aktivität</th><th></th></tr></thead><tbody id="chatRows"></tbody></table></div>
+          <p id="chatEmpty" class="empty hidden">Keine Chats gefunden.</p>
+        </div>
+      </section>
+
+      <!-- BROADCAST -->
+      <section data-pane="broadcast" class="hidden">
+        <div class="topbar"><div><h2>Durchsagen</h2><div class="muted">An alle senden – live &amp; als Push</div></div>
+          <button class="btn sec sm" data-reload="broadcast">↻</button></div>
+        <div class="card">
+          <h3>📣 Neue Durchsage</h3>
+          <div class="row-inline">
+            <div style="flex:0 0 220px"><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
+            <div style="flex:2"><label>Nachricht</label><input id="b_body" placeholder="z. B. Wartung um 22 Uhr" /></div>
+            <div style="flex:0 0 auto;display:flex;align-items:end"><button class="btn" id="broadcastBtn">Senden</button></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Verlauf</h3>
+          <div class="scroll"><table><thead><tr><th>Zeitpunkt</th><th>Titel</th><th>Nachricht</th><th>Live</th><th>Push</th></tr></thead><tbody id="bcRows"></tbody></table></div>
+          <p id="bcEmpty" class="empty hidden">Noch keine Durchsagen.</p>
+        </div>
+      </section>
+
+      <!-- SYSTEM -->
+      <section data-pane="system" class="hidden">
+        <div class="topbar"><div><h2>System</h2><div class="muted">Serverzustand, App-Build &amp; Backups</div></div>
+          <button class="btn sec sm" data-reload="system">↻</button></div>
+        <div class="stats" id="sysGrid"></div>
+        <div class="card two">
+          <div>
+            <h3>📱 App-Download</h3>
+            <div id="dlInfo" class="muted">…</div>
+            <div style="margin-top:12px"><a class="btn sec sm" href="/download/info" target="_blank">Build-Info</a> <a class="btn sec sm" href="/" target="_blank">Landing-Page</a></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">💾 Backups</h3><button class="btn sm" id="backupBtn">Jetzt sichern</button></div>
+            <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Datei</th><th>Größe</th><th>Erstellt</th></tr></thead><tbody id="backupRows"></tbody></table></div>
+            <p id="backupEmpty" class="empty hidden">Noch keine Backups.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
   <div id="toast" class="toast"></div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    let token = sessionStorage.getItem('ping_admin_token') || '';
+    const $=(id)=>document.getElementById(id);
+    let token=sessionStorage.getItem('ping_admin_token')||'';
+    function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+    function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function fmtDate(ms){if(!ms)return'–';try{return new Date(ms).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'});}catch{return'–';}}
+    function fmtDateTime(ms){if(!ms)return'–';try{return new Date(ms).toLocaleString('de-DE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return'–';}}
+    function human(b){if(b==null)return'—';const u=['B','KB','MB','GB'];let i=0,n=b;while(n>=1024&&i<u.length-1){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+' '+u[i];}
+    function fmtUptime(s){if(!s)return'–';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+'d ':'')+(h?h+'h ':'')+m+'m';}
+    function dayLabel(ms){try{return new Date(ms).toLocaleDateString('de-DE',{weekday:'short'});}catch{return'';}}
 
-    function toast(msg) {
-      const t = $('toast'); t.textContent = msg; t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2600);
-    }
-    function esc(s) {
-      return String(s ?? '').replace(/[&<>"']/g, (c) =>
-        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    }
-    function fmtDate(ms) {
-      if (!ms) return '–';
-      try { return new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' }); }
-      catch { return '–'; }
-    }
-
-    async function api(path, opts = {}) {
-      const res = await fetch('/api' + path, {
-        ...opts,
-        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token, ...(opts.headers || {}) },
-      });
-      if (res.status === 401) { logout(); throw new Error('Falsches Token.'); }
-      const body = res.status === 204 ? null : await res.json().catch(() => null);
-      if (!res.ok) throw new Error((body && body.error) || ('Fehler ' + res.status));
+    async function api(path,opts={}){
+      const res=await fetch('/api'+path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Token':token,...(opts.headers||{})}});
+      if(res.status===401){logout();throw new Error('Falsches Token.');}
+      const body=res.status===204?null:await res.json().catch(()=>null);
+      if(!res.ok)throw new Error((body&&body.error)||('Fehler '+res.status));
       return body;
     }
+    function showLogin(){$('login').classList.remove('hidden');$('dash').classList.add('hidden');}
+    function showDash(){$('login').classList.add('hidden');$('dash').classList.remove('hidden');}
+    function logout(){token='';sessionStorage.removeItem('ping_admin_token');showLogin();}
+    async function login(){const v=$('token').value.trim();if(!v)return;token=v;
+      try{await loadOverview();sessionStorage.setItem('ping_admin_token',token);showDash();switchTab('overview');}
+      catch(e){token='';$('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.';}}
 
-    function showLogin() { $('login').classList.remove('hidden'); $('dash').classList.add('hidden'); }
-    function showDash() { $('login').classList.add('hidden'); $('dash').classList.remove('hidden'); }
+    function switchTab(name){
+      document.querySelectorAll('.navitem').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+      document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));
+      ({overview:loadOverview,users:loadUsers,chats:loadChats,broadcast:loadBroadcasts,system:loadSystem}[name]||(()=>{}))().catch(e=>toast(e.message));
+    }
+    document.querySelectorAll('.navitem').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+    document.querySelectorAll('[data-reload]').forEach(b=>b.onclick=()=>({overview:loadOverview,users:loadUsers,chats:loadChats,broadcast:loadBroadcasts,system:loadSystem}[b.dataset.reload])().catch(e=>toast(e.message)));
 
-    function logout() {
-      token = ''; sessionStorage.removeItem('ping_admin_token'); showLogin();
+    // ---- overview ----
+    function stat(n,l,icon,cls,d){return '<div class="stat"><div class="ic">'+(icon||'')+'</div><div class="n '+(cls||'')+'">'+n+'</div><div class="l">'+l+'</div>'+(d?'<div class="d">'+d+'</div>':'')+'</div>';}
+    function chart(el,data,alt){
+      const max=Math.max(1,...data.map(d=>d.n));
+      el.innerHTML='<div class="gridlines"><div></div><div></div><div></div><div></div></div>'+
+        data.map(d=>{const h=Math.round(d.n/max*100);return '<div class="bar'+(alt?' alt':'')+'" style="height:'+Math.max(5,h)+'%"><span class="v">'+d.n+'</span><span class="x">'+dayLabel(d.day)+'</span></div>';}).join('');
+    }
+    async function loadOverview(){
+      const o=await api('/admin/overview');const s=o.stats;
+      $('stats').innerHTML=
+        stat(s.users,'Nutzer','👤',null,s.newUsers7d?('+'+s.newUsers7d+' / 7T'):'')+
+        stat(s.online,'Online','🟢','on')+
+        stat(s.messages,'Nachrichten','💬',null,s.messages24h?('+'+s.messages24h+' / 24h'):'')+
+        stat(s.chats,'Chats','🗂️')+
+        stat(s.groups,'Gruppen','👥')+
+        stat(s.statuses,'Status aktiv','📸')+
+        stat(s.admins,'Admins','🛡️')+
+        stat(s.pushTokens,'Push-Geräte','🔔')+
+        stat(s.blocks,'Blockierungen','🚫')+
+        stat(human(s.uploadBytes),'Medien ('+s.uploads+')','🖼️');
+      chart($('chartUsers'),o.charts.usersPerDay,false);
+      chart($('chartMsgs'),o.charts.messagesPerDay,true);
     }
 
-    async function login() {
-      const val = $('token').value.trim();
-      if (!val) return;
-      token = val;
-      try {
-        await refresh();
-        sessionStorage.setItem('ping_admin_token', token);
-        showDash();
-      } catch (e) {
-        token = '';
-        $('loginErr').textContent = e.message || 'Anmeldung fehlgeschlagen.';
-      }
-    }
-
-    function statCard(n, l, cls) {
-      return '<div class="stat"><div class="n ' + (cls || '') + '">' + n + '</div><div class="l">' + l + '</div></div>';
-    }
-
-    async function refresh() {
-      const s = await api('/admin/stats');
-      $('stats').innerHTML =
-        statCard(s.users ?? '–', 'Nutzer') +
-        statCard(s.online ?? '–', 'Online', 'on') +
-        statCard(s.admins ?? '–', 'Admins') +
-        statCard(s.chats ?? '–', 'Chats') +
-        statCard(s.groups ?? '–', 'Gruppen') +
-        statCard(s.messages ?? '–', 'Nachrichten') +
-        statCard(s.statuses ?? '–', 'Status aktiv');
-      await loadUsers();
-    }
-
-    async function loadUsers() {
-      const q = encodeURIComponent($('q').value.trim());
-      const { users } = await api('/admin/users?q=' + q);
-      const rows = $('rows');
-      rows.innerHTML = '';
-      $('empty').classList.toggle('hidden', users.length > 0);
-      for (const u of users) {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + esc(u.displayName) +
-            (u.isAdmin ? ' <span class="pill admin">Admin</span>' : '') + '</td>' +
-          '<td>' + esc(u.phone) + '</td>' +
-          '<td>' + esc(u.email) + '</td>' +
-          '<td><span class="pill ' + (u.online ? 'on">online' : 'off">offline') + '</span></td>' +
-          '<td>' + fmtDate(u.createdAt) + '</td>' +
-          '<td><div class="actions">' +
-            '<button class="secondary" data-act="admin" data-id="' + u.id + '">' +
-              (u.isAdmin ? 'Admin entz.' : 'Admin') + '</button>' +
-            '<button class="secondary" data-act="pw" data-id="' + u.id + '">Passwort</button>' +
-            '<button class="danger" data-act="del" data-id="' + u.id + '" data-name="' + esc(u.displayName) + '">Löschen</button>' +
-          '</div></td>';
-        tr.querySelector('[data-act=admin]').onclick = () => toggleAdmin(u);
-        tr.querySelector('[data-act=pw]').onclick = () => resetPw(u);
-        tr.querySelector('[data-act=del]').onclick = () => del(u);
+    // ---- users ----
+    async function loadUsers(){
+      const q=encodeURIComponent($('q').value.trim());
+      const {users}=await api('/admin/users?q='+q);
+      const rows=$('rows');rows.innerHTML='';$('empty').classList.toggle('hidden',users.length>0);
+      for(const u of users){
+        const tr=document.createElement('tr');tr.className='click';
+        const status=(u.online?'<span class="pill on">online</span>':'<span class="pill off">offline</span>')+
+          (u.isAdmin?' <span class="pill admin">Admin</span>':'')+(u.disabled?' <span class="pill ban">gesperrt</span>':'');
+        tr.innerHTML='<td><b>'+esc(u.displayName)+'</b></td><td>'+esc(u.phone)+'</td><td>'+esc(u.email)+'</td><td>'+status+'</td><td>'+fmtDate(u.createdAt)+'</td>'+
+          '<td><div class="rowact"><button class="btn sec sm" data-ban>'+(u.disabled?'Entsperren':'Sperren')+'</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
+        tr.querySelector('[data-ban]').onclick=(e)=>{e.stopPropagation();setBan(u,!u.disabled);};
+        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delUser(u);};
+        tr.onclick=()=>openUser(u.id);
         rows.appendChild(tr);
       }
     }
-
-    async function broadcast() {
-      const body = $('b_body').value.trim();
-      if (!body) return toast('Bitte eine Nachricht eingeben.');
-      try {
-        const r = await api('/admin/broadcast', {
-          method: 'POST',
-          body: JSON.stringify({ title: $('b_title').value.trim(), body }),
-        });
-        $('b_body').value = '';
-        toast('Durchsage an ' + r.delivered + ' Online-Nutzer gesendet.');
-      } catch (e) { toast(e.message); }
+    async function createUser(){
+      const body={displayName:$('c_name').value.trim(),phone:$('c_phone').value.trim(),email:$('c_email').value.trim(),password:$('c_pw').value,isAdmin:$('c_admin').checked};
+      try{await api('/admin/users',{method:'POST',body:JSON.stringify(body)});$('c_name').value=$('c_phone').value=$('c_email').value=$('c_pw').value='';$('c_admin').checked=false;toast('Nutzer angelegt.');loadUsers();}catch(e){toast(e.message);}
     }
+    async function setBan(u,disabled){try{await api('/admin/users/'+u.id,{method:'PATCH',body:JSON.stringify({disabled})});toast(disabled?'Konto gesperrt.':'Konto entsperrt.');loadUsers();}catch(e){toast(e.message);}}
+    async function delUser(u){if(!confirm('„'+u.displayName+'“ wirklich löschen?'))return;try{await api('/admin/users/'+u.id,{method:'DELETE'});toast('Nutzer gelöscht.');loadUsers();}catch(e){toast(e.message);}}
 
-    async function createUser() {
-      const body = {
-        displayName: $('c_name').value.trim(),
-        phone: $('c_phone').value.trim(),
-        email: $('c_email').value.trim(),
-        password: $('c_pw').value,
-        isAdmin: $('c_admin').checked,
-      };
-      try {
-        await api('/admin/users', { method: 'POST', body: JSON.stringify(body) });
-        $('c_name').value = $('c_phone').value = $('c_email').value = $('c_pw').value = '';
-        $('c_admin').checked = false;
-        toast('Nutzer angelegt.');
-        await refresh();
-      } catch (e) { toast(e.message); }
+    async function openUser(id){
+      let data;try{data=await api('/admin/users/'+id);}catch(e){return toast(e.message);}
+      const u=data.user,a=data.activity||{};closeModal();
+      const m=document.createElement('div');m.className='overlay';m.onclick=(e)=>{if(e.target===m)closeModal();};
+      m.innerHTML='<div class="modal"><div class="mh"><h3>'+esc(u.displayName)+'</h3><button class="btn ghost" data-x>✕</button></div>'+
+        '<div class="kv"><span>Status</span><b>'+(u.online?'online':'offline')+(u.disabled?' · gesperrt':'')+(u.isAdmin?' · Admin':'')+'</b></div>'+
+        '<div class="kv"><span>Nachrichten</span><b>'+(a.messages??'–')+'</b></div>'+
+        '<div class="kv"><span>Chats</span><b>'+(a.chats??'–')+'</b></div>'+
+        '<div class="kv"><span>Zuletzt gesehen</span><b>'+fmtDateTime(u.lastSeen)+'</b></div>'+
+        '<div class="kv"><span>Erstellt</span><b>'+fmtDate(u.createdAt)+'</b></div>'+
+        '<label>Name</label><input id="m_name" value="'+esc(u.displayName)+'" />'+
+        '<label>E-Mail</label><input id="m_email" value="'+esc(u.email)+'" />'+
+        '<label>Über mich</label><input id="m_about" value="'+esc(u.about||'')+'" />'+
+        '<label>Neues Passwort (optional)</label><input id="m_pw" type="text" placeholder="leer = unverändert" />'+
+        '<div class="grid2" style="margin-top:14px"><button class="btn" data-save>Speichern</button><button class="btn sec" data-admin>'+(u.isAdmin?'Admin entziehen':'Zum Admin machen')+'</button></div>'+
+        '<label style="margin-top:16px">Direkte Nachricht senden</label><div class="row-inline"><input id="m_msg" placeholder="Nachricht an '+esc(u.displayName.split(' ')[0])+' …" style="flex:2"/><button class="btn sec" data-msg style="flex:0 0 auto">Senden</button></div>'+
+        '<div style="margin-top:16px;display:flex;gap:10px"><button class="btn '+(u.disabled?'sec':'danger')+'" data-ban style="flex:1">'+(u.disabled?'Entsperren':'Sperren')+'</button><button class="btn danger" data-del style="flex:1">Löschen</button></div>'+
+        '</div>';
+      m.querySelector('[data-x]').onclick=closeModal;
+      m.querySelector('[data-admin]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({isAdmin:!u.isAdmin})});toast('Gespeichert.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-ban]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({disabled:!u.disabled})});toast(u.disabled?'Entsperrt.':'Gesperrt.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-del]').onclick=async()=>{if(!confirm('Konto löschen?'))return;try{await api('/admin/users/'+id,{method:'DELETE'});toast('Gelöscht.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-msg]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;try{await api('/admin/users/'+id+'/message',{method:'POST',body:JSON.stringify({body})});toast('Nachricht gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
+      m.querySelector('[data-save]').onclick=async()=>{const body={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)body.password=pw;try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Gespeichert.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      $('modalRoot').appendChild(m);
     }
+    function closeModal(){$('modalRoot').innerHTML='';}
 
-    async function toggleAdmin(u) {
-      try {
-        await api('/admin/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ isAdmin: !u.isAdmin }) });
-        await refresh();
-      } catch (e) { toast(e.message); }
-    }
-
-    async function resetPw(u) {
-      const pw = prompt('Neues Passwort für ' + u.displayName + ' (mind. 6 Zeichen):');
-      if (!pw) return;
-      try {
-        await api('/admin/users/' + u.id, { method: 'PATCH', body: JSON.stringify({ password: pw }) });
-        toast('Passwort geändert.');
-      } catch (e) { toast(e.message); }
-    }
-
-    async function del(u) {
-      if (!confirm('„' + u.displayName + '" wirklich löschen? Das entfernt das Konto und seine Mitgliedschaften.')) return;
-      try {
-        await api('/admin/users/' + u.id, { method: 'DELETE' });
-        toast('Nutzer gelöscht.');
-        await refresh();
-      } catch (e) { toast(e.message); }
-    }
-
-    $('loginBtn').onclick = login;
-    $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
-    $('logoutBtn').onclick = logout;
-    $('broadcastBtn').onclick = broadcast;
-    $('createBtn').onclick = createUser;
-    $('reloadBtn').onclick = () => refresh().catch((e) => toast(e.message));
-    $('q').addEventListener('input', () => { clearTimeout(window._t); window._t = setTimeout(() => loadUsers().catch(() => {}), 300); });
-
-    // Boot: try the saved token, else show login.
-    (async () => {
-      if (token) {
-        try { await refresh(); showDash(); return; } catch { logout(); }
+    // ---- chats ----
+    async function loadChats(){
+      const q=encodeURIComponent($('cq').value.trim());
+      const {chats}=await api('/admin/chats?q='+q);
+      const rows=$('chatRows');rows.innerHTML='';$('chatEmpty').classList.toggle('hidden',chats.length>0);
+      for(const c of chats){
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td><b>'+esc(c.title)+'</b></td><td>'+(c.type==='group'?'<span class="pill grp">Gruppe</span>':'Direkt')+'</td><td>'+c.members+'</td><td>'+c.messages+'</td><td>'+fmtDateTime(c.lastActivity)+'</td>'+
+          '<td><div class="rowact"><button class="btn sec sm" data-peek>Ansehen</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
+        tr.querySelector('[data-peek]').onclick=()=>peekChat(c);
+        tr.querySelector('[data-del]').onclick=()=>delChat(c);
+        rows.appendChild(tr);
       }
-      showLogin();
-    })();
+    }
+    async function peekChat(c){
+      let data;try{data=await api('/admin/chats/'+c.id+'/messages');}catch(e){return toast(e.message);}
+      closeModal();const m=document.createElement('div');m.className='overlay';m.onclick=(e)=>{if(e.target===m)closeModal();};
+      const list=data.messages.slice().reverse().map(x=>'<div class="msgline"><span class="who">'+esc(x.sender)+'</span><span class="meta">'+fmtDateTime(x.createdAt)+'</span><div>'+esc(x.preview)+'</div></div>').join('')||'<p class="empty">Keine Nachrichten.</p>';
+      m.innerHTML='<div class="modal"><div class="mh"><h3>'+esc(c.title)+'</h3><button class="btn ghost" data-x>✕</button></div><p class="muted" style="margin-top:0">Letzte '+data.messages.length+' Nachrichten</p>'+list+'</div>';
+      m.querySelector('[data-x]').onclick=closeModal;$('modalRoot').appendChild(m);
+    }
+    async function delChat(c){if(!confirm('Chat „'+c.title+'“ samt Nachrichten löschen?'))return;try{await api('/admin/chats/'+c.id,{method:'DELETE'});toast('Chat gelöscht.');loadChats();}catch(e){toast(e.message);}}
+
+    // ---- broadcast ----
+    async function broadcast(){const body=$('b_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
+      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify({title:$('b_title').value.trim(),body})});$('b_body').value='';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);}}
+    async function loadBroadcasts(){const {broadcasts}=await api('/admin/broadcasts');const rows=$('bcRows');rows.innerHTML='';$('bcEmpty').classList.toggle('hidden',broadcasts.length>0);
+      for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML='<td>'+fmtDateTime(b.createdAt)+'</td><td>'+esc(b.title||'–')+'</td><td>'+esc(b.body)+'</td><td>'+b.delivered+'</td><td>'+b.pushed+'</td>';rows.appendChild(tr);}}
+
+    // ---- system ----
+    async function loadSystem(){
+      const o=await api('/admin/system');const s=o.system;
+      $('sysGrid').innerHTML=
+        stat('v'+s.version,'App-Version','📱')+stat(s.node,'Node','⬡')+stat(fmtUptime(s.uptimeSec),'Uptime','⏱️')+
+        stat(s.rssMb+' MB','Speicher (RSS)','📈')+stat(s.heapMb+' MB','Heap','🧠')+
+        stat(s.freeMemMb+'/'+s.totalMemMb,'RAM frei/ges. (MB)','💾')+
+        stat((s.loadAvg&&s.loadAvg[0]!=null?s.loadAvg[0]:'–'),'Last 1m','⚙️')+
+        stat(s.smsProvider,'SMS-Anbieter','✉️')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht','🔐')+stat(o.backups,'Backups','🗄️');
+      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> · '+human(d.size)+'<br><span class="muted" style="font-size:12px">sha256 '+d.sha256.slice(0,16)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
+      loadBackups();
+    }
+    async function loadBackups(){const {backups}=await api('/admin/backups');const rows=$('backupRows');rows.innerHTML='';$('backupEmpty').classList.toggle('hidden',backups.length>0);
+      for(const b of backups){const tr=document.createElement('tr');tr.innerHTML='<td>'+esc(b.name||'')+'</td><td>'+human(b.size)+'</td><td>'+fmtDateTime(b.createdAt)+'</td>';rows.appendChild(tr);}}
+    async function makeBackup(){try{await api('/admin/backups',{method:'POST'});toast('Backup erstellt.');loadSystem();}catch(e){toast(e.message);}}
+
+    // ---- wire ----
+    $('loginBtn').onclick=login;$('token').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+    $('logoutBtn').onclick=logout;$('broadcastBtn').onclick=broadcast;$('createBtn').onclick=createUser;$('backupBtn').onclick=makeBackup;
+    $('csvBtn').onclick=async()=>{try{const r=await fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}});const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}catch{toast('Export fehlgeschlagen.');}};
+    $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
+    $('cq').addEventListener('input',()=>{clearTimeout(window._tc);window._tc=setTimeout(()=>loadChats().catch(()=>{}),300);});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+
+    (async()=>{if(token){try{await loadOverview();showDash();switchTab('overview');return;}catch{logout();}}showLogin();})();
   </script>
 </body>
 </html>
