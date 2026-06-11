@@ -46,6 +46,9 @@ class MessageBubble extends StatelessWidget {
   /// Tapped an existing reaction chip → toggle that emoji for me.
   final void Function(String emoji)? onToggleReaction;
 
+  /// Tapped a poll option — toggle my vote for it.
+  final void Function(int option)? onVotePoll;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -70,6 +73,7 @@ class MessageBubble extends StatelessWidget {
     this.onOpenVideo,
     this.textScale = 1.0,
     this.onToggleReaction,
+    this.onVotePoll,
   });
 
   @override
@@ -84,6 +88,7 @@ class MessageBubble extends StatelessWidget {
     const tailRadius = Radius.circular(3);
 
     final hasMedia = message.attachment != null && !message.deleted;
+    final hasPoll = message.poll != null && !message.deleted;
     final hasText = message.body.trim().isNotEmpty;
     // Emoji-only messages render large and bubble-less, like a sticker.
     final jumbo = !hasMedia && message.isEmojiOnly && repliedTo == null;
@@ -152,6 +157,13 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           if (hasMedia) _media(context, fg),
+          if (hasPoll)
+            _PollContent(
+              poll: message.poll!,
+              fg: fg,
+              textScale: textScale,
+              onVote: onVotePoll,
+            ),
           if (message.deleted)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -260,6 +272,12 @@ class MessageBubble extends StatelessWidget {
               'bearbeitet',
               style: TextStyle(color: fg.withValues(alpha: 0.6), fontSize: 11),
             ),
+          ),
+        if (message.expiresAt != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Icon(Icons.timer_outlined,
+                size: 12, color: fg.withValues(alpha: 0.65)),
           ),
         Text(
           TimeFormat.messageTime(message.time),
@@ -562,6 +580,152 @@ class _FileAttachment extends StatelessWidget {
               ),
             ),
             Icon(Icons.download_rounded, color: fg.withValues(alpha: 0.7), size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The body of a poll message: question, tappable answer rows with live result
+/// bars, and a voter count. Tapping an option toggles the viewer's vote.
+class _PollContent extends StatelessWidget {
+  final PollData poll;
+  final Color fg;
+  final double textScale;
+  final void Function(int option)? onVote;
+  const _PollContent({
+    required this.poll,
+    required this.fg,
+    required this.textScale,
+    this.onVote,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final total = poll.totalVotes;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 230, maxWidth: 270),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.poll_rounded, size: 18, color: scheme.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  poll.question,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15 * textScale,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 24, top: 1, bottom: 6),
+            child: Text(
+              poll.multi ? 'Mehrere Antworten möglich' : 'Eine Antwort möglich',
+              style: TextStyle(color: fg.withValues(alpha: 0.6), fontSize: 11),
+            ),
+          ),
+          for (var i = 0; i < poll.options.length; i++)
+            _option(context, scheme, i, total),
+          const SizedBox(height: 2),
+          Text(
+            poll.totalVoters == 0
+                ? 'Noch keine Stimmen — tippe zum Abstimmen'
+                : poll.totalVoters == 1
+                    ? '1 Person hat abgestimmt'
+                    : '${poll.totalVoters} Personen haben abgestimmt',
+            style: TextStyle(color: fg.withValues(alpha: 0.6), fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _option(BuildContext context, ColorScheme scheme, int i, int total) {
+    final opt = poll.options[i];
+    final mine = poll.myVotes.contains(i);
+    final share = total == 0 ? 0.0 : opt.votes / total;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onVote == null ? null : () => onVote!(i),
+        child: Stack(
+          children: [
+            // Result bar filling from the left as votes come in.
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: AnimatedFractionallySizedBox(
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOut,
+                    widthFactor: share.clamp(0.0, 1.0),
+                    heightFactor: 1,
+                    child: Container(
+                      color: scheme.primary
+                          .withValues(alpha: mine ? 0.30 : 0.16),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: mine
+                      ? scheme.primary.withValues(alpha: 0.75)
+                      : fg.withValues(alpha: 0.25),
+                  width: mine ? 1.4 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    mine
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    size: 17,
+                    color: mine ? scheme.primary : fg.withValues(alpha: 0.5),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      opt.text,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 13.5 * textScale,
+                        fontWeight: mine ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${opt.votes}',
+                    style: TextStyle(
+                      color: fg.withValues(alpha: 0.75),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

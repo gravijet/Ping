@@ -36,6 +36,59 @@ MessageStatus statusFromString(String? s) {
   }
 }
 
+/// One answer option of a poll, with its current vote count.
+class PollOption {
+  final String text;
+  final int votes;
+  const PollOption({required this.text, required this.votes});
+
+  factory PollOption.fromJson(Map<String, dynamic> json) => PollOption(
+        text: (json['text'] ?? '') as String,
+        votes: (json['votes'] ?? 0) as int,
+      );
+
+  Map<String, dynamic> toJson() => {'text': text, 'votes': votes};
+}
+
+/// The poll payload riding along on a message of type 'poll'.
+class PollData {
+  final String question;
+  final bool multi;
+  final List<PollOption> options;
+  final List<int> myVotes;
+  final int totalVoters;
+
+  const PollData({
+    required this.question,
+    required this.multi,
+    required this.options,
+    required this.myVotes,
+    required this.totalVoters,
+  });
+
+  int get totalVotes => options.fold(0, (sum, o) => sum + o.votes);
+
+  factory PollData.fromJson(Map<String, dynamic> json) => PollData(
+        question: (json['question'] ?? '') as String,
+        multi: (json['multi'] ?? false) as bool,
+        options: ((json['options'] as List?) ?? const [])
+            .map((e) => PollOption.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        myVotes: ((json['myVotes'] as List?) ?? const [])
+            .map((e) => (e as num).toInt())
+            .toList(),
+        totalVoters: (json['totalVoters'] ?? 0) as int,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'question': question,
+        'multi': multi,
+        'options': options.map((o) => o.toJson()).toList(),
+        'myVotes': myVotes,
+        'totalVoters': totalVoters,
+      };
+}
+
 /// A media attachment carried by a message (or a status). The [url] is always a
 /// server-relative path like `/api/uploads/<id>`; the app prefixes the base URL.
 class Attachment {
@@ -98,6 +151,13 @@ class Message {
   final int createdAt;
   final int? editedAt;
   final bool deleted;
+
+  /// Disappearing messages: when set, the server purges this message at that
+  /// time and the client should stop showing it.
+  final int? expiresAt;
+
+  /// Poll payload for messages of type 'poll' (question, options, votes).
+  final PollData? poll;
   MessageStatus? status; // only meaningful for messages I sent
 
   /// Emoji reactions on this message: emoji → count, plus the set of emojis the
@@ -121,11 +181,18 @@ class Message {
     this.replyTo,
     this.editedAt,
     this.deleted = false,
+    this.expiresAt,
+    this.poll,
     this.status,
     this.quoted,
     this.reactions = const {},
     this.myReactions = const {},
   });
+
+  /// True when the disappearing-messages timer of this message has run out
+  /// (the server purge may lag by up to a minute; the client hides it sooner).
+  bool get isExpired =>
+      expiresAt != null && expiresAt! <= DateTime.now().millisecondsSinceEpoch;
 
   bool get hasReactions => reactions.isNotEmpty;
   bool get isSystem => type == 'system';
@@ -172,6 +239,8 @@ class Message {
         return '🎵 Audio';
       case 'file':
         return '📎 ${attachment?.name ?? 'Datei'}';
+      case 'poll':
+        return '📊 ${poll?.question ?? 'Umfrage'}';
       default:
         return body;
     }
@@ -184,6 +253,7 @@ class Message {
     MessageStatus? status,
     Map<String, int>? reactions,
     Set<String>? myReactions,
+    PollData? poll,
   }) =>
       Message(
         id: id,
@@ -196,6 +266,8 @@ class Message {
         createdAt: createdAt,
         editedAt: editedAt ?? this.editedAt,
         deleted: deleted ?? this.deleted,
+        expiresAt: expiresAt,
+        poll: poll ?? this.poll,
         status: status ?? this.status,
         quoted: quoted,
         reactions: reactions ?? this.reactions,
@@ -213,6 +285,8 @@ class Message {
         if (replyTo != null) 'replyTo': replyTo,
         'createdAt': createdAt,
         if (editedAt != null) 'editedAt': editedAt,
+        if (expiresAt != null) 'expiresAt': expiresAt,
+        if (poll != null) 'poll': poll!.toJson(),
         'deleted': deleted,
         if (status != null && status != MessageStatus.sending &&
             status != MessageStatus.failed)
@@ -241,6 +315,10 @@ class Message {
         replyTo: json['replyTo'] as String?,
         createdAt: json['createdAt'] as int,
         editedAt: json['editedAt'] as int?,
+        expiresAt: json['expiresAt'] as int?,
+        poll: json['poll'] != null
+            ? PollData.fromJson(json['poll'] as Map<String, dynamic>)
+            : null,
         deleted: (json['deleted'] ?? false) as bool,
         status: json['status'] != null
             ? statusFromString(json['status'] as String)

@@ -577,16 +577,22 @@ test('blocking prevents the blocked user from messaging', async () => {
   });
   assert.equal(blocked.status, 403);
 
-  const ok = await api(`/api/chats/${chatId}/messages`, {
+  // Blocking cuts the line in both directions: the blocker can't write either.
+  const blockerToo = await api(`/api/chats/${chatId}/messages`, {
     method: 'POST', token: a.token, body: { body: 'Du bist blockiert' },
   });
-  assert.equal(ok.status, 201);
+  assert.equal(blockerToo.status, 403);
+  assert.match(blockerToo.json.error, /blockiert/i);
 
   await api(`/api/users/${b.user.id}/unblock`, { method: 'POST', token: a.token });
   const after = await api(`/api/chats/${chatId}/messages`, {
     method: 'POST', token: b.token, body: { body: 'Wieder da' },
   });
   assert.equal(after.status, 201);
+  const fromBlocker = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'Alles gut' },
+  });
+  assert.equal(fromBlocker.status, 201);
 });
 
 test('a signed-in admin user can use the admin API without the token', async () => {
@@ -1318,4 +1324,183 @@ test('a disabled admin loses admin API access immediately', async () => {
   assert.equal(denied.status, 401);
   const me = await api('/api/me', { token: u.token });
   assert.equal(me.status, 403);
+});
+
+// ---- v2.4.0: Umfragen (Polls) ----------------------------------------------
+
+test('polls: create, vote, multi-toggle and single-choice move', async () => {
+  const a = await register('+431780000001', 'poll-a@example.com', 'PollA');
+  const b = await register('+431780000002', 'poll-b@example.com', 'PollB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: b.user.phone },
+  });
+  const chatId = chat.json.chat.id;
+
+  // Validation: too few options is rejected.
+  const tooFew = await api(`/api/chats/${chatId}/polls`, {
+    method: 'POST', token: a.token, body: { question: 'Hm?', options: ['Nur eine'] },
+  });
+  assert.equal(tooFew.status, 400);
+
+  const wsB = await connect(b.token);
+  const created = await api(`/api/chats/${chatId}/polls`, {
+    method: 'POST', token: a.token,
+    body: { question: 'Pizza heute Abend?', options: ['Ja', 'Nein', 'Vielleicht'] },
+  });
+  assert.equal(created.status, 201);
+  const msg = created.json.message;
+  assert.equal(msg.type, 'poll');
+  assert.equal(msg.poll.question, 'Pizza heute Abend?');
+  assert.equal(msg.poll.options.length, 3);
+  assert.equal(msg.poll.totalVoters, 0);
+
+  // B receives the poll live.
+  const live = await waitFor(wsB, 'message');
+  assert.equal(live.message.poll.question, 'Pizza heute Abend?');
+
+  // B votes "Ja" → counts update; A would get message-updated (B checks own response).
+  const vote = await api(`/api/chats/${chatId}/messages/${msg.id}/vote`, {
+    method: 'POST', token: b.token, body: { option: 0 },
+  });
+  assert.equal(vote.status, 200);
+  assert.equal(vote.json.message.poll.options[0].votes, 1);
+  assert.deepEqual(vote.json.message.poll.myVotes, [0]);
+
+  // Single choice: voting "Nein" moves the vote instead of adding one.
+  const move = await api(`/api/chats/${chatId}/messages/${msg.id}/vote`, {
+    method: 'POST', token: b.token, body: { option: 1 },
+  });
+  assert.equal(move.json.message.poll.options[0].votes, 0);
+  assert.equal(move.json.message.poll.options[1].votes, 1);
+  assert.equal(move.json.message.poll.totalVoters, 1);
+
+  // Voting the same option again toggles it off.
+  const off = await api(`/api/chats/${chatId}/messages/${msg.id}/vote`, {
+    method: 'POST', token: b.token, body: { option: 1 },
+  });
+  assert.equal(off.json.message.poll.totalVoters, 0);
+
+  // Out-of-range option → 400.
+  const bad = await api(`/api/chats/${chatId}/messages/${msg.id}/vote`, {
+    method: 'POST', token: b.token, body: { option: 9 },
+  });
+  assert.equal(bad.status, 400);
+
+  // Multi-choice keeps several picks at once.
+  const multi = await api(`/api/chats/${chatId}/polls`, {
+    method: 'POST', token: a.token,
+    body: { question: 'Beläge?', options: ['Salami', 'Mais', 'Pilze'], multi: true },
+  });
+  const mid = multi.json.message.id;
+  await api(`/api/chats/${chatId}/messages/${mid}/vote`, {
+    method: 'POST', token: b.token, body: { option: 0 },
+  });
+  const second = await api(`/api/chats/${chatId}/messages/${mid}/vote`, {
+    method: 'POST', token: b.token, body: { option: 2 },
+  });
+  assert.deepEqual(second.json.message.poll.myVotes.sort(), [0, 2]);
+  wsB.close();
+});
+
+// ---- v2.4.0: Selbstlöschende Nachrichten ------------------------------------
+
+test('disappearing messages: timer set, ttl applied, purge removes + notifies', async () => {
+  const { db } = await import('../src/db.js');
+  const { runMaintenance } = await import('../src/maintenance.js');
+
+  const a = await register('+431780000011', 'ttl-a@example.com', 'ExpA');
+  const b = await register('+431780000012', 'ttl-b@example.com', 'ExpB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: b.user.phone },
+  });
+  const chatId = chat.json.chat.id;
+
+  // Either side of a direct chat may set the timer.
+  const set = await api(`/api/chats/${chatId}/expire`, {
+    method: 'POST', token: b.token, body: { seconds: 3600 },
+  });
+  assert.equal(set.status, 200);
+  assert.equal(set.json.chat.expireSeconds, 3600);
+
+  // New messages now carry an expiry; the system note about the timer doesn't.
+  const sent = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'verschwindet bald' },
+  });
+  assert.ok(sent.json.message.expiresAt > Date.now());
+
+  // Fudge the clock: force-expire the message, then run the sweeper.
+  const wsA = await connect(a.token);
+  db.prepare('UPDATE messages SET expires_at = ? WHERE id = ?')
+    .run(Date.now() - 1000, sent.json.message.id);
+  runMaintenance();
+  const purged = await waitFor(wsA, 'message-purged');
+  assert.equal(purged.messageId, sent.json.message.id);
+
+  const history = await api(`/api/chats/${chatId}/messages`, { token: a.token });
+  assert.ok(!history.json.messages.some((m) => m.id === sent.json.message.id));
+
+  // Turning the timer off stops new expiries.
+  const off = await api(`/api/chats/${chatId}/expire`, {
+    method: 'POST', token: a.token, body: { seconds: 0 },
+  });
+  assert.equal(off.json.chat.expireSeconds, 0);
+  const plain = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'bleibt' },
+  });
+  assert.equal(plain.json.message.expiresAt, null);
+  wsA.close();
+});
+
+test('disappearing messages: only the owner may set a group timer', async () => {
+  const owner = await register('+431780000013', 'exp-own@example.com', 'ExpOwn');
+  const member = await register('+431780000014', 'exp-mem@example.com', 'ExpMem');
+  const group = await api('/api/chats/group', {
+    method: 'POST', token: owner.token,
+    body: { name: 'Timer-Gruppe', memberIds: [member.user.id] },
+  });
+  const gid = group.json.chat.id;
+  const denied = await api(`/api/chats/${gid}/expire`, {
+    method: 'POST', token: member.token, body: { seconds: 86400 },
+  });
+  assert.equal(denied.status, 403);
+  const ok = await api(`/api/chats/${gid}/expire`, {
+    method: 'POST', token: owner.token, body: { seconds: 86400 },
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.chat.expireSeconds, 86400);
+});
+
+// ---- v2.4.0: Für mich löschen ------------------------------------------------
+
+test('hide for me: message disappears for one user only', async () => {
+  const a = await register('+431780000021', 'hide-a@example.com', 'HideA');
+  const b = await register('+431780000022', 'hide-b@example.com', 'HideB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: b.user.phone },
+  });
+  const chatId = chat.json.chat.id;
+  const msg = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'peinlich' },
+  });
+  const msgId = msg.json.message.id;
+
+  // B hides A's message for themselves.
+  const hide = await api(`/api/chats/${chatId}/messages/${msgId}/hide`, {
+    method: 'POST', token: b.token,
+  });
+  assert.equal(hide.status, 200);
+
+  const forB = await api(`/api/chats/${chatId}/messages`, { token: b.token });
+  assert.ok(!forB.json.messages.some((m) => m.id === msgId));
+  const forA = await api(`/api/chats/${chatId}/messages`, { token: a.token });
+  assert.ok(forA.json.messages.some((m) => m.id === msgId));
+
+  // The chat-list preview and the global search respect it too.
+  const chatsB = await api('/api/chats', { token: b.token });
+  const cb = chatsB.json.chats.find((c) => c.id === chatId);
+  assert.notEqual(cb.lastMessage?.id, msgId);
+  const search = await api('/api/messages/search?q=peinlich', { token: b.token });
+  assert.ok(!search.json.messages.some((m) => m.id === msgId));
+  const searchA = await api('/api/messages/search?q=peinlich', { token: a.token });
+  assert.ok(searchA.json.messages.some((m) => m.id === msgId));
 });

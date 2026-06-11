@@ -31,6 +31,7 @@ const _kSettings = 'ping_settings';
 const _kChatWallpapers = 'ping_chat_wallpapers';
 const _kPinnedChats = 'ping_pinned_chats';
 const _kUpdatePrompted = 'ping_update_prompted_build';
+const _kDrafts = 'ping_drafts';
 
 /// Friendly name shown instead of the raw server address by default, so the
 /// endpoint isn't advertised in the UI.
@@ -106,6 +107,10 @@ class AppState extends ChangeNotifier {
 
   /// Chats the user has pinned to the top of the list (device-local).
   final Set<String> _pinnedChats = {};
+
+  /// Unsent composer drafts per chat (device-local). The chat list shows a
+  /// "Entwurf: …" preview, and reopening the chat restores the text.
+  final Map<String, String> _drafts = {};
 
   AuthStatus status = AuthStatus.unknown;
   PingUser? me;
@@ -195,6 +200,7 @@ class AppState extends ChangeNotifier {
     settings = PingSettings.decode(prefs.getString(_kSettings));
     _loadChatWallpapers(prefs);
     _loadPinnedChats(prefs);
+    _loadDrafts(prefs);
     starredStore.ids().then((ids) {
       starredIds
         ..clear()
@@ -444,6 +450,10 @@ class AppState extends ChangeNotifier {
     starredIds.clear();
     _pinnedChats.clear();
     _loadedChats.clear();
+    _drafts.clear();
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.remove(_kDrafts))
+        .catchError((_) => false);
     _socket.disconnect();
     await _clearToken();
     await tts.stop();
@@ -566,6 +576,39 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_kPinnedChats, _pinnedChats.toList());
     _sortChats();
+    notifyListeners();
+  }
+
+  // ---- Drafts ---------------------------------------------------------------
+
+  void _loadDrafts(SharedPreferences prefs) {
+    _drafts.clear();
+    final raw = prefs.getString(_kDrafts);
+    if (raw == null || raw.isEmpty) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      map.forEach((k, v) => _drafts[k] = v.toString());
+    } catch (_) {
+      /* corrupt — ignore */
+    }
+  }
+
+  /// The unsent draft for a chat ('' when there is none).
+  String draftFor(String chatId) => _drafts[chatId] ?? '';
+
+  /// Remember (or, when empty, forget) the composer draft of a chat.
+  Future<void> setDraft(String chatId, String text) async {
+    final trimmed = text.trim();
+    final unchanged = (_drafts[chatId] ?? '') == (trimmed.isEmpty ? '' : text);
+    if (unchanged && trimmed.isEmpty && !_drafts.containsKey(chatId)) return;
+    if (trimmed.isEmpty) {
+      if (_drafts.remove(chatId) == null) return;
+    } else {
+      if (_drafts[chatId] == text) return;
+      _drafts[chatId] = text;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDrafts, jsonEncode(_drafts));
     notifyListeners();
   }
 
@@ -1020,7 +1063,8 @@ class AppState extends ChangeNotifier {
   }
 
   /// Combine message lists, de-duped by id (server copy wins) and sorted oldest
-  /// first.
+  /// first. Expired disappearing messages (e.g. stale entries from the local
+  /// cache) are dropped.
   List<Message> _mergeMessages(List<Message> primary, List<Message> extra) {
     final byId = <String, Message>{};
     for (final m in primary) {
@@ -1029,7 +1073,7 @@ class AppState extends ChangeNotifier {
     for (final m in extra) {
       byId.putIfAbsent(m.id, () => m);
     }
-    final all = byId.values.toList()
+    final all = byId.values.where((m) => !m.isExpired).toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return all;
   }
@@ -1205,6 +1249,49 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       // The server broadcast (message-updated) will correct any drift; ignore.
     }
+  }
+
+  /// Create a poll in a chat (a message of type 'poll'); everyone can vote.
+  Future<void> createPoll(
+    String chatId,
+    String question,
+    List<String> options, {
+    bool multi = false,
+  }) async {
+    final res = await _api.post('/chats/$chatId/polls', {
+      'question': question,
+      'options': options,
+      'multi': multi,
+    });
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Toggle a vote for one poll option. The response carries the fresh counts;
+  /// other devices reconcile via the server's message-updated broadcast.
+  Future<void> votePoll(String chatId, String messageId, int option) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/vote', {'option': option});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// "Für mich löschen": hide a message on this account only. Works on
+  /// anyone's messages; the rest of the chat is untouched for everyone else.
+  Future<void> hideMessageForMe(String chatId, String messageId) async {
+    await _api.post('/chats/$chatId/messages/$messageId/hide');
+    _removeMessageLocally(chatId, messageId);
+    notifyListeners();
+  }
+
+  /// Set the disappearing-messages timer of a chat (0 turns it off). Direct
+  /// chats: either side; groups: owner only (the server enforces it).
+  Future<void> setChatExpire(String chatId, int seconds) async {
+    final res = await _api.post('/chats/$chatId/expire', {'seconds': seconds});
+    _upsertChat(Chat.fromJson(res['chat'] as Map<String, dynamic>));
+    notifyListeners();
   }
 
   Future<Chat> openDirectChat(PingUser user) async {
@@ -1573,6 +1660,29 @@ class AppState extends ChangeNotifier {
       case 'user-updated':
         final user = PingUser.fromJson(payload['user'] as Map<String, dynamic>);
         _userCache[user.id] = user;
+        // Reflect the change in the chat list too (title, avatar, last seen) —
+        // otherwise a renamed contact keeps their old name until a full reload.
+        for (var i = 0; i < chats.length; i++) {
+          final c = chats[i];
+          if (!c.isGroup && c.otherUser?.id == user.id) {
+            chats[i] = c.copyWith(otherUser: user, title: user.displayName);
+          } else if (c.isGroup && c.members.any((m) => m.id == user.id)) {
+            chats[i] = c.copyWith(
+              members: [
+                for (final m in c.members) m.id == user.id ? user : m,
+              ],
+            );
+          }
+        }
+        notifyListeners();
+        break;
+
+      case 'message-purged':
+        // A disappearing message ran out — drop it everywhere on this device.
+        _removeMessageLocally(
+          payload['chatId'] as String,
+          payload['messageId'] as String,
+        );
         notifyListeners();
         break;
 
@@ -1711,6 +1821,22 @@ class AppState extends ChangeNotifier {
     if (list.any((m) => m.id == msg.id)) return; // de-dupe
     list.add(msg);
     _persistLocal(msg.chatId);
+  }
+
+  /// Drop a message from the in-memory list + on-device cache (hide for me /
+  /// disappearing-messages purge). Refreshes the chat-list preview if needed.
+  void _removeMessageLocally(String chatId, String messageId) {
+    final list = _messages[chatId];
+    if (list != null) {
+      list.removeWhere((m) => m.id == messageId);
+      _persistLocal(chatId);
+    }
+    final ci = chats.indexWhere((c) => c.id == chatId);
+    if (ci != -1 && chats[ci].lastMessage?.id == messageId) {
+      final remaining = _messages[chatId];
+      chats[ci].lastMessage =
+          (remaining != null && remaining.isNotEmpty) ? remaining.last : null;
+    }
   }
 
   void _replaceMessage(Message msg) {

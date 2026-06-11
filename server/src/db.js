@@ -66,16 +66,48 @@ db.exec(`
     chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
     type       TEXT NOT NULL DEFAULT 'text'
-      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location')),
+      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll')),
     body       TEXT NOT NULL DEFAULT '',
     attachment TEXT,
     reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     edited_at  INTEGER,
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    -- Disappearing messages: when set, the row is purged once this passes.
+    expires_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_messages_chat
     ON messages(chat_id, created_at);
+
+  -- Polls: one row per poll message ("type = 'poll'"); the option texts live
+  -- here as JSON, the votes in poll_votes (one row per user + option).
+  CREATE TABLE IF NOT EXISTS polls (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    question   TEXT NOT NULL,
+    options    TEXT NOT NULL,
+    multi      INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS poll_votes (
+    poll_id      TEXT NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    option_index INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL,
+    PRIMARY KEY (poll_id, user_id, option_index)
+  );
+
+  -- "Für mich löschen": a message hidden for one user only. The row itself
+  -- stays for everyone else; history queries filter on this table.
+  CREATE TABLE IF NOT EXISTS hidden_messages (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_hidden_user ON hidden_messages(user_id);
 
   -- Emoji reactions on a message. One row per (message, user, emoji); a user can
   -- react with several different emojis but only once each.
@@ -266,8 +298,68 @@ function ensureColumns() {
     // section on that user's device only.
     db.exec('ALTER TABLE chat_members ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
   }
+  if (!chatCols.includes('expire_seconds')) {
+    // Disappearing messages: new messages in this chat expire after this many
+    // seconds (0 = off).
+    db.exec('ALTER TABLE chats ADD COLUMN expire_seconds INTEGER NOT NULL DEFAULT 0');
+  }
+  const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!msgCols.includes('expires_at')) {
+    db.exec('ALTER TABLE messages ADD COLUMN expires_at INTEGER');
+  }
+  // The partial index can only exist once the column does (old DBs gain it via
+  // the ALTER above), so it is created here rather than in the initial schema.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at) WHERE expires_at IS NOT NULL'
+  );
 }
 ensureColumns();
+
+// Older databases don't allow the 'poll' message type yet (CHECK constraint).
+// Rebuild the table in place — same 12-step procedure as migrate() above.
+function migrateMessageTypes() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'")
+    .get();
+  if (!row || /'poll'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER,
+        expires_at INTEGER
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+         edited_at, deleted_at, expires_at)
+        SELECT id, chat_id, sender_id, type, body, attachment, reply_to,
+               created_at, edited_at, deleted_at, expires_at
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_expires
+        ON messages(expires_at) WHERE expires_at IS NOT NULL;
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateMessageTypes();
 
 // Older databases capped status.type at ('text','image'); rebuild the table so
 // video statuses are allowed. Rows are preserved (statuses are ephemeral anyway).

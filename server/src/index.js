@@ -10,6 +10,7 @@ import { router } from './routes.js';
 import { createHub } from './hub.js';
 import { ensureOfficialUser } from './repo.js';
 import { startBackupScheduler } from './backup.js';
+import { startMaintenance } from './maintenance.js';
 import { mountDownloads } from './download.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -144,6 +145,7 @@ if (isMain) {
     console.log(`WebSocket: ws://${config.host}:${config.port}/ws`);
   });
   startBackupScheduler();
+  startMaintenance();
 
   const shutdown = () => {
     console.log('\nServer wird beendet …');

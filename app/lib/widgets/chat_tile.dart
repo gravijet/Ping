@@ -123,6 +123,29 @@ class ChatTile extends StatelessWidget {
         ),
       );
     }
+    // An unsent draft outranks the last message — you see at a glance where
+    // you stopped writing.
+    final draft = state.draftFor(chat.id);
+    if (draft.isNotEmpty) {
+      return Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: 'Entwurf: ',
+              style: TextStyle(
+                  color: scheme.error, fontWeight: FontWeight.w700),
+            ),
+            TextSpan(
+              text: draft,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14),
+      );
+    }
     if (last == null) {
       return Text(
         'Noch keine Nachrichten — sag Hallo!',
@@ -144,7 +167,9 @@ class ChatTile extends StatelessWidget {
           : (chat.isGroup
               ? '${state.cachedUser(last.senderId ?? '')?.displayName.split(' ').first ?? ''}: '
               : '');
-      text = '$prefix${last.body}';
+      // preview falls back to the body for text and labels media ("📷 Foto"),
+      // so attachments without a caption don't render as an empty line.
+      text = '$prefix${last.preview}';
     }
 
     final isMine = last.senderId == state.me?.id;

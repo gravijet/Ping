@@ -324,12 +324,7 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                     for (final chat in chats) ...[
-                      ChatTile(
-                        chat: chat,
-                        pinned: state.isPinned(chat.id),
-                        onTap: () => _openChatById(chat.id),
-                        onLongPress: () => _showChatMenu(chat),
-                      ),
+                      _swipeableTile(state, scheme, chat),
                       Divider(
                         indent: 84,
                         endIndent: 16,
@@ -409,6 +404,78 @@ class _HomeScreenState extends State<HomeScreen>
       return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
     }
     return '${d.day}.${d.month}.${d.year % 100}';
+  }
+
+  /// A chat row with swipe gestures: right = pin/unpin, left = archive. The
+  /// row always springs back (confirmDismiss returns false) — the action runs,
+  /// nothing is removed destructively.
+  Widget _swipeableTile(AppState state, ColorScheme scheme, Chat chat) {
+    final pinned = state.isPinned(chat.id);
+    return Dismissible(
+      key: ValueKey('chat-${chat.id}'),
+      direction: chat.self
+          ? DismissDirection.startToEnd
+          : DismissDirection.horizontal,
+      background: _swipeBackground(
+        scheme,
+        alignment: Alignment.centerLeft,
+        color: scheme.primary,
+        icon: pinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+        label: pinned ? 'Lösen' : 'Anheften',
+      ),
+      secondaryBackground: _swipeBackground(
+        scheme,
+        alignment: Alignment.centerRight,
+        color: scheme.tertiary,
+        icon: chat.archived ? Icons.unarchive_rounded : Icons.archive_rounded,
+        label: chat.archived ? 'Zurückholen' : 'Archivieren',
+      ),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.startToEnd) {
+          state.togglePin(chat.id);
+        } else {
+          try {
+            await state.toggleArchive(chat.id, !chat.archived);
+          } on ApiException catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(e.message)));
+            }
+          }
+        }
+        return false; // spring back — the tile stays in place
+      },
+      child: ChatTile(
+        chat: chat,
+        pinned: pinned,
+        onTap: () => _openChatById(chat.id),
+        onLongPress: () => _showChatMenu(chat),
+      ),
+    );
+  }
+
+  Widget _swipeBackground(
+    ColorScheme scheme, {
+    required Alignment alignment,
+    required Color color,
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      color: color.withValues(alpha: 0.18),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      alignment: alignment,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 2),
+          Text(label,
+              style: TextStyle(
+                  color: color, fontSize: 11.5, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
   }
 
   void _showChatMenu(Chat chat) {

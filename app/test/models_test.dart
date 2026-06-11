@@ -166,5 +166,76 @@ void main() {
       expect(c.ownerId, 'a');
       expect(c.initials, 'CR');
     });
+
+    test('expire timer round-trips from json', () {
+      final c = Chat.fromJson({
+        'id': 'c2',
+        'type': 'direct',
+        'title': 'T',
+        'avatarColor': '#5C6BC0',
+        'memberIds': ['a', 'b'],
+        'expireSeconds': 86400,
+        'updatedAt': 1,
+      });
+      expect(c.expireSeconds, 86400);
+      expect(c.copyWith(unread: 1).expireSeconds, 86400);
+    });
+  });
+
+  group('Poll', () {
+    test('poll message parses options, votes and preview', () {
+      final m = Message.fromJson({
+        'id': 'p1',
+        'chatId': 'c1',
+        'senderId': 'u1',
+        'type': 'poll',
+        'body': '',
+        'createdAt': 1000,
+        'poll': {
+          'question': 'Pizza?',
+          'multi': true,
+          'options': [
+            {'text': 'Ja', 'votes': 2},
+            {'text': 'Nein', 'votes': 0},
+          ],
+          'myVotes': [0],
+          'totalVoters': 2,
+        },
+      });
+      expect(m.poll, isNotNull);
+      expect(m.poll!.question, 'Pizza?');
+      expect(m.poll!.multi, true);
+      expect(m.poll!.options.length, 2);
+      expect(m.poll!.options.first.votes, 2);
+      expect(m.poll!.myVotes, [0]);
+      expect(m.poll!.totalVotes, 2);
+      expect(m.preview, '📊 Pizza?');
+      // Local-cache round trip keeps the poll payload.
+      final back = Message.fromJson(m.toJson());
+      expect(back.poll!.question, 'Pizza?');
+      expect(back.poll!.options[0].votes, 2);
+    });
+  });
+
+  group('Disappearing messages', () {
+    test('expiresAt round-trips and isExpired flips', () {
+      final future = DateTime.now().millisecondsSinceEpoch + 60000;
+      final m = Message.fromJson({
+        'id': 'e1',
+        'chatId': 'c1',
+        'senderId': 'u1',
+        'type': 'text',
+        'body': 'bald weg',
+        'createdAt': 1000,
+        'expiresAt': future,
+      });
+      expect(m.expiresAt, future);
+      expect(m.isExpired, false);
+      final expired = Message.fromJson({
+        ...m.toJson(),
+        'expiresAt': DateTime.now().millisecondsSinceEpoch - 1000,
+      });
+      expect(expired.isExpired, true);
+    });
   });
 }

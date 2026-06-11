@@ -31,13 +31,22 @@ Online-Status, Lesebestätigungen).
   automatisch im offenen Chat; Sprache, Tempo und Tonhöhe einstellbar.
 - **Status** – wie bei WhatsApp: Text- oder Bild-Updates, die nach 24 h ablaufen,
   mit „gesehen"-Ringen und Betrachterliste.
-- **Blockieren** – Kontakte blockieren; Blockierte können dir nicht mehr schreiben.
+- **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
+  per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Selbstlöschende Nachrichten** – per-Chat-Timer (1 h bis 90 Tage); neue
+  Nachrichten verschwinden danach automatisch für alle.
+- **Blockieren** – Kontakte blockieren; die Verbindung ist in beide Richtungen
+  getrennt, bis die Blockierung aufgehoben wird.
 - **Gruppen** – mehrere Kontakte auswählen, Gruppe benennen, Mitglieder hinzufügen.
 - **Profile** – Profilbild (Galerie/Kamera), Anzeigename, Avatarfarbe und „Über mich".
 - **Echtzeit** – sofortige Zustellung, Tippanzeige, Online-/Zuletzt-online-Status
   und ✓✓-Lesebestätigungen (abschaltbar).
-- **Nachrichten verwalten** – antworten (mit Zitat), bearbeiten, löschen, kopieren,
-  vorlesen. Optimistisches Senden mit Wiederholung bei Fehlern.
+- **Nachrichten verwalten** – antworten (mit Zitat), bearbeiten, „für alle" oder
+  nur „für mich" löschen, kopieren, vorlesen. Optimistisches Senden mit
+  Wiederholung bei Fehlern.
+- **Entwürfe & Komfort** – unfertige Nachrichten bleiben pro Chat erhalten
+  („Entwurf: …" in der Liste), „X neue Nachrichten"-Markierung beim Öffnen,
+  Chats per Wischgeste anheften oder archivieren.
 - **Viele Einstellungen** – Lesebestätigungen, Benachrichtigungen (Vorschau,
   Vibration), „mit Enter senden", Schriftgröße, Chat-Hintergrund, Vorlesen u. v. m.
 - **Admin** – Web-Portal **und** In-App-Panel (für Admin-Konten): Statistik,
@@ -107,7 +116,7 @@ Tests:
 
 ```bash
 cd server
-npm test           # 25 End-to-End-Tests (Konto, Kontakte, Medien, Status, Blockieren, Admin …)
+npm test           # 60 End-to-End-Tests (Konto, Kontakte, Medien, Status, Blockieren, Admin …)
 ```
 
 ### 2. App starten

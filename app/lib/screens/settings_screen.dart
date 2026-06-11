@@ -131,7 +131,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 2.3.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 2.4.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(
@@ -168,7 +168,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '2.3.0',
+              applicationVersion: '2.4.0',
             ),
           ),
           const SizedBox(height: 8),

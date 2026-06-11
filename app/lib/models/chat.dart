@@ -18,6 +18,7 @@ class Chat {
   final int avatarVersion; // groups: cache-buster for the group picture
   final bool locked; // read-only channel (official "Ping Team" broadcast)
   final bool archived; // collapsed into the "Archiviert" section (per user)
+  final int expireSeconds; // disappearing-messages timer (0 = off)
   Message? lastMessage;
   int unread;
   bool muted;
@@ -39,6 +40,7 @@ class Chat {
     this.avatarVersion = 0,
     this.locked = false,
     this.archived = false,
+    this.expireSeconds = 0,
     this.lastMessage,
     this.unread = 0,
     this.muted = false,
@@ -88,6 +90,7 @@ class Chat {
         avatarVersion: (json['avatarVersion'] ?? 0) as int,
         locked: (json['locked'] ?? false) as bool,
         archived: (json['archived'] ?? false) as bool,
+        expireSeconds: (json['expireSeconds'] ?? 0) as int,
         lastMessage: json['lastMessage'] != null
             ? Message.fromJson(json['lastMessage'] as Map<String, dynamic>)
             : null,
@@ -121,6 +124,7 @@ class Chat {
         avatarVersion: avatarVersion,
         locked: locked,
         archived: archived ?? this.archived,
+        expireSeconds: expireSeconds,
         lastMessage: lastMessage ?? this.lastMessage,
         unread: unread ?? this.unread,
         muted: muted ?? this.muted,

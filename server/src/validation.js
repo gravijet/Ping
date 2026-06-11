@@ -283,6 +283,41 @@ export const reactionSchema = z.object({
   emoji: z.string().trim().min(1, 'Emoji fehlt.').max(16, 'Ungültiges Emoji.'),
 });
 
+// A poll: a question plus 2-12 answer options; `multi` allows several picks.
+export const pollCreateSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib eine Frage ein.')
+    .max(300, 'Die Frage ist zu lang.'),
+  options: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1, 'Leere Antwortoptionen gehen nicht.')
+        .max(100, 'Eine Antwortoption ist zu lang.')
+    )
+    .min(2, 'Eine Umfrage braucht mindestens 2 Antworten.')
+    .max(12, 'Höchstens 12 Antworten pro Umfrage.'),
+  multi: z.boolean().optional(),
+});
+
+// Voting toggles one option by its index.
+export const pollVoteSchema = z.object({
+  option: z.number().int().min(0).max(11),
+});
+
+// Disappearing-messages timer: off (0) or 1 minute … 1 year.
+export const expireTimerSchema = z.object({
+  seconds: z
+    .number()
+    .int()
+    .min(0, 'Ungültige Dauer.')
+    .max(365 * 86400, 'Höchstens 1 Jahr.')
+    .refine((s) => s === 0 || s >= 60, 'Mindestens 1 Minute.'),
+});
+
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1, 'Token fehlt.').max(4096),
   platform: z.enum(['android', 'ios', 'web']).optional(),

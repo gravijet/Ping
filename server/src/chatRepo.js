@@ -27,10 +27,23 @@ const s = {
     'UPDATE chats SET avatar_mime = ?, avatar_version = avatar_version + 1 WHERE id = ?'
   ),
   setChatLockedStmt: db.prepare('UPDATE chats SET locked = ? WHERE id = ?'),
+  setChatExpireStmt: db.prepare('UPDATE chats SET expire_seconds = ? WHERE id = ?'),
   userChats: db.prepare(`
     SELECT c.* FROM chats c
     JOIN chat_members m ON m.chat_id = c.id
     WHERE m.user_id = ?`),
+  // The viewer's visible last message: not expired and not hidden for them.
+  lastVisibleMessage: db.prepare(`
+    SELECT * FROM messages m
+    WHERE m.chat_id = ?
+      AND (m.expires_at IS NULL OR m.expires_at > ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM hidden_messages h
+        WHERE h.message_id = m.id AND h.user_id = ?)
+    ORDER BY m.created_at DESC, m.id DESC LIMIT 1`),
+  unreadCount: db.prepare(`
+    SELECT COUNT(*) AS n FROM message_status
+    WHERE chat_id = ? AND user_id = ? AND read_at IS NULL`),
 };
 
 export function directKey(a, b) {
@@ -103,6 +116,12 @@ export function setChatAvatar(chatId, mime) {
 // the official "Ping Team" broadcast channel.
 export function setChatLocked(chatId, locked) {
   s.setChatLockedStmt.run(locked ? 1 : 0, chatId);
+  return s.chatById.get(chatId);
+}
+// Disappearing messages: new messages in this chat expire after [seconds]
+// (0 turns the timer off). Existing messages keep their original lifetime.
+export function setChatExpire(chatId, seconds) {
+  s.setChatExpireStmt.run(seconds, chatId);
   return s.chatById.get(chatId);
 }
 export const getMembers = (chatId) => s.members.all(chatId);
@@ -246,6 +265,8 @@ export function chatView(chat, viewerId) {
     archived: false,
     // Read-only channel (official broadcasts): the client hides the composer.
     locked: !!chat.locked,
+    // Disappearing-messages timer (seconds; 0 = off).
+    expireSeconds: chat.expire_seconds || 0,
   };
 
   const flags = s.memberFlags.get(chat.id, viewerId);
@@ -279,20 +300,10 @@ export function chatView(chat, viewerId) {
     base.ownerId = memberRows.find((m) => m.role === 'owner')?.user_id || null;
   }
 
-  const last = db
-    .prepare(
-      `SELECT * FROM messages WHERE chat_id = ?
-       ORDER BY created_at DESC, id DESC LIMIT 1`
-    )
-    .get(chat.id);
+  const last = s.lastVisibleMessage.get(chat.id, now(), viewerId);
   base.lastMessage = last ? messageView(last, viewerId) : null;
 
-  base.unread = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM message_status
-       WHERE chat_id = ? AND user_id = ? AND read_at IS NULL`
-    )
-    .get(chat.id, viewerId).n;
+  base.unread = s.unreadCount.get(chat.id, viewerId).n;
 
   base.updatedAt = last ? last.created_at : chat.created_at;
   return base;
@@ -302,18 +313,30 @@ export function chatView(chat, viewerId) {
 
 const m = {
   insert: db.prepare(`
-    INSERT INTO messages (id, chat_id, sender_id, type, body, attachment, reply_to, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO messages (id, chat_id, sender_id, type, body, attachment, reply_to, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   byId: db.prepare('SELECT * FROM messages WHERE id = ?'),
   insertStatus: db.prepare(`
     INSERT OR IGNORE INTO message_status (message_id, user_id, chat_id)
     VALUES (?, ?, ?)`),
+  // History as the viewer sees it: skip expired messages and ones the viewer
+  // deleted "für mich".
   history: db.prepare(`
-    SELECT * FROM messages WHERE chat_id = ? AND created_at < ?
-    ORDER BY created_at DESC, id DESC LIMIT ?`),
+    SELECT * FROM messages m WHERE m.chat_id = ? AND m.created_at < ?
+      AND (m.expires_at IS NULL OR m.expires_at > ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM hidden_messages h
+        WHERE h.message_id = m.id AND h.user_id = ?)
+    ORDER BY m.created_at DESC, m.id DESC LIMIT ?`),
   edit: db.prepare('UPDATE messages SET body = ?, edited_at = ? WHERE id = ?'),
   softDelete: db.prepare(
     "UPDATE messages SET deleted_at = ?, body = '' WHERE id = ?"
+  ),
+  hide: db.prepare(`
+    INSERT OR IGNORE INTO hidden_messages (message_id, user_id, created_at)
+    VALUES (?, ?, ?)`),
+  expired: db.prepare(
+    'SELECT id, chat_id FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?'
   ),
 };
 
@@ -324,6 +347,7 @@ export function createMessage({
   type = 'text',
   attachment = null,
   replyTo = null,
+  expiresAt = null,
 }) {
   const id = uid();
   const ts = now();
@@ -331,12 +355,31 @@ export function createMessage({
   // One transaction: the message and its per-recipient receipt rows land
   // atomically (and as a single fsync instead of one per group member).
   tx(() => {
-    m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts);
+    m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts, expiresAt);
     for (const memberId of getMemberIds(chatId)) {
       if (memberId !== senderId) m.insertStatus.run(id, memberId, chatId);
     }
   });
   return m.byId.get(id);
+}
+
+/// "Für mich löschen": hide [messageId] for [userId] only. The message keeps
+/// existing for everyone else; this viewer's history/search/chat-list skip it.
+export function hideMessageFor(messageId, userId) {
+  m.hide.run(messageId, userId, now());
+}
+
+/// Drop every message whose disappearing-messages timer has run out. Returns
+/// the removed { id, chat_id } rows so the caller can notify live clients.
+export function purgeExpiredMessages() {
+  const rows = m.expired.all(now());
+  if (rows.length === 0) return [];
+  tx(() => {
+    for (const r of rows) {
+      db.prepare('DELETE FROM messages WHERE id = ?').run(r.id);
+    }
+  });
+  return rows;
 }
 
 export const getMessage = (id) => m.byId.get(id);
@@ -358,8 +401,17 @@ export function purgeMessage(id) {
   db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }
 
-export function getHistory(chatId, { before, limit = 40 } = {}) {
-  const rows = m.history.all(chatId, before ?? Number.MAX_SAFE_INTEGER, Math.min(limit, 100));
+// The hard ceiling exists so a single call can never drag the whole table into
+// memory; the public history route additionally caps at 100 per page. The
+// personal export passes a high limit on purpose (it really wants everything).
+export function getHistory(chatId, { before, limit = 40, viewerId = '' } = {}) {
+  const rows = m.history.all(
+    chatId,
+    before ?? Number.MAX_SAFE_INTEGER,
+    now(),
+    viewerId,
+    Math.min(limit, 10000)
+  );
   return rows.reverse();
 }
 
@@ -371,6 +423,10 @@ const searchStmt = db.prepare(`
   JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
   WHERE m.deleted_at IS NULL
     AND m.type != 'system'
+    AND (m.expires_at IS NULL OR m.expires_at > ?)
+    AND NOT EXISTS (
+      SELECT 1 FROM hidden_messages h
+      WHERE h.message_id = m.id AND h.user_id = ?)
     AND m.body LIKE ? ESCAPE '\\'
   ORDER BY m.created_at DESC
   LIMIT ?`);
@@ -379,7 +435,7 @@ export function searchMessages(userId, q, limit = 30) {
   const needle = (q || '').trim();
   if (needle.length < 2) return [];
   const like = `%${needle.replace(/[\\%_]/g, '\\$&')}%`;
-  return searchStmt.all(userId, like, Math.min(limit, 50));
+  return searchStmt.all(userId, now(), userId, like, Math.min(limit, 50));
 }
 
 // Mark every unread message in a chat (from others) as read for this viewer.
@@ -502,6 +558,78 @@ function myReactions(messageId, viewerId) {
     .map((r) => r.emoji);
 }
 
+// ---- Polls -------------------------------------------------------------------
+
+const p = {
+  insert: db.prepare(`
+    INSERT INTO polls (id, message_id, chat_id, question, options, multi, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`),
+  byMessage: db.prepare('SELECT * FROM polls WHERE message_id = ?'),
+  votes: db.prepare(
+    'SELECT option_index, COUNT(*) AS n FROM poll_votes WHERE poll_id = ? GROUP BY option_index'
+  ),
+  myVotes: db.prepare(
+    'SELECT option_index FROM poll_votes WHERE poll_id = ? AND user_id = ?'
+  ),
+  voters: db.prepare(
+    'SELECT COUNT(DISTINCT user_id) AS n FROM poll_votes WHERE poll_id = ?'
+  ),
+  addVote: db.prepare(`
+    INSERT OR IGNORE INTO poll_votes (poll_id, user_id, option_index, created_at)
+    VALUES (?, ?, ?, ?)`),
+  delVote: db.prepare(
+    'DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ? AND option_index = ?'
+  ),
+  clearVotes: db.prepare('DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?'),
+};
+
+/// Create the poll row backing a freshly-created 'poll' message.
+export function createPoll({ messageId, chatId, question, options, multi = false }) {
+  const id = uid();
+  p.insert.run(id, messageId, chatId, question, JSON.stringify(options), multi ? 1 : 0, now());
+  return p.byMessage.get(messageId);
+}
+
+export const getPollByMessage = (messageId) => p.byMessage.get(messageId);
+
+/// Toggle a vote for [optionIndex]. Single-choice polls move the vote (any
+/// previous pick is cleared); multi-choice polls toggle each option on/off.
+/// Returns false when the option index is out of range.
+export function votePoll(messageId, userId, optionIndex) {
+  const poll = p.byMessage.get(messageId);
+  if (!poll) return false;
+  const options = JSON.parse(poll.options);
+  if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= options.length) {
+    return false;
+  }
+  const mine = p.myVotes.all(poll.id, userId).map((r) => r.option_index);
+  tx(() => {
+    if (mine.includes(optionIndex)) {
+      p.delVote.run(poll.id, userId, optionIndex);
+    } else {
+      if (!poll.multi) p.clearVotes.run(poll.id, userId);
+      p.addVote.run(poll.id, userId, optionIndex, now());
+    }
+  });
+  return true;
+}
+
+/// The poll as one viewer sees it: option texts + counts, their own picks and
+/// how many people voted overall.
+export function pollView(messageId, viewerId) {
+  const poll = p.byMessage.get(messageId);
+  if (!poll) return null;
+  const texts = JSON.parse(poll.options);
+  const counts = new Map(p.votes.all(poll.id).map((r) => [r.option_index, r.n]));
+  return {
+    question: poll.question,
+    multi: !!poll.multi,
+    options: texts.map((text, i) => ({ text, votes: counts.get(i) || 0 })),
+    myVotes: p.myVotes.all(poll.id, viewerId).map((r) => r.option_index),
+    totalVoters: p.voters.get(poll.id).n,
+  };
+}
+
 export function messageView(msg, viewerId) {
   return {
     id: msg.id,
@@ -517,10 +645,14 @@ export function messageView(msg, viewerId) {
     createdAt: msg.created_at,
     editedAt: msg.edited_at,
     deleted: !!msg.deleted_at,
+    // Disappearing messages: when the client should drop this bubble.
+    expiresAt: msg.expires_at || null,
     // Only the author cares about the receipt ticks on their own bubble.
     status: msg.sender_id === viewerId ? receiptState(msg.id) : null,
     // Emoji reactions: global counts + the viewer's own picks (for highlighting).
     reactions: msg.deleted_at ? {} : reactionCounts(msg.id),
     myReactions: msg.deleted_at ? [] : myReactions(msg.id, viewerId),
+    // Poll payload (question/options/votes) for 'poll' messages.
+    poll: msg.type === 'poll' && !msg.deleted_at ? pollView(msg.id, viewerId) : null,
   };
 }

@@ -43,8 +43,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _hasMore = true;
   bool _isTyping = false;
   Timer? _typingTimer;
+  Timer? _draftTimer;
   Message? _replyTo;
   Message? _editing;
+
+  // "X neue Nachrichten" divider: how many were unread when the chat was
+  // opened, and the id of the first unread message (the divider sits above it).
+  int _initialUnread = 0;
+  String? _unreadAnchorId;
 
   // Show a "jump to latest" button once the user scrolls up a fair distance.
   bool _showScrollDown = false;
@@ -74,7 +80,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     final state = context.read<AppState>();
+    // Capture the unread count before setActiveChat clears it — it anchors the
+    // "neue Nachrichten" divider.
+    _initialUnread = _chat?.unread ?? 0;
     state.setActiveChat(widget.chatId);
+    // Restore an unsent draft into the composer.
+    final draft = state.draftFor(widget.chatId);
+    if (draft.isNotEmpty) _input.text = draft;
     _scroll.addListener(_onScroll);
     _loadInitial();
   }
@@ -136,6 +148,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     _typingTimer?.cancel();
     _typingTimer = Timer(const Duration(seconds: 3), _stopTyping);
+    // Persist the draft after a short pause in typing (not while editing an
+    // existing message — that text isn't a draft).
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted && _editing == null) {
+        state.setDraft(widget.chatId, _input.text);
+      }
+    });
     setState(() {}); // refresh send button enabled state
   }
 
@@ -168,6 +188,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final reply = _replyTo;
     _input.clear();
     setState(() => _replyTo = null);
+    _draftTimer?.cancel();
+    state.setDraft(widget.chatId, '');
     try {
       await state.sendMessage(widget.chatId, text, replyTo: reply?.id);
       _scrollToBottom();
@@ -259,8 +281,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _stopTyping();
     _highlightTimer?.cancel();
     _recordTicker?.cancel();
+    _draftTimer?.cancel();
     _recorder.dispose();
-    context.read<AppState>().setActiveChat(null);
+    final state = context.read<AppState>();
+    // Keep whatever is left in the composer as the chat's draft.
+    if (_editing == null) state.setDraft(widget.chatId, _input.text);
+    state.setActiveChat(null);
     _scroll.dispose();
     _input.dispose();
     _inputFocus.dispose();
@@ -493,6 +519,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
 
+    // Anchor the "neue Nachrichten" divider to the first message that was
+    // unread when the chat was opened. Computed once, so it stays put while
+    // new messages arrive below it.
+    if (_unreadAnchorId == null &&
+        _initialUnread > 0 &&
+        messages.length >= _initialUnread) {
+      _unreadAnchorId = messages[messages.length - _initialUnread].id;
+    }
+
     // Build a flat list of items in chronological order: a day divider sits
     // directly *above* the first message of each day. The list is then reversed
     // for the bottom-anchored (reverse: true) ListView.
@@ -502,6 +537,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final prev = i > 0 ? messages[i - 1] : null;
       if (prev == null || !_sameDay(prev.time, m.time)) {
         items.add(_ListItem.divider(m.time));
+      }
+      if (m.id == _unreadAnchorId && i > 0) {
+        items.add(_ListItem.unread());
       }
       items.add(_ListItem.message(m));
     }
@@ -526,6 +564,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           );
         }
         final item = reversed[index];
+        if (item.isUnread) {
+          return _UnreadDivider(count: _initialUnread);
+        }
         if (item.isDivider) {
           return _DayDivider(label: TimeFormat.dayDivider(item.time!));
         }
@@ -652,7 +693,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onToggleReaction: interactive
           ? (emoji) => state.toggleReaction(widget.chatId, m.id, emoji)
           : null,
+      onVotePoll: interactive && m.poll != null
+          ? (option) => _votePoll(m, option)
+          : null,
     );
+  }
+
+  Future<void> _votePoll(Message m, int option) async {
+    try {
+      await context.read<AppState>().votePoll(widget.chatId, m.id, option);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
   }
 
   void _startReply(Message m) {
@@ -685,11 +737,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         label: 'Antworten',
         onTap: () => _startReply(m),
       ),
-      MessageAction(
-        icon: Icons.forward_rounded,
-        label: 'Weiterleiten',
-        onTap: () => _forwardMessage(m),
-      ),
+      // Polls are bound to their chat (votes live there) — no forwarding.
+      if (m.poll == null)
+        MessageAction(
+          icon: Icons.forward_rounded,
+          label: 'Weiterleiten',
+          onTap: () => _forwardMessage(m),
+        ),
       if (hasText)
         MessageAction(
           icon: Icons.copy_rounded,
@@ -729,10 +783,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _inputFocus.requestFocus();
           },
         ),
+      MessageAction(
+        icon: Icons.visibility_off_outlined,
+        label: 'Für mich löschen',
+        destructive: !isMine,
+        onTap: () => _hideForMe(m),
+      ),
       if (isMine)
         MessageAction(
           icon: Icons.delete_outline_rounded,
-          label: 'Löschen',
+          label: 'Für alle löschen',
           destructive: true,
           onTap: () => _confirmDelete(m),
         ),
@@ -799,6 +859,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _showError(targets.length == 1
           ? 'Weitergeleitet.'
           : 'An ${targets.length} Chats weitergeleitet.');
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  /// "Für mich löschen": removes the message on this account only — the rest
+  /// of the chat keeps it. Used for tidying up your own view.
+  Future<void> _hideForMe(Message m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Für mich löschen?'),
+        content: const Text(
+            'Die Nachricht verschwindet nur bei dir. Alle anderen im Chat '
+            'sehen sie weiterhin.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Für mich löschen'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context.read<AppState>().hideMessageForMe(widget.chatId, m.id);
     } on ApiException catch (e) {
       _showError(e.message);
     }
@@ -919,6 +1008,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 },
               ),
               _AttachOption(
+                icon: Icons.poll_rounded,
+                color: const Color(0xFF5C6BC0),
+                label: 'Umfrage',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openPollComposer();
+                },
+              ),
+              _AttachOption(
                 icon: Icons.mic_rounded,
                 color: const Color(0xFFFF7043),
                 label: 'Sprache',
@@ -932,6 +1030,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  Future<void> _openPollComposer() async {
+    final result = await showModalBottomSheet<_PollDraft>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => const _PollComposerSheet(),
+    );
+    if (result == null || !mounted) return;
+    try {
+      await context.read<AppState>().createPoll(
+            widget.chatId,
+            result.question,
+            result.options,
+            multi: result.multi,
+          );
+      _scrollToBottom();
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
   }
 
   String _imageMime(String path) {
@@ -1475,9 +1594,55 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 class _ListItem {
   final Message? message;
   final DateTime? time;
-  _ListItem.message(this.message) : time = null;
-  _ListItem.divider(this.time) : message = null;
-  bool get isDivider => message == null;
+  final bool isUnread;
+  _ListItem.message(this.message)
+      : time = null,
+        isUnread = false;
+  _ListItem.divider(this.time)
+      : message = null,
+        isUnread = false;
+  _ListItem.unread()
+      : message = null,
+        time = null,
+        isUnread = true;
+  bool get isDivider => message == null && time != null;
+}
+
+/// The "X neue Nachrichten" marker shown above the first unread message when a
+/// chat is opened with pending messages.
+class _UnreadDivider extends StatelessWidget {
+  final int count;
+  const _UnreadDivider({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: scheme.primary.withValues(alpha: 0.4))),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              count == 1 ? '1 neue Nachricht' : '$count neue Nachrichten',
+              style: TextStyle(
+                color: scheme.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(child: Divider(color: scheme.primary.withValues(alpha: 0.4))),
+        ],
+      ),
+    );
+  }
 }
 
 class _DayDivider extends StatelessWidget {
@@ -1958,6 +2123,159 @@ class _MessageInfoSheet extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// What the poll composer hands back to the chat screen for sending.
+class _PollDraft {
+  final String question;
+  final List<String> options;
+  final bool multi;
+  const _PollDraft(this.question, this.options, this.multi);
+}
+
+/// Bottom sheet to compose a poll: question, 2-12 answer options (rows appear
+/// as you fill them) and a multi-choice switch.
+class _PollComposerSheet extends StatefulWidget {
+  const _PollComposerSheet();
+
+  @override
+  State<_PollComposerSheet> createState() => _PollComposerSheetState();
+}
+
+class _PollComposerSheetState extends State<_PollComposerSheet> {
+  final _question = TextEditingController();
+  final List<TextEditingController> _options = [
+    TextEditingController(),
+    TextEditingController(),
+  ];
+  bool _multi = false;
+
+  static const _maxOptions = 12;
+
+  @override
+  void dispose() {
+    _question.dispose();
+    for (final c in _options) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  List<String> get _filledOptions => _options
+      .map((c) => c.text.trim())
+      .where((t) => t.isNotEmpty)
+      .toList();
+
+  bool get _canSend =>
+      _question.text.trim().isNotEmpty && _filledOptions.length >= 2;
+
+  void _onOptionChanged() {
+    // Always keep one empty row at the end (until the cap is reached).
+    if (_options.length < _maxOptions &&
+        _options.every((c) => c.text.trim().isNotEmpty)) {
+      _options.add(TextEditingController());
+    }
+    setState(() {});
+  }
+
+  void _removeOption(int i) {
+    if (_options.length <= 2) return;
+    _options.removeAt(i).dispose();
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final inset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: inset),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.72,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (ctx, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          children: [
+            Row(
+              children: [
+                Icon(Icons.poll_rounded, color: scheme.primary),
+                const SizedBox(width: 10),
+                Text('Umfrage erstellen',
+                    style: Theme.of(context).textTheme.titleLarge),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _question,
+              maxLength: 300,
+              minLines: 1,
+              maxLines: 3,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Frage',
+                hintText: 'Was möchtest du fragen?',
+                counterText: '',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text('Antworten',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 4),
+            for (var i = 0; i < _options.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: TextField(
+                  controller: _options[i],
+                  maxLength: 100,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => _onOptionChanged(),
+                  decoration: InputDecoration(
+                    hintText: 'Antwort ${i + 1}',
+                    counterText: '',
+                    isDense: true,
+                    suffixIcon: _options.length > 2
+                        ? IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            tooltip: 'Entfernen',
+                            onPressed: () => _removeOption(i),
+                          )
+                        : null,
+                  ),
+                ),
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Mehrere Antworten erlauben'),
+              subtitle:
+                  const Text('Jede Person kann mehrere Optionen wählen.'),
+              value: _multi,
+              onChanged: (v) => setState(() => _multi = v),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: _canSend
+                  ? () => Navigator.pop(
+                        context,
+                        _PollDraft(
+                            _question.text.trim(), _filledOptions, _multi),
+                      )
+                  : null,
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('Umfrage senden'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

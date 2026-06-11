@@ -33,6 +33,9 @@ import {
   matchSchema,
   createGroupChatSchema,
   reactionSchema,
+  pollCreateSchema,
+  pollVoteSchema,
+  expireTimerSchema,
   adminCreateSchema,
   adminUpdateSchema,
   adminBroadcastSchema,
@@ -101,6 +104,7 @@ import {
   setMuted,
   setArchived,
   setChatLocked,
+  setChatExpire,
   searchMessages,
   updateGroupMeta,
   setChatAvatar,
@@ -110,6 +114,9 @@ import {
   getMessage,
   editMessage,
   deleteMessage,
+  hideMessageFor,
+  createPoll,
+  votePoll,
   toggleReaction,
   getHistory,
   messageView,
@@ -220,6 +227,8 @@ function messagePreview(msg) {
       return '🎤 Sprachnachricht';
     case 'file':
       return '📎 Datei';
+    case 'poll':
+      return '📊 Umfrage';
     default:
       return 'Neue Nachricht';
   }
@@ -792,13 +801,22 @@ router.get(
     const beforeRaw = Number(req.query.before);
     const limitRaw = Number(req.query.limit);
     const before = Number.isFinite(beforeRaw) ? beforeRaw : undefined;
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 40;
-    const messages = getHistory(req.chat.id, { before, limit }).map((m) =>
-      messageView(m, req.user.id)
-    );
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : 40;
+    const messages = getHistory(req.chat.id, {
+      before,
+      limit,
+      viewerId: req.user.id,
+    }).map((m) => messageView(m, req.user.id));
     res.json({ messages });
   })
 );
+
+// When the chat has a disappearing-messages timer, new messages get a TTL.
+function messageExpiry(chat) {
+  const seconds = chat.expire_seconds || 0;
+  return seconds > 0 ? Date.now() + seconds * 1000 : null;
+}
 
 router.post(
   '/chats/:id/messages',
@@ -822,13 +840,19 @@ router.post(
         return res.status(400).json({ error: 'Die zitierte Nachricht gehört nicht zu diesem Chat.' });
       }
     }
-    // In a direct chat you can't message someone who has blocked you.
+    // In a direct chat, blocking cuts the line in both directions: you can't
+    // message someone who blocked you, and not someone you blocked yourself.
     if (req.chat.type === 'direct') {
       const otherId = getMemberIds(req.chat.id).find((mId) => mId !== req.user.id);
       if (otherId && hasBlocked(otherId, req.user.id)) {
         return res
           .status(403)
           .json({ error: 'Du kannst dieser Person gerade nicht schreiben.' });
+      }
+      if (otherId && hasBlocked(req.user.id, otherId)) {
+        return res.status(403).json({
+          error: 'Du hast diese Person blockiert. Hebe die Blockierung auf, um zu schreiben.',
+        });
       }
     }
     const att = attachment
@@ -846,6 +870,7 @@ router.post(
       body: (body || '').trim(),
       attachment: att,
       replyTo,
+      expiresAt: messageExpiry(req.chat),
     });
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
@@ -919,6 +944,128 @@ router.post(
     res.json({ ok: true, added, message: messageView(msg, req.user.id) });
   })
 );
+
+// Create a poll in a chat. The poll is a normal message of type 'poll' whose
+// question/options/votes ride along in messageView.poll, so all the existing
+// realtime plumbing (message + message-updated events) just works.
+router.post(
+  '/chats/:id/polls',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { question, options, multi = false } = parse(pollCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'poll',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createPoll({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      question,
+      options,
+      multi,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Vote in a poll (toggles the option; single-choice polls move the vote).
+// Everyone in the chat sees the new counts live via message-updated.
+router.post(
+  '/chats/:id/messages/:msgId/vote',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'poll') {
+      return res.status(404).json({ error: 'Diese Umfrage gibt es nicht.' });
+    }
+    const { option } = parse(pollVoteSchema, req.body);
+    if (!votePoll(msg.id, req.user.id, option)) {
+      return res.status(400).json({ error: 'Diese Antwortoption gibt es nicht.' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// "Für mich löschen": hide a message on this account only. Unlike DELETE (für
+// alle) this works on anyone's messages and leaves the chat untouched for
+// everyone else.
+router.post(
+  '/chats/:id/messages/:msgId/hide',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    hideMessageFor(msg.id, req.user.id);
+    res.json({ ok: true });
+  })
+);
+
+// Turn the disappearing-messages timer for a chat on/off. In groups only the
+// owner may change it; in a direct chat either side can (like WhatsApp).
+router.post(
+  '/chats/:id/expire',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    if (
+      req.chat.type === 'group' &&
+      getMemberRole(req.chat.id, req.user.id) !== 'owner'
+    ) {
+      return res.status(403).json({ error: 'Das dürfen nur Gruppen-Admins.' });
+    }
+    const { seconds } = parse(expireTimerSchema, req.body);
+    const updated = setChatExpire(req.chat.id, seconds);
+    const sys = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'system',
+      body:
+        seconds > 0
+          ? `${req.user.display_name} hat selbstlöschende Nachrichten aktiviert (${expireLabel(seconds)}).`
+          : `${req.user.display_name} hat selbstlöschende Nachrichten deaktiviert.`,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(sys, memberId) });
+    }
+    broadcastChatUpdate(updated);
+    res.json({ chat: chatView(updated, req.user.id) });
+  })
+);
+
+// Human label for a disappearing-messages duration (used in system messages).
+function expireLabel(seconds) {
+  if (seconds % 86400 === 0 && seconds >= 86400) {
+    const d = seconds / 86400;
+    return d === 1 ? '24 Stunden' : `${d} Tage`;
+  }
+  if (seconds % 3600 === 0 && seconds >= 3600) {
+    const hours = seconds / 3600;
+    return hours === 1 ? '1 Stunde' : `${hours} Stunden`;
+  }
+  const min = Math.max(1, Math.round(seconds / 60));
+  return min === 1 ? '1 Minute' : `${min} Minuten`;
+}
 
 router.post(
   '/chats/:id/read',
@@ -1196,9 +1343,17 @@ router.post(
           .json({ error: 'Dieses Bildformat wird nicht unterstützt.' });
       }
     }
-    const name = req.headers['x-filename']
-      ? decodeURIComponent(req.headers['x-filename'].toString()).slice(0, 200)
-      : null;
+    // A malformed (non-URI-encoded) header must not 500 the upload — fall back
+    // to the raw value instead.
+    let name = null;
+    const rawName = req.headers['x-filename'];
+    if (rawName) {
+      try {
+        name = decodeURIComponent(rawName.toString()).slice(0, 200);
+      } catch {
+        name = rawName.toString().slice(0, 200);
+      }
+    }
     const meta = saveUpload({ buf, mime, name, ownerId: req.user.id });
     res.status(201).json({ upload: meta });
   })
@@ -1423,8 +1578,8 @@ router.get(
     const uid = req.user.id;
     const chatsOut = [];
     for (const chat of getUserChats(uid)) {
-      const messages = getHistory(chat.id, { limit: 10000 }).map((m) =>
-        messageView(m, uid)
+      const messages = getHistory(chat.id, { limit: 10000, viewerId: uid }).map(
+        (m) => messageView(m, uid)
       );
       chatsOut.push({ chat: chatView(chat, uid), messages });
     }

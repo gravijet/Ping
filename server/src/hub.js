@@ -105,11 +105,14 @@ function setTyping(chatId, userId, isTyping) {
     // Auto-clear after 6s in case we never get a "stop" (app killed, etc.).
     const handle = setTimeout(() => {
       chatTyping.delete(userId);
+      if (chatTyping.size === 0) typing.delete(chatId);
       broadcastToChat(chatId, 'typing', { chatId, userId, typing: false }, userId);
     }, 6000);
     chatTyping.set(userId, handle);
   } else {
     chatTyping.delete(userId);
+    // Don't let idle chats accumulate empty maps forever.
+    if (chatTyping.size === 0) typing.delete(chatId);
   }
   broadcastToChat(chatId, 'typing', { chatId, userId, typing: isTyping }, userId);
 }

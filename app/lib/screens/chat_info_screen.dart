@@ -183,6 +183,15 @@ class ChatInfoScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => _editChatWallpaper(context, state, chat.id),
           ),
+          if (!chat.locked)
+            ListTile(
+              leading: const Icon(Icons.timer_outlined),
+              title: const Text('Selbstlöschende Nachrichten'),
+              subtitle: Text(_expireLabel(chat.expireSeconds)),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _editExpireTimer(context, state, chat,
+                  canEdit: !chat.isGroup || isOwner),
+            ),
           if (!chat.isGroup && chat.otherUser != null) ...[
             const Divider(height: 24),
             Builder(builder: (context) {
@@ -293,6 +302,82 @@ class ChatInfoScreen extends StatelessWidget {
 
   void _snack(BuildContext context, String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  static const _expireChoices = <(int, String)>[
+    (0, 'Aus'),
+    (3600, '1 Stunde'),
+    (86400, '24 Stunden'),
+    (7 * 86400, '7 Tage'),
+    (90 * 86400, '90 Tage'),
+  ];
+
+  String _expireLabel(int seconds) {
+    if (seconds <= 0) return 'Aus';
+    for (final (value, label) in _expireChoices) {
+      if (value == seconds) return label;
+    }
+    if (seconds % 86400 == 0) return '${seconds ~/ 86400} Tage';
+    if (seconds % 3600 == 0) return '${seconds ~/ 3600} Stunden';
+    return '${(seconds / 60).round()} Minuten';
+  }
+
+  /// Pick how long new messages live before they vanish for everyone. In
+  /// groups only the owner may change it (the server enforces this too).
+  void _editExpireTimer(BuildContext context, AppState state, Chat chat,
+      {required bool canEdit}) {
+    if (!canEdit) {
+      _snack(context, 'Das kann nur der Gruppen-Admin ändern.');
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Column(
+                children: [
+                  Text('Selbstlöschende Nachrichten',
+                      style: Theme.of(ctx).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Neue Nachrichten in diesem Chat verschwinden nach der '
+                    'gewählten Zeit für alle. Bestehende Nachrichten bleiben.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            RadioGroup<int>(
+              groupValue: chat.expireSeconds,
+              onChanged: (v) async {
+                Navigator.pop(ctx);
+                if (v == null || v == chat.expireSeconds) return;
+                try {
+                  await state.setChatExpire(chat.id, v);
+                } on ApiException catch (e) {
+                  if (context.mounted) _snack(context, e.message);
+                }
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final (value, label) in _expireChoices)
+                    RadioListTile<int>(value: value, title: Text(label)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   String _imageMime(String path) {
