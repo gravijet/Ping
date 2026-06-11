@@ -1,11 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/chat.dart';
+import '../models/message.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../services/notification_target.dart';
 import '../widgets/brand.dart';
 import '../widgets/chat_tile.dart';
+import '../widgets/update_sheet.dart';
+import 'app_navigation.dart';
+import 'archived_chats_screen.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
 import 'saved_messages_screen.dart';
@@ -22,26 +29,72 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final AppState _state = context.read<AppState>();
   bool _loading = true;
   String? _error;
   String _chatQuery = '';
+
+  // Global message search (server-side, across the full history).
+  Timer? _searchDebounce;
+  List<Message> _messageHits = const [];
+  bool _searchingMessages = false;
 
   @override
   void initState() {
     super.initState();
     _refresh();
-    final state = context.read<AppState>();
-    // Route notification taps to the right chat.
-    state.notifications.onTapChat = _openChatById;
+    final state = _state;
+    // Route notification taps (chat or admin deep-link) to the right screen.
+    state.onOpenTarget = _handleNotificationTarget;
     // Surface admin announcements while the app is open.
     state.onAnnouncement = _showAnnouncement;
+    // Consume any notification that was tapped before the UI was ready (e.g. a
+    // cold launch from the system tray).
+    final pending = state.takePendingTarget();
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _handleNotificationTarget(pending));
+    }
     _tabs.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
+    if (_state.onOpenTarget == _handleNotificationTarget) {
+      _state.onOpenTarget = null;
+    }
+    _searchDebounce?.cancel();
     _tabs.dispose();
     super.dispose();
+  }
+
+  /// Debounced server-side search through the whole message history. Results
+  /// land in [_messageHits] and render below the chat matches.
+  void _onSearchChanged(String value) {
+    setState(() => _chatQuery = value);
+    _searchDebounce?.cancel();
+    final q = value.trim();
+    if (q.length < 2) {
+      setState(() {
+        _messageHits = const [];
+        _searchingMessages = false;
+      });
+      return;
+    }
+    setState(() => _searchingMessages = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final hits = await context.read<AppState>().searchAllMessages(q);
+        if (mounted && _chatQuery.trim() == q) {
+          setState(() {
+            _messageHits = hits;
+            _searchingMessages = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) setState(() => _searchingMessages = false);
+      }
+    });
   }
 
   Future<void> _refresh() async {
@@ -57,8 +110,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  void _showAnnouncement(String title, String body) {
+  void _showAnnouncement(String title, String body, String? route) {
     if (!mounted) return;
+    final hasTarget = route != null && route.isNotEmpty && route != 'home';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -66,13 +120,32 @@ class _HomeScreenState extends State<HomeScreen>
         title: Text(title),
         content: Text(body),
         actions: [
+          if (hasTarget)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Später'),
+            ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (hasTarget) navigateToAppRoute(context, route);
+            },
+            child: Text(hasTarget ? 'Öffnen' : 'OK'),
           ),
         ],
       ),
     );
+  }
+
+  /// Route a tapped notification to its destination: a chat, or an in-app screen
+  /// (admin deep-links). Pops back to the inbox first so we don't stack screens.
+  void _handleNotificationTarget(NotificationTarget target) {
+    if (!mounted) return;
+    if (target.isChat) {
+      _openChatById(target.chatId!);
+    } else if (target.route != null) {
+      navigateToAppRoute(context, target.route!);
+    }
   }
 
   void _openChatById(String chatId) {
@@ -88,11 +161,23 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  bool _autoUpdateShown = false;
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
     final onStatus = _tabs.index == 1;
+
+    // Proactively offer a freshly-detected update once (per version).
+    if (state.updateAutoPromptPending && !_autoUpdateShown) {
+      _autoUpdateShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        state.markUpdatePrompted(); // persist in the background
+        showUpdateSheet(context);
+      });
+    }
 
     return Scaffold(
       appBar: pingAppBar(
@@ -187,56 +272,143 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     final q = _chatQuery.trim().toLowerCase();
-    final chats = q.isEmpty
-        ? state.chats
-        : state.chats
+    final searching = q.isNotEmpty;
+    // While searching, archived chats take part too; otherwise they collapse
+    // into the "Archiviert" entry below the search field.
+    final source =
+        searching ? state.chats : state.chats.where((c) => !c.archived).toList();
+    final chats = !searching
+        ? source
+        : source
             .where((c) =>
                 c.displayTitle.toLowerCase().contains(q) ||
                 (c.lastMessage?.body.toLowerCase().contains(q) ?? false))
             .toList();
+    final archivedCount = state.archivedCount;
 
     return Column(
       children: [
+        if (state.availableUpdate != null) _UpdateBanner(state: state),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: TextField(
-            onChanged: (v) => setState(() => _chatQuery = v),
+            onChanged: _onSearchChanged,
             textInputAction: TextInputAction.search,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search_rounded),
-              hintText: 'Chats durchsuchen',
+              hintText: 'Chats und Nachrichten durchsuchen',
               isDense: true,
             ),
           ),
         ),
         Expanded(
-          child: chats.isEmpty
+          child: (chats.isEmpty && !searching)
               ? Center(
                   child: Text('Keine Chats gefunden',
                       style: TextStyle(color: scheme.onSurfaceVariant)),
                 )
-              : ListView.separated(
+              : ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(bottom: 96, top: 2),
-                  itemCount: chats.length,
-                  separatorBuilder: (_, _) => Divider(
-                    indent: 84,
-                    endIndent: 16,
-                    color: scheme.outlineVariant.withValues(alpha: 0.3),
-                  ),
-                  itemBuilder: (context, i) {
-                    final chat = chats[i];
-                    return ChatTile(
-                      chat: chat,
-                      pinned: state.isPinned(chat.id),
-                      onTap: () => _openChatById(chat.id),
-                      onLongPress: () => _showChatMenu(chat),
-                    );
-                  },
+                  children: [
+                    if (!searching && archivedCount > 0)
+                      ListTile(
+                        leading: const Icon(Icons.archive_outlined),
+                        title: const Text('Archiviert'),
+                        trailing: Text('$archivedCount',
+                            style:
+                                TextStyle(color: scheme.onSurfaceVariant)),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const ArchivedChatsScreen()),
+                        ),
+                      ),
+                    for (final chat in chats) ...[
+                      ChatTile(
+                        chat: chat,
+                        pinned: state.isPinned(chat.id),
+                        onTap: () => _openChatById(chat.id),
+                        onLongPress: () => _showChatMenu(chat),
+                      ),
+                      Divider(
+                        indent: 84,
+                        endIndent: 16,
+                        color: scheme.outlineVariant.withValues(alpha: 0.3),
+                      ),
+                    ],
+                    if (searching && chats.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Center(
+                          child: Text('Keine Chats gefunden',
+                              style:
+                                  TextStyle(color: scheme.onSurfaceVariant)),
+                        ),
+                      ),
+                    if (searching) ..._messageResults(state, scheme),
+                  ],
                 ),
         ),
       ],
     );
+  }
+
+  /// The "Nachrichten" section under the chat matches: full-history hits from
+  /// the server-side search.
+  List<Widget> _messageResults(AppState state, ColorScheme scheme) {
+    if (!_searchingMessages && _messageHits.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Row(
+          children: [
+            Text('Nachrichten',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+            const SizedBox(width: 10),
+            if (_searchingMessages)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+      ),
+      for (final m in _messageHits)
+        Builder(builder: (context) {
+          final chatIndex = state.chats.indexWhere((c) => c.id == m.chatId);
+          final chat = chatIndex == -1 ? null : state.chats[chatIndex];
+          return ListTile(
+            leading: CircleAvatar(
+              radius: 20,
+              backgroundColor: scheme.surfaceContainerHighest,
+              child: Icon(Icons.chat_bubble_outline_rounded,
+                  size: 20, color: scheme.onSurfaceVariant),
+            ),
+            title: Text(chat?.displayTitle ?? 'Chat',
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(m.preview,
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: Text(
+              _hitDate(m.createdAt),
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+            onTap: chat == null ? null : () => _openChatById(chat.id),
+          );
+        }),
+    ];
+  }
+
+  static String _hitDate(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    if (d.year == now.year && d.month == now.month && d.day == now.day) {
+      return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    }
+    return '${d.day}.${d.month}.${d.year % 100}';
   }
 
   void _showChatMenu(Chat chat) {
@@ -270,6 +442,26 @@ class _HomeScreenState extends State<HomeScreen>
                   Navigator.pop(ctx);
                   try {
                     await state.toggleMute(chat.id, !chat.muted);
+                  } on ApiException catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(SnackBar(content: Text(e.message)));
+                    }
+                  }
+                },
+              ),
+            if (!chat.self)
+              ListTile(
+                leading: Icon(chat.archived
+                    ? Icons.unarchive_outlined
+                    : Icons.archive_outlined),
+                title: Text(chat.archived
+                    ? 'Aus dem Archiv holen'
+                    : 'Archivieren'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    await state.toggleArchive(chat.id, !chat.archived);
                   } on ApiException catch (e) {
                     if (mounted) {
                       ScaffoldMessenger.of(context)
@@ -323,6 +515,55 @@ class _EmptyState extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A slim banner offering the in-app update when a newer build is available.
+class _UpdateBanner extends StatelessWidget {
+  final AppState state;
+  const _UpdateBanner({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final info = state.availableUpdate!;
+    return Material(
+      color: scheme.primaryContainer,
+      child: InkWell(
+        onTap: () => showUpdateSheet(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+          child: Row(
+            children: [
+              Icon(Icons.system_update_rounded, color: scheme.onPrimaryContainer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Update verfügbar — Ping ${info.version}',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onPrimaryContainer)),
+                    Text('Tippen, um zu installieren',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: scheme.onPrimaryContainer
+                                .withValues(alpha: 0.8))),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Ausblenden',
+                icon: Icon(Icons.close_rounded,
+                    color: scheme.onPrimaryContainer, size: 20),
+                onPressed: state.dismissUpdate,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

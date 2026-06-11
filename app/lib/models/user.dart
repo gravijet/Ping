@@ -17,6 +17,7 @@ class PingUser {
   final bool hasPassword;
   final bool isAdmin;
   final String messageStorage; // 'server' (default) | 'local'
+  final bool showLastSeen; // privacy: share "zuletzt online" (own account only)
 
   const PingUser({
     required this.id,
@@ -32,6 +33,7 @@ class PingUser {
     this.hasPassword = false,
     this.isAdmin = false,
     this.messageStorage = 'server',
+    this.showLastSeen = true,
   });
 
   Color get color {
@@ -72,6 +74,7 @@ class PingUser {
     bool? hasPassword,
     bool? isAdmin,
     String? messageStorage,
+    bool? showLastSeen,
   }) =>
       PingUser(
         id: id,
@@ -87,6 +90,7 @@ class PingUser {
         hasPassword: hasPassword ?? this.hasPassword,
         isAdmin: isAdmin ?? this.isAdmin,
         messageStorage: messageStorage ?? this.messageStorage,
+        showLastSeen: showLastSeen ?? this.showLastSeen,
       );
 
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
@@ -103,6 +107,7 @@ class PingUser {
         hasPassword: (json['hasPassword'] ?? false) as bool,
         isAdmin: (json['isAdmin'] ?? false) as bool,
         messageStorage: (json['messageStorage'] ?? 'server') as String,
+        showLastSeen: (json['showLastSeen'] ?? true) as bool,
       );
 }
 

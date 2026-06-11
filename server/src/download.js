@@ -72,19 +72,35 @@ function apkInfo() {
   }
   // Optional sidecar version.json (written by scripts/publish-apk.sh).
   let version = null;
+  let build = null;
   try {
     const meta = JSON.parse(
       fs.readFileSync(path.join(path.dirname(latest.full), 'version.json'), 'utf8')
     );
     version = meta.version || null;
+    build = meta.build || null;
   } catch {
     /* derive from filename */
   }
   if (!version) {
     const m = latest.f.match(/(\d+\.\d+\.\d+(?:\+\d+)?)/);
-    version = m ? m[1] : '2.0.0';
+    version = m ? m[1].split('+')[0] : '2.0.0';
+    if (m && m[1].includes('+')) build = m[1];
   }
-  cache = { ...latest, sha, version, updatedAt: Math.round(latest.mtime) };
+  // The Android version code (build number) is the part after "+" in
+  // "<name>+<code>". The app compares this integer to decide if an update is
+  // available — far more reliable than parsing a semver string.
+  let versionCode = null;
+  const plus = (build || '').split('+')[1];
+  if (plus && /^\d+$/.test(plus)) versionCode = Number(plus);
+  cache = {
+    ...latest,
+    sha,
+    version,
+    build: build || version,
+    versionCode,
+    updatedAt: Math.round(latest.mtime),
+  };
   return cache;
 }
 
@@ -106,10 +122,13 @@ export function mountDownloads(app, publicDir) {
     if (!info) return res.status(404).json({ error: 'Noch kein Build verfügbar.' });
     res.json({
       version: info.version,
+      build: info.build,
+      versionCode: info.versionCode,
       size: info.size,
       sha256: info.sha,
       updatedAt: info.updatedAt,
       filename: `ping-${info.version}.apk`,
+      url: '/download',
     });
   });
 

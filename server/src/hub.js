@@ -58,6 +58,23 @@ export function broadcastToChat(chatId, type, payload, exceptUserId = null) {
   }
 }
 
+// Forcibly end a user's live sessions — used when an admin disables or deletes
+// the account. We tell every one of their devices to log out (so the client
+// drops back to the login screen immediately) and then close the sockets.
+export function disconnectUser(userId, reason = 'force-logout') {
+  const set = sockets.get(userId);
+  if (!set) return;
+  for (const ws of [...set]) {
+    send(ws, 'force-logout', { reason });
+    try {
+      ws.close(4003, reason);
+    } catch {
+      /* socket already gone */
+    }
+  }
+  sockets.delete(userId);
+}
+
 // Tell everyone who shares a chat with this user about their presence change.
 function broadcastPresence(userId) {
   const online = isOnline(userId);
@@ -71,7 +88,8 @@ function broadcastPresence(userId) {
       sendToUser(memberId, 'presence', {
         userId,
         online,
-        lastSeen: user?.last_seen ?? null,
+        // "Zuletzt online" is only shared when the user hasn't hidden it.
+        lastSeen: user && user.show_last_seen !== 0 ? user.last_seen : null,
       });
     }
   }
@@ -111,7 +129,9 @@ export function createHub(server) {
     }
     const payload = token ? verifyToken(token) : null;
     const user = payload ? getUserById(payload.sub) : null;
-    if (!user) {
+    // Disabled (banned) accounts are rejected here too, not just on the REST
+    // API — otherwise a kicked user could keep a live session via the socket.
+    if (!user || user.disabled) {
       send(ws, 'error', { message: 'Authentifizierung fehlgeschlagen.' });
       ws.close(4001, 'unauthorized');
       return;

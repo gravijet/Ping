@@ -995,3 +995,327 @@ test('emoji reactions toggle and broadcast', async () => {
   assert.equal(r2.json.added, false);
   assert.equal(r2.json.message.reactions['❤️'], undefined);
 });
+
+test('admin profile edits reach the user live (self-updated)', async () => {
+  const u = await register('0681 5000001', 'live-edit@example.com', 'Before Name');
+  const ws = await connect(u.token);
+  await waitFor(ws, 'ready');
+
+  const list = await api('/api/admin/users?q=live-edit@example.com', { admin: ADMIN });
+  const id = list.json.users.find((x) => x.email === 'live-edit@example.com').id;
+
+  await api(`/api/admin/users/${id}`, {
+    method: 'PATCH', admin: ADMIN, body: { displayName: 'After Name' },
+  });
+  const ev = await waitFor(ws, 'self-updated');
+  assert.equal(ev.user.displayName, 'After Name');
+  ws.close();
+});
+
+test('disabling a user forces their live sessions to log out', async () => {
+  const u = await register('0681 5000002', 'kick-me@example.com', 'Kick');
+  const ws = await connect(u.token);
+  await waitFor(ws, 'ready');
+
+  const list = await api('/api/admin/users?q=kick-me@example.com', { admin: ADMIN });
+  const id = list.json.users.find((x) => x.email === 'kick-me@example.com').id;
+
+  await api(`/api/admin/users/${id}`, {
+    method: 'PATCH', admin: ADMIN, body: { disabled: true },
+  });
+  const ev = await waitFor(ws, 'force-logout');
+  assert.equal(ev.reason, 'disabled');
+});
+
+test('admin broadcast accepts an optional deep-link route', async () => {
+  const sent = await api('/api/admin/broadcast', {
+    method: 'POST', admin: ADMIN,
+    body: { title: 'Datenschutz', body: 'Bitte prüfen', route: 'privacy' },
+  });
+  assert.equal(sent.status, 200);
+
+  // An unknown route is rejected by validation.
+  const bad = await api('/api/admin/broadcast', {
+    method: 'POST', admin: ADMIN,
+    body: { body: 'Test', route: 'not-a-real-route' },
+  });
+  assert.equal(bad.status, 400);
+});
+
+test('download info exposes the build number for auto-update', async () => {
+  const info = await fetch(base + '/download/info');
+  if (info.status === 200) {
+    const json = await info.json();
+    assert.ok(typeof json.version === 'string');
+    // build + versionCode are present when version.json ships a "+<code>" build.
+    assert.ok('build' in json);
+    assert.ok('versionCode' in json);
+  } else {
+    assert.equal(info.status, 404); // no build published — also valid
+  }
+});
+
+test('two users can start a chat and message each other', async () => {
+  const a = await register('0699 1000001', 'msg-a@example.com', 'MsgA');
+  const b = await register('0699 1000002', 'msg-b@example.com', 'MsgB');
+  const wsB = await connect(b.token);
+  await waitFor(wsB, 'ready');
+
+  // A starts a direct chat with B by phone number.
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: '0699 1000002' },
+  });
+  assert.equal(chat.status, 201);
+  const chatId = chat.json.chat.id;
+
+  // B is told about the new chat live, then A's message arrives over the socket.
+  const created = await waitFor(wsB, 'chat-created');
+  assert.equal(created.chat.id, chatId);
+  const sent = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'Hallo Bob!' },
+  });
+  assert.equal(sent.status, 201);
+  const live = await waitFor(wsB, 'message');
+  assert.equal(live.message.body, 'Hallo Bob!');
+
+  // And B sees it in history (server-stored).
+  const hist = await api(`/api/chats/${chatId}/messages`, { token: b.token });
+  assert.ok(hist.json.messages.some((m) => m.body === 'Hallo Bob!'));
+  wsB.close();
+});
+
+test('admin sends a real DM into a read-only Ping Team channel', async () => {
+  const u = await register('0699 2000001', 'dm-target@example.com', 'DmTarget');
+  const ws = await connect(u.token);
+  await waitFor(ws, 'ready');
+  const list = await api('/api/admin/users?q=dm-target@example.com', { admin: ADMIN });
+  const id = list.json.users.find((x) => x.email === 'dm-target@example.com').id;
+
+  const dm = await api(`/api/admin/users/${id}/dm`, {
+    method: 'POST', admin: ADMIN, body: { body: 'Willkommen bei Ping!' },
+  });
+  assert.equal(dm.status, 200);
+  assert.equal(dm.json.ok, true);
+
+  // The channel appears + the message is delivered live.
+  const created = await waitFor(ws, 'chat-created');
+  assert.equal(created.chat.locked, true);
+  const chatId = created.chat.id;
+  const live = await waitFor(ws, 'message');
+  assert.equal(live.message.body, 'Willkommen bei Ping!');
+
+  // The user can't reply into the locked channel.
+  const reply = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: u.token, body: { body: 'Darf ich antworten?' },
+  });
+  assert.equal(reply.status, 403);
+  ws.close();
+});
+
+test('admin broadcast-dm reaches every user privately', async () => {
+  const a = await register('0699 3000001', 'bdm-a@example.com', 'BdmA');
+  const b = await register('0699 3000002', 'bdm-b@example.com', 'BdmB');
+
+  const res = await api('/api/admin/broadcast-dm', {
+    method: 'POST', admin: ADMIN, body: { body: 'Wartungsarbeiten heute Abend.' },
+  });
+  assert.equal(res.status, 200);
+  assert.ok(res.json.delivered >= 2);
+
+  // Both users now have a Ping Team chat carrying the message.
+  for (const tok of [a.token, b.token]) {
+    const chats = await api('/api/chats', { token: tok });
+    const team = chats.json.chats.find((c) => c.locked === true);
+    assert.ok(team, 'expected a locked Ping Team chat');
+    assert.equal(team.lastMessage.body, 'Wartungsarbeiten heute Abend.');
+  }
+});
+
+test('admin posts an official status every user can see', async () => {
+  const viewer = await register('0699 4000001', 'status-view@example.com', 'StatusView');
+  const posted = await api('/api/admin/status', {
+    method: 'POST', admin: ADMIN, body: { body: 'Frohe Feiertage!', bgColor: '#26A69A' },
+  });
+  assert.equal(posted.status, 201);
+
+  // A brand-new user with no shared chats still sees the Ping Team status.
+  const feed = await api('/api/status', { token: viewer.token });
+  const team = feed.json.others.find((o) => o.user.displayName === 'Ping Team');
+  assert.ok(team, 'expected the official status in the feed');
+  assert.ok(team.items.some((i) => i.body === 'Frohe Feiertage!'));
+});
+
+// ---- v2.3.0: password reset, archive, search, privacy, hardening ------------
+
+test('forgot-password: SMS code flow resets the password', async () => {
+  await register('0699 5000001', 'reset-me@example.com', 'ResetMe', 'oldpass1');
+
+  // Request a reset code (the 'log' SMS provider returns it as devCode).
+  const reqd = await api('/api/auth/request-code', {
+    method: 'POST', body: { phone: '0699 5000001', purpose: 'reset' },
+  });
+  assert.equal(reqd.status, 200, JSON.stringify(reqd.json));
+  assert.ok(reqd.json.devCode);
+
+  const ver = await api('/api/auth/verify-code', {
+    method: 'POST', body: { phone: '0699 5000001', code: reqd.json.devCode },
+  });
+  assert.equal(ver.status, 200);
+
+  const reset = await api('/api/auth/reset-password', {
+    method: 'POST',
+    body: { phone: '0699 5000001', verifyToken: ver.json.verifyToken, password: 'newpass1' },
+  });
+  assert.equal(reset.status, 200, JSON.stringify(reset.json));
+  assert.ok(reset.json.token);
+
+  // Old password is dead, the new one works.
+  const oldLogin = await api('/api/auth/login', {
+    method: 'POST', body: { login: '0699 5000001', password: 'oldpass1' },
+  });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await api('/api/auth/login', {
+    method: 'POST', body: { login: '0699 5000001', password: 'newpass1' },
+  });
+  assert.equal(newLogin.status, 200);
+});
+
+test('request-code rejects mismatched purposes', async () => {
+  // Registering with an already-taken number is refused up front…
+  const taken = await api('/api/auth/request-code', {
+    method: 'POST', body: { phone: '0699 5000001', purpose: 'register' },
+  });
+  assert.equal(taken.status, 409);
+  // …and a reset for a number without an account is too.
+  const unknown = await api('/api/auth/request-code', {
+    method: 'POST', body: { phone: '0699 5999999', purpose: 'reset' },
+  });
+  assert.equal(unknown.status, 404);
+});
+
+test('reset-password refuses a token for a different number', async () => {
+  await register('0699 5000002', 'reset-b@example.com', 'ResetB');
+  const reqd = await api('/api/auth/request-code', {
+    method: 'POST', body: { phone: '0699 5000002', purpose: 'reset' },
+  });
+  const ver = await api('/api/auth/verify-code', {
+    method: 'POST', body: { phone: '0699 5000002', code: reqd.json.devCode },
+  });
+  const wrong = await api('/api/auth/reset-password', {
+    method: 'POST',
+    body: { phone: '0699 5000001', verifyToken: ver.json.verifyToken, password: 'hijack1' },
+  });
+  assert.equal(wrong.status, 401);
+});
+
+test('archiving a chat is per-user and reversible', async () => {
+  const a = await register('0699 6000001', 'arch-a@example.com', 'ArchA');
+  const b = await register('0699 6000002', 'arch-b@example.com', 'ArchB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: '0699 6000002' },
+  });
+  const chatId = chat.json.chat.id;
+
+  const arch = await api(`/api/chats/${chatId}/archive`, {
+    method: 'POST', token: a.token, body: { archived: true },
+  });
+  assert.equal(arch.status, 200);
+
+  const aChats = await api('/api/chats', { token: a.token });
+  assert.equal(aChats.json.chats.find((c) => c.id === chatId).archived, true);
+  // B's view is untouched.
+  const bChats = await api('/api/chats', { token: b.token });
+  assert.equal(bChats.json.chats.find((c) => c.id === chatId).archived, false);
+
+  await api(`/api/chats/${chatId}/archive`, {
+    method: 'POST', token: a.token, body: { archived: false },
+  });
+  const again = await api('/api/chats', { token: a.token });
+  assert.equal(again.json.chats.find((c) => c.id === chatId).archived, false);
+});
+
+test('global message search finds matches across chats', async () => {
+  const a = await register('0699 7000001', 'search-a@example.com', 'SearchA');
+  const b = await register('0699 7000002', 'search-b@example.com', 'SearchB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: '0699 7000002' },
+  });
+  const chatId = chat.json.chat.id;
+  await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'Treffen am Donnerstagabend im Café' },
+  });
+  await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: b.token, body: { body: 'Passt, bis Donnerstag!' },
+  });
+
+  const hits = await api('/api/messages/search?q=donnerstag', { token: a.token });
+  assert.equal(hits.status, 200);
+  assert.equal(hits.json.messages.length, 2);
+
+  // An outsider sees nothing from this chat.
+  const c = await register('0699 7000003', 'search-c@example.com', 'SearchC');
+  const none = await api('/api/messages/search?q=donnerstag', { token: c.token });
+  assert.equal(none.json.messages.length, 0);
+
+  // Queries below 2 chars are rejected.
+  const short = await api('/api/messages/search?q=x', { token: a.token });
+  assert.equal(short.status, 400);
+});
+
+test('hiding "zuletzt online" blanks lastSeen for others only', async () => {
+  const a = await register('0699 8000001', 'seen-a@example.com', 'SeenA');
+  const b = await register('0699 8000002', 'seen-b@example.com', 'SeenB');
+  await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: '0699 8000002' },
+  });
+
+  // Default: B's lastSeen is visible to A.
+  const before = await api(`/api/users/${b.user.id}`, { token: a.token });
+  assert.ok(before.json.user.lastSeen != null);
+
+  const setp = await api('/api/me/privacy', {
+    method: 'POST', token: b.token, body: { showLastSeen: false },
+  });
+  assert.equal(setp.status, 200);
+  assert.equal(setp.json.user.showLastSeen, false);
+  // B still sees their own timestamp.
+  assert.ok(setp.json.user.lastSeen != null);
+
+  const after = await api(`/api/users/${b.user.id}`, { token: a.token });
+  assert.equal(after.json.user.lastSeen, null);
+});
+
+test('opening a chat with the Ping Team is read-only from the start', async () => {
+  const u = await register('0699 9000001', 'team-chat@example.com', 'TeamChat');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: u.token, body: { userId: 'ping-official' },
+  });
+  assert.equal(chat.status, 201);
+  assert.equal(chat.json.chat.locked, true);
+  const send = await api(`/api/chats/${chat.json.chat.id}/messages`, {
+    method: 'POST', token: u.token, body: { body: 'Hallo Team' },
+  });
+  assert.equal(send.status, 403);
+});
+
+test('a disabled admin loses admin API access immediately', async () => {
+  const u = await register('0699 9100001', 'exadmin@example.com', 'ExAdmin');
+  const list = await api('/api/admin/users?q=exadmin@example.com', { admin: ADMIN });
+  const id = list.json.users[0].id;
+  await api(`/api/admin/users/${id}`, {
+    method: 'PATCH', admin: ADMIN, body: { isAdmin: true },
+  });
+
+  // As a live admin the bearer token works on the admin API…
+  const ok = await api('/api/admin/stats', { token: u.token });
+  assert.equal(ok.status, 200);
+
+  await api(`/api/admin/users/${id}`, {
+    method: 'PATCH', admin: ADMIN, body: { disabled: true },
+  });
+  // …but a disabled account is locked out of both the admin and the user API.
+  const denied = await api('/api/admin/stats', { token: u.token });
+  assert.equal(denied.status, 401);
+  const me = await api('/api/me', { token: u.token });
+  assert.equal(me.status, 403);
+});

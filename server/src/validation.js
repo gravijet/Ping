@@ -49,14 +49,26 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Bitte gib dein Passwort ein.'),
 });
 
-// SMS one-time-code verification.
-export const requestCodeSchema = z.object({ phone: phoneInputSchema });
+// SMS one-time-code verification. The purpose decides which accounts may
+// request a code: 'register' (default) needs a *free* number, 'reset' needs an
+// *existing* account (password reset).
+export const requestCodeSchema = z.object({
+  phone: phoneInputSchema,
+  purpose: z.enum(['register', 'reset']).optional(),
+});
 export const verifyCodeSchema = z.object({
   phone: phoneInputSchema,
   code: z
     .string()
     .trim()
     .regex(/^\d{4,8}$/, 'Bitte gib den Code aus der SMS ein.'),
+});
+
+// Set a new password after proving phone ownership via the SMS code flow.
+export const resetPasswordSchema = z.object({
+  phone: phoneInputSchema,
+  verifyToken: z.string().min(10, 'Verifizierung fehlt.'),
+  password: passwordSchema,
 });
 
 export const updateProfileSchema = z.object({
@@ -195,6 +207,21 @@ export const adminUpdateSchema = z
     { message: 'Nichts zu ändern.' }
   );
 
+// The set of in-app destinations an admin notification can deep-link to. Kept
+// in sync with the app's notification router (AppRoutes). 'home' is the default.
+export const appRouteSchema = z.enum([
+  'home',
+  'settings',
+  'privacy',
+  'notifications',
+  'design',
+  'security',
+  'backup',
+  'saved',
+  'update',
+  'profile',
+]);
+
 export const adminBroadcastSchema = z.object({
   title: z.string().trim().max(80).optional(),
   body: z
@@ -202,11 +229,53 @@ export const adminBroadcastSchema = z.object({
     .trim()
     .min(1, 'Bitte gib eine Nachricht ein.')
     .max(2000, 'Die Durchsage ist zu lang.'),
+  // Optional deep-link: which screen the app opens when the notification is
+  // tapped (e.g. 'privacy' for the privacy settings). Defaults to the inbox.
+  route: appRouteSchema.optional(),
 });
 
 export const messageStorageSchema = z.object({
   mode: z.enum(['server', 'local']),
 });
+
+// Per-account privacy switches (extend here as more arrive).
+export const privacySchema = z.object({
+  showLastSeen: z.boolean(),
+});
+
+// Global message search (home screen).
+export const searchQuerySchema = z
+  .string()
+  .trim()
+  .min(2, 'Bitte gib mindestens 2 Zeichen ein.')
+  .max(120, 'Die Suche ist zu lang.');
+
+// An official message an admin sends into a user's "Ping Team" channel — either
+// to one user or broadcast to everyone. Plain text only (no caller-supplied
+// attachment to keep the channel simple and trustworthy).
+export const officialMessageSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib eine Nachricht ein.')
+    .max(2000, 'Die Nachricht ist zu lang.'),
+});
+
+// An official status ("story") an admin posts so every user sees it.
+export const adminStatusSchema = z
+  .object({
+    type: z.enum(['text', 'image', 'video']).optional(),
+    body: z.string().max(700, 'Der Status ist zu lang.').optional(),
+    attachment: attachmentSchema.optional(),
+    bgColor: avatarColorSchema.optional(),
+  })
+  .refine(
+    (d) => {
+      const t = d.type || 'text';
+      return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
+    },
+    { message: 'Ein Status braucht Text, ein Bild oder ein Video.' }
+  );
 
 // A single emoji reaction. We keep it short (an emoji can be several code units
 // with ZWJ/skin-tone modifiers) but never a long string.

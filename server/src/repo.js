@@ -18,6 +18,44 @@ export function pickAvatarColor(seed) {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 }
 
+// ---- Official "Ping Team" account ------------------------------------------
+
+// A fixed system account used as the sender of official admin messages and
+// broadcasts (so they appear as a real, named "Ping Team" chat rather than an
+// anonymous popup). It is never a real login: its phone is an unreachable
+// sentinel (E.164 can't start with 0) and its password hash matches nothing.
+export const OFFICIAL_USER_ID = 'ping-official';
+const OFFICIAL_PHONE = '+000000000000';
+
+// Create the official account once if it's missing. Idempotent and cheap, so it
+// is safe to call on every server start.
+export function ensureOfficialUser() {
+  const existing = stmts.userById.get(OFFICIAL_USER_ID);
+  if (existing) return existing;
+  const ts = now();
+  try {
+    stmts.insertUserWithId.run(
+      OFFICIAL_USER_ID,
+      OFFICIAL_PHONE,
+      'user@example.invalid',
+      'user@example.invalid',
+      // A random, non-bcrypt hash — bcrypt.compare against it always returns false.
+      crypto.randomBytes(24).toString('hex'),
+      'Ping Team',
+      '#5C6BC0',
+      'Offizielle Mitteilungen',
+      1,
+      ts,
+      ts
+    );
+  } catch (e) {
+    // A lost race or a pre-existing row with the reserved email/phone — never let
+    // this stop the server from booting. Fall back to whatever exists.
+    console.error('[official-user] konnte Ping-Team-Konto nicht anlegen:', e.message);
+  }
+  return stmts.userById.get(OFFICIAL_USER_ID);
+}
+
 // ---- Users -----------------------------------------------------------------
 
 const stmts = {
@@ -26,6 +64,13 @@ const stmts = {
       (id, phone, email, email_lc, password_hash, display_name, avatar_color,
        about, is_admin, created_at, last_seen)
     VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?)`),
+  // Like insertUser but with an explicit id + about — used for the fixed
+  // official "Ping Team" system account.
+  insertUserWithId: db.prepare(`
+    INSERT INTO users
+      (id, phone, email, email_lc, password_hash, display_name, avatar_color,
+       about, is_admin, created_at, last_seen)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   userByPhone: db.prepare('SELECT * FROM users WHERE phone = ?'),
   userByEmailLc: db.prepare('SELECT * FROM users WHERE email_lc = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -42,11 +87,18 @@ const stmts = {
   setName: db.prepare('UPDATE users SET display_name = ? WHERE id = ?'),
   setMessageStorage: db.prepare('UPDATE users SET message_storage = ? WHERE id = ?'),
   deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
-  count: db.prepare('SELECT COUNT(*) AS n FROM users'),
-  allUsers: db.prepare('SELECT * FROM users ORDER BY created_at DESC LIMIT 500'),
+  // The official "Ping Team" system account is hidden from user counts and
+  // listings — it isn't a real person.
+  count: db.prepare("SELECT COUNT(*) AS n FROM users WHERE id != 'ping-official'"),
+  allUsers: db.prepare(
+    "SELECT * FROM users WHERE id != 'ping-official' ORDER BY created_at DESC LIMIT 500"
+  ),
   searchAdmin: db.prepare(`
     SELECT * FROM users
-    WHERE LOWER(display_name) LIKE ? OR LOWER(email) LIKE ? OR phone LIKE ?
+    WHERE id != 'ping-official'
+      AND (LOWER(display_name) LIKE ? ESCAPE '\\'
+        OR LOWER(email) LIKE ? ESCAPE '\\'
+        OR phone LIKE ? ESCAPE '\\')
     ORDER BY created_at DESC LIMIT 500`),
 };
 
@@ -125,13 +177,22 @@ export function getMessageStorage(id) {
 export const deleteUser = (id) => stmts.deleteUser.run(id);
 export const countUsers = () => stmts.count.get().n;
 
+// Every real, active user id — used to fan an official broadcast DM out to the
+// whole user base. Excludes the official account itself and disabled accounts.
+const allActiveIdsStmt = db.prepare(
+  "SELECT id FROM users WHERE id != 'ping-official' AND disabled = 0"
+);
+export const allActiveUserIds = () => allActiveIdsStmt.all().map((r) => r.id);
+
 // Aggregate counters for the admin dashboard.
 const adminStats = {
   chats: db.prepare('SELECT COUNT(*) AS n FROM chats'),
   groups: db.prepare("SELECT COUNT(*) AS n FROM chats WHERE type = 'group'"),
   messages: db.prepare('SELECT COUNT(*) AS n FROM messages WHERE deleted_at IS NULL'),
   statuses: db.prepare('SELECT COUNT(*) AS n FROM statuses WHERE expires_at > ?'),
-  admins: db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_admin = 1'),
+  admins: db.prepare(
+    "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1 AND id != 'ping-official'"
+  ),
 };
 export const countChats = () => adminStats.chats.get().n;
 export const countGroups = () => adminStats.groups.get().n;
@@ -140,7 +201,7 @@ export const countActiveStatuses = () => adminStats.statuses.get(now()).n;
 export const countAdmins = () => adminStats.admins.get().n;
 export const listUsers = (q) => {
   if (q && q.trim()) {
-    const like = `%${q.toLowerCase().replace(/[%_]/g, '\\$&')}%`;
+    const like = `%${q.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`;
     return stmts.searchAdmin.all(like, like, like);
   }
   return stmts.allUsers.all();
@@ -153,6 +214,12 @@ export function setAbout(id, about) {
 
 export function setDisabled(id, disabled) {
   db.prepare('UPDATE users SET disabled = ? WHERE id = ?').run(disabled ? 1 : 0, id);
+  return stmts.userById.get(id);
+}
+
+/** Privacy: whether other people may see this user's "zuletzt online". */
+export function setShowLastSeen(id, show) {
+  db.prepare('UPDATE users SET show_last_seen = ? WHERE id = ?').run(show ? 1 : 0, id);
   return stmts.userById.get(id);
 }
 
@@ -270,7 +337,9 @@ export function publicUser(u) {
     about: u.about,
     hasAvatar: !!u.avatar_mime,
     avatarVersion: u.avatar_version,
-    lastSeen: u.last_seen,
+    // Hidden when the user turned "zuletzt online" off in their privacy
+    // settings (the column may be missing on rows from very old exports).
+    lastSeen: u.show_last_seen === 0 ? null : u.last_seen,
   };
 }
 
@@ -279,10 +348,13 @@ export function privateUser(u) {
   if (!u) return null;
   return {
     ...publicUser(u),
+    // You always see your own last_seen, regardless of the privacy setting.
+    lastSeen: u.last_seen,
     phone: u.phone,
     email: u.email,
     isAdmin: !!u.is_admin,
     messageStorage: u.message_storage || 'server',
+    showLastSeen: u.show_last_seen !== 0,
   };
 }
 

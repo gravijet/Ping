@@ -7,6 +7,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
 import '../widgets/ping_logo.dart';
+import 'forgot_password_screen.dart';
 import 'phone_verify_screen.dart';
 
 /// The entry screen. Two modes:
@@ -217,6 +218,16 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 14),
         _passwordField(),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _busy
+                ? null
+                : () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const ForgotPasswordScreen())),
+            child: const Text('Passwort vergessen?'),
+          ),
+        ),
       ];
 
   Widget _phoneField() => TextFormField(

@@ -5,7 +5,6 @@ import 'dart:convert';
 class PingSettings {
   // Privacy
   final bool readReceipts; // send read receipts to others
-  final bool showOnline; // (cosmetic) advertise presence
 
   // Notifications
   final bool notificationsEnabled;
@@ -31,7 +30,6 @@ class PingSettings {
 
   const PingSettings({
     this.readReceipts = true,
-    this.showOnline = true,
     this.notificationsEnabled = true,
     this.notificationPreview = true,
     this.notificationVibrate = true,
@@ -50,7 +48,6 @@ class PingSettings {
 
   PingSettings copyWith({
     bool? readReceipts,
-    bool? showOnline,
     bool? notificationsEnabled,
     bool? notificationPreview,
     bool? notificationVibrate,
@@ -69,7 +66,6 @@ class PingSettings {
   }) =>
       PingSettings(
         readReceipts: readReceipts ?? this.readReceipts,
-        showOnline: showOnline ?? this.showOnline,
         notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
         notificationPreview: notificationPreview ?? this.notificationPreview,
         notificationVibrate: notificationVibrate ?? this.notificationVibrate,
@@ -89,7 +85,6 @@ class PingSettings {
 
   Map<String, dynamic> toJson() => {
         'readReceipts': readReceipts,
-        'showOnline': showOnline,
         'notificationsEnabled': notificationsEnabled,
         'notificationPreview': notificationPreview,
         'notificationVibrate': notificationVibrate,
@@ -108,7 +103,6 @@ class PingSettings {
 
   factory PingSettings.fromJson(Map<String, dynamic> j) => PingSettings(
         readReceipts: j['readReceipts'] ?? true,
-        showOnline: j['showOnline'] ?? true,
         notificationsEnabled: j['notificationsEnabled'] ?? true,
         notificationPreview: j['notificationPreview'] ?? true,
         notificationVibrate: j['notificationVibrate'] ?? true,

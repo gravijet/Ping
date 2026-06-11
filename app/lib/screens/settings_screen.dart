@@ -7,6 +7,7 @@ import '../widgets/avatar.dart';
 import '../widgets/brand.dart';
 import '../widgets/invite_sheet.dart';
 import '../widgets/ping_logo.dart';
+import '../widgets/update_sheet.dart';
 import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
@@ -126,30 +127,39 @@ class SettingsScreen extends StatelessWidget {
             ),
           ],
           const Divider(),
-          _SectionHeader('Verbindung'),
-          ListTile(
-            leading: Icon(
-              state.socketConnected
-                  ? Icons.cloud_done_rounded
-                  : Icons.cloud_off_rounded,
-              color:
-                  state.socketConnected ? const Color(0xFF22C55E) : scheme.error,
-            ),
-            title: const Text('Server'),
-            subtitle: Text(
-              '${isDefaultServer(state.baseUrl) ? serverLabel : state.baseUrl}'
-              '\n${state.socketConnected ? 'Verbunden' : 'Nicht verbunden'}',
-            ),
-            isThreeLine: true,
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _editServer(context, state),
-          ),
-          const Divider(),
           _SectionHeader('Über'),
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 2.1.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 2.3.0 — schnell, sicher, in Blau.'),
+          ),
+          ListTile(
+            leading: Icon(
+              state.availableUpdate != null
+                  ? Icons.system_update_rounded
+                  : Icons.update_rounded,
+              color: state.availableUpdate != null ? scheme.primary : null,
+            ),
+            title: const Text('App-Update'),
+            subtitle: Text(state.availableUpdate != null
+                ? 'Version ${state.availableUpdate!.version} verfügbar — jetzt installieren'
+                : 'Nach Updates suchen'),
+            trailing: state.availableUpdate != null
+                ? Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: scheme.primary,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('NEU',
+                        style: TextStyle(
+                            color: scheme.onPrimary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800)),
+                  )
+                : const Icon(Icons.chevron_right_rounded),
+            onTap: () => showUpdateSheet(context),
           ),
           ListTile(
             leading: const Icon(Icons.description_outlined),
@@ -158,7 +168,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '2.1.0',
+              applicationVersion: '2.3.0',
             ),
           ),
           const SizedBox(height: 8),
@@ -296,36 +306,6 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _editServer(BuildContext context, AppState state) async {
-    final controller = TextEditingController(text: state.baseUrl);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Server-Adresse'),
-        content: TextField(
-          controller: controller,
-          autocorrect: false,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(
-            labelText: 'URL',
-            hintText: 'https://dein-server',
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Abbrechen')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('Speichern'),
-          ),
-        ],
-      ),
-    );
-    if (result != null && result.isNotEmpty) {
-      await state.setBaseUrl(result);
-    }
-  }
 }
 
 class _SectionHeader extends StatelessWidget {

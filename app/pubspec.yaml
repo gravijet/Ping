@@ -1,7 +1,7 @@
 name: ping
 description: "Ping – ein schneller, moderner Messenger."
 publish_to: 'none'
-version: 2.1.0+4
+version: 2.3.0+6
 
 environment:
   sdk: ^3.12.1
@@ -26,6 +26,10 @@ dependencies:
   flutter_tts: ^4.2.0
   url_launcher: ^6.3.1
   path_provider: ^2.1.5
+  # In-app auto-update: read the running version + open the downloaded APK.
+  package_info_plus: ^8.1.1
+  open_filex: ^4.5.0
+  crypto: ^3.0.6 # verify the downloaded APK's sha256 before installing
   firebase_core: ^4.10.0
   firebase_auth: ^6.5.2
   firebase_messaging: ^16.0.5

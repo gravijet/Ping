@@ -40,7 +40,10 @@ db.exec(`
     created_at   INTEGER NOT NULL,
     -- For direct chats this holds the sorted "a:b" user id pair so we can
     -- enforce a single conversation per pair via the unique index below.
-    direct_key   TEXT
+    direct_key   TEXT,
+    -- A read-only channel (e.g. the official "Ping Team" broadcast): only the
+    -- server delivers messages into it; normal members can't reply.
+    locked       INTEGER NOT NULL DEFAULT 0
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_direct_key
     ON chats(direct_key) WHERE direct_key IS NOT NULL;
@@ -236,6 +239,10 @@ function ensureColumns() {
   if (!chatCols.includes('description')) {
     db.exec("ALTER TABLE chats ADD COLUMN description TEXT NOT NULL DEFAULT ''");
   }
+  if (!chatCols.includes('locked')) {
+    // Read-only channels (official "Ping Team" broadcasts): members can't reply.
+    db.exec('ALTER TABLE chats ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
+  }
   const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!userCols.includes('message_storage')) {
     // 'server' = keep history (default); 'local' = purge a user's sent messages
@@ -248,6 +255,16 @@ function ensureColumns() {
     // Admin "ban": a disabled account can't log in and existing sessions are
     // rejected.
     db.exec('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userCols.includes('show_last_seen')) {
+    // Privacy: when 0, other people never see this user's "zuletzt online".
+    db.exec('ALTER TABLE users ADD COLUMN show_last_seen INTEGER NOT NULL DEFAULT 1');
+  }
+  const memberCols = db.prepare('PRAGMA table_info(chat_members)').all().map((c) => c.name);
+  if (!memberCols.includes('archived')) {
+    // Per-user chat archiving: the chat moves into a collapsed "Archiviert"
+    // section on that user's device only.
+    db.exec('ALTER TABLE chat_members ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
   }
 }
 ensureColumns();
@@ -291,4 +308,19 @@ migrateStatusType();
 
 export function now() {
   return Date.now();
+}
+
+/// Run [fn] inside a single SQLite transaction (BEGIN/COMMIT, ROLLBACK on
+/// throw). Used for multi-row writes (e.g. seeding receipt rows for a group
+/// message) so they hit the disk as one atomic unit instead of N autocommits.
+export function tx(fn) {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
 }

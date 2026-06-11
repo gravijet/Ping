@@ -2,6 +2,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import 'notification_service.dart';
+import 'notification_target.dart';
 
 /// Top-level background handler. Required by firebase_messaging. Messages that
 /// carry a `notification` block are shown by the OS automatically while the app
@@ -14,8 +15,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 /// Wires Firebase Cloud Messaging into the app: obtains the device token (so the
 /// server can push to it), shows foreground messages as local notifications, and
-/// routes notification taps to the right chat. Android-only for now; silently
-/// does nothing elsewhere so the rest of the app never special-cases it.
+/// routes notification taps to the right chat or screen. Android-only for now;
+/// silently does nothing elsewhere so the rest of the app never special-cases it.
 class PushService {
   final _messaging = FirebaseMessaging.instance;
   NotificationService? _notifications;
@@ -24,6 +25,10 @@ class PushService {
   /// Called with the FCM token on start and whenever it refreshes — the app
   /// registers it with the server here.
   void Function(String token)? onToken;
+
+  /// Called when a push notification is tapped (background/terminated launch),
+  /// with where it should take the user.
+  void Function(NotificationTarget target)? onOpen;
 
   bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -65,19 +70,19 @@ class PushService {
   void _onForeground(RemoteMessage message) {
     final n = message.notification;
     if (n == null) return;
-    final chatId = (message.data['chatId'] ?? '').toString();
+    final data = message.data;
+    final target =
+        NotificationTarget.fromData(data) ?? const NotificationTarget();
     _notifications?.showMessage(
-      chatId: chatId.isNotEmpty ? chatId : 'ping',
       title: n.title ?? 'Ping',
       body: n.body ?? '',
+      target: target,
+      announcement: (data['type'] ?? '').toString() == 'announcement',
     );
   }
 
   void _onOpened(RemoteMessage message) {
-    final chatId = (message.data['chatId'] ?? '').toString();
-    if (chatId.isNotEmpty) {
-      // Reuse the existing local-notification tap routing.
-      _notifications?.onTapChat?.call(chatId);
-    }
+    final target = NotificationTarget.fromData(message.data);
+    if (target != null) onOpen?.call(target);
   }
 }

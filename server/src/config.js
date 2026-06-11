@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +7,22 @@ import { fileURLToPath } from 'node:url';
 // Centralised runtime configuration. Everything is overridable through the
 // environment so the same build runs locally, in CI and in production.
 const isProd = process.env.NODE_ENV === 'production';
+
+// The single source of truth for the server version (surfaced by /health and
+// the admin system view) is package.json — no hardcoded copies elsewhere.
+function readVersion() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'),
+        'utf8'
+      )
+    );
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 function readSecret() {
   const fromEnv = process.env.JWT_SECRET;
@@ -25,6 +42,7 @@ const isMemoryDb = /:memory:|mode=memory/.test(dbFile);
 
 export const config = {
   isProd,
+  version: readVersion(),
   // A port in the IANA dynamic/private range (49152-65535) that also sits above
   // the usual Linux ephemeral range (32768-60999), so it won't collide with the
   // other services or with the OS's outbound sockets on a busy host.

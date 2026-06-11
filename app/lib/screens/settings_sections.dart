@@ -34,11 +34,22 @@ class PrivacySettingsScreen extends StatelessWidget {
             onChanged: (v) => update(s.copyWith(readReceipts: v)),
           ),
           SwitchListTile(
-            secondary: const Icon(Icons.circle_outlined),
-            title: const Text('Online-Status zeigen'),
-            subtitle: const Text('Zeige „online" und „zuletzt online" an.'),
-            value: s.showOnline,
-            onChanged: (v) => update(s.copyWith(showOnline: v)),
+            secondary: const Icon(Icons.schedule_rounded),
+            title: const Text('„Zuletzt online" zeigen'),
+            subtitle: const Text(
+                'Wenn aus, sehen andere nicht mehr, wann du zuletzt online '
+                'warst. Ob du gerade online bist, bleibt sichtbar.'),
+            value: state.me?.showLastSeen ?? true,
+            onChanged: (v) async {
+              try {
+                await state.setShowLastSeen(v);
+              } on ApiException catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(e.message)));
+                }
+              }
+            },
           ),
           const Divider(),
           SwitchListTile(

@@ -16,6 +16,8 @@ class Chat {
   final String description; // groups: optional description
   final bool hasAvatar; // groups: an uploaded group picture exists
   final int avatarVersion; // groups: cache-buster for the group picture
+  final bool locked; // read-only channel (official "Ping Team" broadcast)
+  final bool archived; // collapsed into the "Archiviert" section (per user)
   Message? lastMessage;
   int unread;
   bool muted;
@@ -35,6 +37,8 @@ class Chat {
     this.description = '',
     this.hasAvatar = false,
     this.avatarVersion = 0,
+    this.locked = false,
+    this.archived = false,
     this.lastMessage,
     this.unread = 0,
     this.muted = false,
@@ -82,6 +86,8 @@ class Chat {
         description: (json['description'] ?? '') as String,
         hasAvatar: (json['hasAvatar'] ?? false) as bool,
         avatarVersion: (json['avatarVersion'] ?? 0) as int,
+        locked: (json['locked'] ?? false) as bool,
+        archived: (json['archived'] ?? false) as bool,
         lastMessage: json['lastMessage'] != null
             ? Message.fromJson(json['lastMessage'] as Map<String, dynamic>)
             : null,
@@ -95,6 +101,7 @@ class Chat {
     Message? lastMessage,
     int? unread,
     bool? muted,
+    bool? archived,
     int? updatedAt,
     PingUser? otherUser,
     List<PingUser>? members,
@@ -112,6 +119,8 @@ class Chat {
         description: description,
         hasAvatar: hasAvatar,
         avatarVersion: avatarVersion,
+        locked: locked,
+        archived: archived ?? this.archived,
         lastMessage: lastMessage ?? this.lastMessage,
         unread: unread ?? this.unread,
         muted: muted ?? this.muted,

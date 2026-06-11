@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { router } from './routes.js';
 import { createHub } from './hub.js';
+import { ensureOfficialUser } from './repo.js';
 import { startBackupScheduler } from './backup.js';
 import { mountDownloads } from './download.js';
 
@@ -57,18 +58,42 @@ export function createApp() {
 
   app.use(express.json({ limit: '64kb' }));
 
-  app.get('/health', (_req, res) => res.json({ ok: true, name: 'ping', version: '2.0.0' }));
+  app.get('/health', (_req, res) =>
+    res.json({ ok: true, name: 'ping', version: config.version })
+  );
 
-  // Tighter limit on auth + admin endpoints to slow down credential/token guessing.
+  // Rate-limit key: in production the server sits behind Cloudflare + nginx, so
+  // req.ip is an edge/proxy address shared by *all* users — keying on it would
+  // throttle everyone together. Cloudflare passes the real client address in
+  // CF-Connecting-IP; fall back to req.ip when it's absent (local/dev/tests).
+  const clientKey = (req) => {
+    const cf = req.headers['cf-connecting-ip'];
+    if (typeof cf === 'string' && cf.trim()) return cf.trim();
+    return req.ip;
+  };
+
+  // Tighter limit on auth endpoints to slow down credential guessing.
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: config.authRateMax,
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: clientKey,
     message: { error: 'Zu viele Versuche. Bitte warte einen Moment und versuch es erneut.' },
   });
   app.use('/api/auth', authLimiter);
-  app.use('/api/admin', authLimiter);
+
+  // The admin portal gets its own bucket: still slow enough to blunt token
+  // guessing, but roomy enough for the dashboard's auto-refresh polling.
+  const adminLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: Math.max(config.authRateMax * 6, 240),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: clientKey,
+    message: { error: 'Zu viele Versuche. Bitte warte einen Moment und versuch es erneut.' },
+  });
+  app.use('/api/admin', adminLimiter);
 
   // General API rate limit.
   app.use(
@@ -78,6 +103,7 @@ export function createApp() {
       max: 300,
       standardHeaders: true,
       legacyHeaders: false,
+      keyGenerator: clientKey,
       message: { error: 'Etwas zu schnell — bitte einen Moment warten.' },
     })
   );
@@ -101,6 +127,8 @@ export function createApp() {
 }
 
 export function createServer() {
+  // Make sure the official "Ping Team" account exists before we serve traffic.
+  ensureOfficialUser();
   const app = createApp();
   const server = http.createServer(app);
   createHub(server);

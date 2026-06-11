@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, tx } from './db.js';
 import { uid, pickAvatarColor, getUserById, publicUser } from './repo.js';
 
 const s = {
@@ -15,11 +15,18 @@ const s = {
   members: db.prepare('SELECT user_id, role, muted FROM chat_members WHERE chat_id = ?'),
   memberIds: db.prepare('SELECT user_id FROM chat_members WHERE chat_id = ?'),
   setMuted: db.prepare('UPDATE chat_members SET muted = ? WHERE chat_id = ? AND user_id = ?'),
+  setArchived: db.prepare(
+    'UPDATE chat_members SET archived = ? WHERE chat_id = ? AND user_id = ?'
+  ),
+  memberFlags: db.prepare(
+    'SELECT muted, archived FROM chat_members WHERE chat_id = ? AND user_id = ?'
+  ),
   memberRole: db.prepare('SELECT role FROM chat_members WHERE chat_id = ? AND user_id = ?'),
   setChatMeta: db.prepare('UPDATE chats SET name = ?, description = ? WHERE id = ?'),
   setChatAvatarStmt: db.prepare(
     'UPDATE chats SET avatar_mime = ?, avatar_version = avatar_version + 1 WHERE id = ?'
   ),
+  setChatLockedStmt: db.prepare('UPDATE chats SET locked = ? WHERE id = ?'),
   userChats: db.prepare(`
     SELECT c.* FROM chats c
     JOIN chat_members m ON m.chat_id = c.id
@@ -92,6 +99,12 @@ export function setChatAvatar(chatId, mime) {
   s.setChatAvatarStmt.run(mime, chatId);
   return s.chatById.get(chatId);
 }
+// Mark a chat read-only (or not). Read-only chats reject member sends — used by
+// the official "Ping Team" broadcast channel.
+export function setChatLocked(chatId, locked) {
+  s.setChatLockedStmt.run(locked ? 1 : 0, chatId);
+  return s.chatById.get(chatId);
+}
 export const getMembers = (chatId) => s.members.all(chatId);
 export const getMemberIds = (chatId) => s.memberIds.all(chatId).map((r) => r.user_id);
 export const addMember = (chatId, userId, role = 'member') =>
@@ -99,6 +112,10 @@ export const addMember = (chatId, userId, role = 'member') =>
 export const removeMember = (chatId, userId) => s.removeMember.run(chatId, userId);
 export const setMuted = (chatId, userId, muted) =>
   s.setMuted.run(muted ? 1 : 0, chatId, userId);
+// Per-user archiving: the chat collapses into the "Archiviert" section on this
+// user's device; other members are unaffected.
+export const setArchived = (chatId, userId, archived) =>
+  s.setArchived.run(archived ? 1 : 0, chatId, userId);
 export const getUserChats = (userId) => s.userChats.all(userId);
 
 // Everyone who shares at least one chat with this user (their "contacts" in the
@@ -226,12 +243,14 @@ export function chatView(chat, viewerId) {
     createdAt: chat.created_at,
     memberIds,
     muted: false,
+    archived: false,
+    // Read-only channel (official broadcasts): the client hides the composer.
+    locked: !!chat.locked,
   };
 
-  const muteRow = db
-    .prepare('SELECT muted FROM chat_members WHERE chat_id = ? AND user_id = ?')
-    .get(chat.id, viewerId);
-  base.muted = !!(muteRow && muteRow.muted);
+  const flags = s.memberFlags.get(chat.id, viewerId);
+  base.muted = !!(flags && flags.muted);
+  base.archived = !!(flags && flags.archived);
 
   if (chat.type === 'direct') {
     if (isSelfChat(chat, viewerId)) {
@@ -309,11 +328,14 @@ export function createMessage({
   const id = uid();
   const ts = now();
   const att = attachment ? JSON.stringify(attachment) : null;
-  m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts);
-  // Seed a status row for every recipient (everyone but the sender).
-  for (const memberId of getMemberIds(chatId)) {
-    if (memberId !== senderId) m.insertStatus.run(id, memberId, chatId);
-  }
+  // One transaction: the message and its per-recipient receipt rows land
+  // atomically (and as a single fsync instead of one per group member).
+  tx(() => {
+    m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts);
+    for (const memberId of getMemberIds(chatId)) {
+      if (memberId !== senderId) m.insertStatus.run(id, memberId, chatId);
+    }
+  });
   return m.byId.get(id);
 }
 
@@ -341,6 +363,25 @@ export function getHistory(chatId, { before, limit = 40 } = {}) {
   return rows.reverse();
 }
 
+// Full-history text search across every chat the user belongs to (newest
+// first). Powers the global search on the home screen. The LIKE wildcards in
+// the query itself are escaped so they're matched literally.
+const searchStmt = db.prepare(`
+  SELECT m.* FROM messages m
+  JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
+  WHERE m.deleted_at IS NULL
+    AND m.type != 'system'
+    AND m.body LIKE ? ESCAPE '\\'
+  ORDER BY m.created_at DESC
+  LIMIT ?`);
+
+export function searchMessages(userId, q, limit = 30) {
+  const needle = (q || '').trim();
+  if (needle.length < 2) return [];
+  const like = `%${needle.replace(/[\\%_]/g, '\\$&')}%`;
+  return searchStmt.all(userId, like, Math.min(limit, 50));
+}
+
 // Mark every unread message in a chat (from others) as read for this viewer.
 // Returns the messages that flipped to read, grouped by their sender so we can
 // notify each author about their own receipts.
@@ -356,7 +397,9 @@ export function markChatRead(chatId, userId) {
   const upd = db.prepare(
     'UPDATE message_status SET read_at = ?, delivered_at = COALESCE(delivered_at, ?) WHERE message_id = ? AND user_id = ?'
   );
-  for (const p of pending) upd.run(ts, ts, p.message_id, userId);
+  tx(() => {
+    for (const p of pending) upd.run(ts, ts, p.message_id, userId);
+  });
   return { ts, messageIds: pending.map((p) => p.message_id), senders: pending };
 }
 
@@ -372,7 +415,9 @@ export function markDelivered(chatId, userId) {
   const upd = db.prepare(
     'UPDATE message_status SET delivered_at = ? WHERE message_id = ? AND user_id = ?'
   );
-  for (const p of pending) upd.run(ts, p.message_id, userId);
+  tx(() => {
+    for (const p of pending) upd.run(ts, p.message_id, userId);
+  });
   return { ts, senders: pending };
 }
 

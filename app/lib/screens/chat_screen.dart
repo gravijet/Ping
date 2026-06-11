@@ -317,9 +317,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
           _TypingRow(chat: chat),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
-          if (!blockedOther && (_replyTo != null || _editing != null))
+          if (!chat.locked && !blockedOther && (_replyTo != null || _editing != null))
             _composerBanner(),
-          if (blockedOther)
+          if (chat.locked)
+            const _ReadOnlyBar()
+          else if (blockedOther)
             _BlockedBar(
               name: chat.otherUser!.label,
               onUnblock: () async {
@@ -1651,6 +1653,38 @@ class _BlockedBar extends StatelessWidget {
               ),
             ),
             TextButton(onPressed: onUnblock, child: const Text('Entsperren')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown instead of the composer in a read-only channel (an official "Ping
+/// Team" broadcast): you receive messages here but can't reply.
+class _ReadOnlyBar extends StatelessWidget {
+  const _ReadOnlyBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        color: scheme.surfaceContainerHigh,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.lock_outline_rounded,
+                color: scheme.onSurfaceVariant, size: 18),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'Nur Ping kann hier schreiben.',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
           ],
         ),
       ),

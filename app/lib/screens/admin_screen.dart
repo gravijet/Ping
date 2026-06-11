@@ -73,6 +73,137 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  Future<void> _toggleBan(Map u) async {
+    final disabled = u['disabled'] == true;
+    try {
+      await _api.patch('/admin/users/${u['id']}', {'disabled': !disabled});
+      _toast(disabled ? 'Konto entsperrt.' : 'Konto gesperrt — Sitzungen beendet.');
+      await _refresh();
+    } on ApiException catch (e) {
+      _toast(e.message);
+    }
+  }
+
+  Future<void> _messageUser(Map u) async {
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Nachricht an ${u['displayName']}'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(
+              labelText: 'Nachricht',
+              hintText: 'Landet als „Ping Team"-Chat (ohne Antwort)'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Senden')),
+        ],
+      ),
+    );
+    if (ok != true || controller.text.trim().isEmpty) return;
+    try {
+      // A real, persisted DM in the user's read-only "Ping Team" channel.
+      await _api.post('/admin/users/${u['id']}/dm', {'body': controller.text.trim()});
+      _toast('Nachricht gesendet.');
+    } on ApiException catch (e) {
+      _toast(e.message);
+    }
+  }
+
+  /// Send a private one-way message to every user (WhatsApp-style broadcast).
+  Future<void> _broadcastDm() async {
+    final body = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Private Nachricht an alle'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Jeder Nutzer bekommt die Nachricht in seinem „Ping Team"-Chat. '
+              'Antworten sind nicht möglich.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: body,
+              maxLines: 4,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Nachricht'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('An alle senden')),
+        ],
+      ),
+    );
+    if (ok != true || body.text.trim().isEmpty) return;
+    try {
+      final res =
+          await _api.post('/admin/broadcast-dm', {'body': body.text.trim()});
+      _toast('An ${res['delivered']} Nutzer privat gesendet.');
+    } on ApiException catch (e) {
+      _toast(e.message);
+    }
+  }
+
+  /// Post an official status ("story") that every user sees.
+  Future<void> _postStatus() async {
+    final body = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Status für alle'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Erscheint im Status-Tab aller Nutzer (24 Stunden lang).',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: body,
+              maxLines: 3,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Status-Text'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Posten')),
+        ],
+      ),
+    );
+    if (ok != true || body.text.trim().isEmpty) return;
+    try {
+      await _api.post('/admin/status', {'body': body.text.trim()});
+      _toast('Status für alle gepostet.');
+    } on ApiException catch (e) {
+      _toast(e.message);
+    }
+  }
+
   Future<void> _resetPassword(Map u) async {
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
@@ -180,10 +311,48 @@ class _AdminScreenState extends State<AdminScreen> {
       appBar: AppBar(
         title: const Text('Admin'),
         actions: [
-          IconButton(
-            tooltip: 'Durchsage',
-            icon: const Icon(Icons.campaign_rounded),
-            onPressed: _broadcast,
+          PopupMenuButton<String>(
+            tooltip: 'Senden',
+            icon: const Icon(Icons.send_rounded),
+            onSelected: (v) {
+              switch (v) {
+                case 'announce':
+                  _broadcast();
+                case 'dm-all':
+                  _broadcastDm();
+                case 'status':
+                  _postStatus();
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'announce',
+                child: ListTile(
+                  leading: Icon(Icons.campaign_rounded),
+                  title: Text('Durchsage'),
+                  subtitle: Text('Banner an alle'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'dm-all',
+                child: ListTile(
+                  leading: Icon(Icons.forward_to_inbox_rounded),
+                  title: Text('Private Nachricht an alle'),
+                  subtitle: Text('Als „Ping Team"-Chat'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'status',
+                child: ListTile(
+                  leading: Icon(Icons.amp_stories_rounded),
+                  title: Text('Status für alle'),
+                  subtitle: Text('Erscheint im Status-Tab'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
           IconButton(
             tooltip: 'Aktualisieren',
@@ -269,20 +438,19 @@ class _AdminScreenState extends State<AdminScreen> {
   Widget _userTile(Map u) {
     final isAdmin = u['isAdmin'] == true;
     final online = u['online'] == true;
+    final disabled = u['disabled'] == true;
+    final scheme = Theme.of(context).colorScheme;
     return ListTile(
       title: Row(
         children: [
-          Flexible(child: Text('${u['displayName']}')),
-          if (isAdmin)
-            Container(
-              margin: const EdgeInsets.only(left: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text('Admin', style: TextStyle(fontSize: 11)),
-            ),
+          Flexible(
+            child: Text('${u['displayName']}',
+                style: TextStyle(
+                    decoration:
+                        disabled ? TextDecoration.lineThrough : null)),
+          ),
+          if (isAdmin) _chip('Admin', scheme.primaryContainer),
+          if (disabled) _chip('gesperrt', scheme.errorContainer),
         ],
       ),
       subtitle: Text('${u['phone']} · ${u['email']}'),
@@ -295,6 +463,10 @@ class _AdminScreenState extends State<AdminScreen> {
           switch (v) {
             case 'admin':
               _toggleAdmin(u);
+            case 'ban':
+              _toggleBan(u);
+            case 'msg':
+              _messageUser(u);
             case 'pw':
               _resetPassword(u);
             case 'del':
@@ -305,10 +477,24 @@ class _AdminScreenState extends State<AdminScreen> {
           PopupMenuItem(
               value: 'admin',
               child: Text(isAdmin ? 'Admin entziehen' : 'Zum Admin machen')),
+          PopupMenuItem(
+              value: 'ban',
+              child: Text(disabled ? 'Entsperren' : 'Sperren')),
+          const PopupMenuItem(value: 'msg', child: Text('Nachricht senden')),
           const PopupMenuItem(value: 'pw', child: Text('Passwort ändern')),
           const PopupMenuItem(value: 'del', child: Text('Löschen')),
         ],
       ),
     );
   }
+
+  Widget _chip(String label, Color color) => Container(
+        margin: const EdgeInsets.only(left: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(label, style: const TextStyle(fontSize: 11)),
+      );
 }

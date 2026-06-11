@@ -14,7 +14,13 @@ import '../services/app_state.dart';
 /// without any Firebase console setup.
 class PhoneVerifyScreen extends StatefulWidget {
   final String phone;
-  const PhoneVerifyScreen({super.key, required this.phone});
+
+  /// Why the number is being verified: 'register' (default) or 'reset'
+  /// (forgot password). The server checks the account state accordingly.
+  final String purpose;
+
+  const PhoneVerifyScreen(
+      {super.key, required this.phone, this.purpose = 'register'});
 
   @override
   State<PhoneVerifyScreen> createState() => _PhoneVerifyScreenState();
@@ -47,7 +53,9 @@ class _PhoneVerifyScreenState extends State<PhoneVerifyScreen> {
       _error = null;
     });
     try {
-      final res = await context.read<AppState>().requestPhoneCode(widget.phone);
+      final res = await context
+          .read<AppState>()
+          .requestPhoneCode(widget.phone, purpose: widget.purpose);
       if (!mounted) return;
       setState(() {
         _step = _Step.code;

@@ -1,19 +1,30 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'notification_target.dart';
+
 /// Lightweight wrapper around local notifications. Used to surface incoming
-/// messages while the app is in the background. Stays silent on platforms that
-/// don't support it so the rest of the app never has to special-case it.
+/// messages and admin announcements while the app is running. Stays silent on
+/// platforms that don't support it so the rest of the app never special-cases it.
 class NotificationService {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
-  void Function(String chatId)? onTapChat;
 
-  static const _channel = AndroidNotificationChannel(
+  /// Called when a notification is tapped, with where it should take the user.
+  void Function(NotificationTarget target)? onTap;
+
+  static const _messageChannel = AndroidNotificationChannel(
     'ping_messages',
     'Nachrichten',
     description: 'Benachrichtigungen für neue Nachrichten',
     importance: Importance.high,
+  );
+
+  static const _announcementChannel = AndroidNotificationChannel(
+    'ping_announcements',
+    'Durchsagen',
+    description: 'Wichtige Hinweise vom Ping-Team',
+    importance: Importance.max,
   );
 
   Future<void> init() async {
@@ -29,20 +40,34 @@ class NotificationService {
       await _plugin.initialize(
         settings,
         onDidReceiveNotificationResponse: (resp) {
-          final chatId = resp.payload;
-          if (chatId != null && chatId.isNotEmpty) onTapChat?.call(chatId);
+          final target = NotificationTarget.decode(resp.payload);
+          if (target != null) onTap?.call(target);
         },
       );
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        await _plugin
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.createNotificationChannel(_channel);
-      }
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await androidPlugin?.createNotificationChannel(_messageChannel);
+      await androidPlugin?.createNotificationChannel(_announcementChannel);
       _ready = true;
     } catch (_) {
       _ready = false;
     }
+  }
+
+  /// If the app was cold-launched by tapping a *local* notification, return its
+  /// target so the caller can route to it once the UI is ready. (FCM tray taps
+  /// are handled separately by firebase_messaging's getInitialMessage.)
+  Future<NotificationTarget?> launchTarget() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      final details = await _plugin.getNotificationAppLaunchDetails();
+      if (details?.didNotificationLaunchApp == true) {
+        return NotificationTarget.decode(details!.notificationResponse?.payload);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return null;
   }
 
   Future<void> requestPermission() async {
@@ -54,31 +79,32 @@ class NotificationService {
     }
   }
 
+  /// Show a notification. [target] decides where a tap routes; for messages it
+  /// also de-duplicates (same chat replaces its previous notification).
   Future<void> showMessage({
-    required String chatId,
     required String title,
     required String body,
+    required NotificationTarget target,
+    bool announcement = false,
   }) async {
     if (!_ready) return;
-    const details = NotificationDetails(
+    final channel = announcement ? _announcementChannel : _messageChannel;
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        'ping_messages',
-        'Nachrichten',
-        channelDescription: 'Benachrichtigungen für neue Nachrichten',
-        importance: Importance.high,
+        channel.id,
+        channel.name,
+        channelDescription: channel.description,
+        importance: announcement ? Importance.max : Importance.high,
         priority: Priority.high,
-        styleInformation: BigTextStyleInformation(''),
+        category:
+            announcement ? AndroidNotificationCategory.social : null,
+        styleInformation: const BigTextStyleInformation(''),
       ),
     );
-    // Use the chat id hash as the notification id so new messages in the same
-    // chat replace the previous notification instead of stacking endlessly.
-    await _plugin.show(
-      chatId.hashCode & 0x7fffffff,
-      title,
-      body,
-      details,
-      payload: chatId,
-    );
+    // Group message notifications per chat (replace previous); give each
+    // announcement its own slot so they stack.
+    final id = (target.chatId ?? target.route ?? body).hashCode & 0x7fffffff;
+    await _plugin.show(id, title, body, details, payload: target.encode());
   }
 
   Future<void> cancelForChat(String chatId) async {

@@ -20,6 +20,9 @@ import {
   loginSchema,
   requestCodeSchema,
   verifyCodeSchema,
+  resetPasswordSchema,
+  privacySchema,
+  searchQuerySchema,
   updateProfileSchema,
   securitySchema,
   messageBodySchema,
@@ -33,11 +36,16 @@ import {
   adminCreateSchema,
   adminUpdateSchema,
   adminBroadcastSchema,
+  officialMessageSchema,
+  adminStatusSchema,
   pushTokenSchema,
   messageStorageSchema,
 } from './validation.js';
 import {
   createUser,
+  OFFICIAL_USER_ID,
+  ensureOfficialUser,
+  allActiveUserIds,
   getUserByPhone,
   getUserByEmail,
   getUserById,
@@ -50,6 +58,7 @@ import {
   setAdmin,
   setDisabled,
   setMessageStorage,
+  setShowLastSeen,
   deleteUser,
   countUsers,
   countChats,
@@ -90,6 +99,9 @@ import {
   addMember,
   removeMember,
   setMuted,
+  setArchived,
+  setChatLocked,
+  searchMessages,
   updateGroupMeta,
   setChatAvatar,
   getUserChats,
@@ -125,8 +137,14 @@ import {
   statusView,
   statusViewers,
 } from './statusRepo.js';
-import { broadcastToChat, sendToUser, isOnline, onlineUserIds } from './hub.js';
-import { sendPushToUsers } from './push.js';
+import {
+  broadcastToChat,
+  sendToUser,
+  isOnline,
+  onlineUserIds,
+  disconnectUser,
+} from './hub.js';
+import { sendPushToUsers, pushEnabled } from './push.js';
 import { listBackups, backupNow } from './backup.js';
 import {
   savePushToken,
@@ -143,12 +161,40 @@ const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(
 // login timing roughly constant whether or not an account exists.
 const DUMMY_HASH = '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinv';
 
+// createUser can still trip the UNIQUE constraints when two registrations race
+// between the duplicate check and the INSERT. Surface that as the same 409 the
+// check would have produced instead of a generic 500. Returns null after
+// writing the response.
+function tryCreateUser(args, res) {
+  try {
+    return createUser(args);
+  } catch (e) {
+    const msg = e?.message || '';
+    if (/UNIQUE/i.test(msg) && msg.includes('phone')) {
+      res.status(409).json({ error: 'Diese Handynummer ist schon registriert.' });
+      return null;
+    }
+    if (/UNIQUE/i.test(msg) && msg.includes('email')) {
+      res.status(409).json({ error: 'Diese E-Mail-Adresse ist schon registriert.' });
+      return null;
+    }
+    throw e;
+  }
+}
+
 // Notify everyone who shares a chat with this user about a profile change.
 function broadcastProfile(user) {
   const view = publicUser(user);
   for (const chat of getUserChats(user.id)) {
     broadcastToChat(chat.id, 'user-updated', { user: view }, user.id);
   }
+}
+
+// Push the user's own (private) account view to all of their devices, so changes
+// an admin makes — name, email, about, admin flag, … — take effect live without
+// a manual refresh. Combined with broadcastProfile this keeps everyone in sync.
+function broadcastSelf(user) {
+  sendToUser(user.id, 'self-updated', { user: privateUser(user) });
 }
 
 // A short, notification-friendly preview of a message (no message body leaks
@@ -206,6 +252,32 @@ function pushForMessage(chat, msg, senderId) {
   }).catch(() => {});
 }
 
+// Deliver a real, persisted message from the official "Ping Team" account into a
+// user's private channel. The channel is a normal direct chat that we mark
+// read-only (locked), so it shows up like any other conversation but the user
+// can't reply — the WhatsApp-broadcast model. Reused for both single-user admin
+// DMs and the broadcast-to-everyone. Returns true on delivery.
+function deliverOfficialMessage(targetUserId, { body, type = 'text', attachment = null }) {
+  if (targetUserId === OFFICIAL_USER_ID) return false;
+  const target = getUserById(targetUserId);
+  if (!target) return false;
+  const chat = getOrCreateDirectChat(OFFICIAL_USER_ID, targetUserId);
+  if (!chat.locked) setChatLocked(chat.id, true);
+  const msg = createMessage({
+    chatId: chat.id,
+    senderId: OFFICIAL_USER_ID,
+    type,
+    body: (body || '').trim(),
+    attachment,
+  });
+  // Make sure the channel exists on the recipient's device, then deliver live.
+  const freshChat = getChat(chat.id);
+  sendToUser(targetUserId, 'chat-created', { chat: chatView(freshChat, targetUserId) });
+  sendToUser(targetUserId, 'message', { message: messageView(msg, targetUserId) });
+  pushForMessage(freshChat, msg, OFFICIAL_USER_ID);
+  return true;
+}
+
 // ---- Auth ------------------------------------------------------------------
 
 // Send a one-time SMS code to a phone number (server-side verification). With
@@ -215,13 +287,27 @@ function pushForMessage(chat, msg, senderId) {
 router.post(
   '/auth/request-code',
   h(async (req, res) => {
-    const { phone } = parse(requestCodeSchema, req.body);
+    const { phone, purpose = 'register' } = parse(requestCodeSchema, req.body);
     const normalized = normalizePhone(phone);
     if (!normalized) {
       return res.status(400).json({
         error:
           'Diese Handynummer können wir nicht erkennen. Probier es im Format +43 660 1234567.',
       });
+    }
+    // Don't waste an SMS on a doomed flow: registering needs a free number,
+    // resetting a password needs an existing account. (Registration already
+    // reveals whether a number is taken, so this leaks nothing new.)
+    const existing = getUserByPhone(normalized);
+    if (purpose === 'register' && existing) {
+      return res
+        .status(409)
+        .json({ error: 'Diese Handynummer ist schon registriert. Melde dich an.' });
+    }
+    if (purpose === 'reset' && !existing) {
+      return res
+        .status(404)
+        .json({ error: 'Zu dieser Handynummer gibt es kein Ping-Konto.' });
     }
     const result = await requestCode(normalized);
     if (!result.ok) {
@@ -253,6 +339,34 @@ router.post(
         .json({ error: 'Der Code stimmt nicht oder ist abgelaufen.' });
     }
     res.json({ ok: true, phone: normalized, verifyToken: signPhoneToken(normalized) });
+  })
+);
+
+// Forgot password: after proving phone ownership via the SMS code flow
+// (request-code purpose:'reset' → verify-code → verifyToken), set a new
+// password and sign the user straight in.
+router.post(
+  '/auth/reset-password',
+  h(async (req, res) => {
+    const { phone, verifyToken, password } = parse(resetPasswordSchema, req.body);
+    const normalized = normalizePhone(phone);
+    const verified = verifyPhoneToken(verifyToken);
+    if (!normalized || !verified || normalizePhone(verified) !== normalized) {
+      return res.status(401).json({
+        error: 'Die Verifizierung ist ungültig oder abgelaufen. Fordere einen neuen Code an.',
+      });
+    }
+    const user = getUserByPhone(normalized);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: 'Zu dieser Handynummer gibt es kein Ping-Konto.' });
+    }
+    if (user.disabled) {
+      return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
+    }
+    const updated = setPassword(user.id, await hashPassword(password));
+    res.json({ token: signToken(updated), user: privateUser(updated) });
   })
 );
 
@@ -319,7 +433,11 @@ router.post(
       });
     }
     const passwordHash = await hashPassword(password);
-    const user = createUser({ phone: normalized, email, passwordHash, displayName });
+    const user = tryCreateUser(
+      { phone: normalized, email, passwordHash, displayName },
+      res
+    );
+    if (!user) return;
     res.status(201).json({ token: signToken(user), user: privateUser(user) });
   })
 );
@@ -587,6 +705,12 @@ router.post(
     // A chat with yourself ("Notiz an mich") is allowed and useful — note,
     // forward, save things to yourself, just like WhatsApp.
     const chat = getOrCreateDirectChat(req.user.id, other.id);
+    // The official "Ping Team" channel is always read-only, even when the user
+    // opens it before the team has ever messaged them.
+    if (other.id === OFFICIAL_USER_ID && !chat.locked) {
+      setChatLocked(chat.id, true);
+      chat.locked = 1;
+    }
     // For a real peer, let them know; for a self-chat this just syncs our own
     // other devices (idempotent on the client).
     sendToUser(other.id, 'chat-created', { chat: chatView(chat, other.id) });
@@ -663,8 +787,12 @@ router.get(
   requireAuth,
   memberGuard,
   h(async (req, res) => {
-    const before = req.query.before ? Number(req.query.before) : undefined;
-    const limit = req.query.limit ? Number(req.query.limit) : 40;
+    // Non-numeric query params fall back to the defaults instead of producing
+    // NaN (which would silently return an empty history).
+    const beforeRaw = Number(req.query.before);
+    const limitRaw = Number(req.query.limit);
+    const before = Number.isFinite(beforeRaw) ? beforeRaw : undefined;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : 40;
     const messages = getHistory(req.chat.id, { before, limit }).map((m) =>
       messageView(m, req.user.id)
     );
@@ -677,6 +805,12 @@ router.post(
   requireAuth,
   memberGuard,
   h(async (req, res) => {
+    // Read-only channel (official "Ping Team" broadcast): members can't post.
+    if (req.chat.locked) {
+      return res
+        .status(403)
+        .json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
     const { body, type = 'text', attachment, replyTo: replyRaw } = parse(
       messageSendSchema,
       req.body || {}
@@ -831,6 +965,18 @@ router.post(
   h(async (req, res) => {
     setMuted(req.chat.id, req.user.id, !!req.body?.muted);
     res.json({ ok: true, muted: !!req.body?.muted });
+  })
+);
+
+// Archive / unarchive a chat for the calling user only (it moves into the
+// collapsed "Archiviert" section on their device; other members see nothing).
+router.post(
+  '/chats/:id/archive',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    setArchived(req.chat.id, req.user.id, !!req.body?.archived);
+    res.json({ ok: true, archived: !!req.body?.archived });
   })
 );
 
@@ -1116,7 +1262,12 @@ router.get(
       statusView(s, req.user.id)
     );
     const others = [];
-    for (const peerId of getPeerIds(req.user.id)) {
+    // The official "Ping Team" account is visible to everyone, even without a
+    // shared chat, so add it alongside the viewer's real peers (de-duped below).
+    const peerIds = new Set(getPeerIds(req.user.id));
+    peerIds.delete(req.user.id);
+    if (req.user.id !== OFFICIAL_USER_ID) peerIds.add(OFFICIAL_USER_ID);
+    for (const peerId of peerIds) {
       const rows = activeStatusesForUser(peerId);
       if (rows.length === 0) continue;
       const items = rows.map((s) => statusView(s, req.user.id));
@@ -1161,7 +1312,8 @@ router.get(
         .status(403)
         .json({ error: 'Nur der Ersteller sieht, wer den Status angesehen hat.' });
     }
-    res.json({ viewers: statusViewers(s.id) });
+    // Viewers whose accounts were deleted in the meantime are dropped.
+    res.json({ viewers: statusViewers(s.id).filter((v) => v.user) });
   })
 );
 
@@ -1226,6 +1378,37 @@ router.post(
     const { mode } = parse(messageStorageSchema, req.body);
     const updated = setMessageStorage(req.user.id, mode);
     res.json({ user: privateUser(updated) });
+  })
+);
+
+// ---- Privacy settings -------------------------------------------------------
+
+// Toggle whether other people may see this user's "zuletzt online". Presence
+// (online right now) stays visible — only the timestamp is hidden.
+router.post(
+  '/me/privacy',
+  requireAuth,
+  h(async (req, res) => {
+    const { showLastSeen } = parse(privacySchema, req.body);
+    const updated = setShowLastSeen(req.user.id, showLastSeen);
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+// ---- Global message search --------------------------------------------------
+
+// Search the full history of every chat the user belongs to. Returns the
+// newest matches first; the client maps each hit to its chat for display.
+router.get(
+  '/messages/search',
+  requireAuth,
+  h(async (req, res) => {
+    const q = parse(searchQuerySchema, (req.query.q || '').toString());
+    const messages = searchMessages(req.user.id, q).map((m) =>
+      messageView(m, req.user.id)
+    );
+    res.json({ messages });
   })
 );
 
@@ -1335,7 +1518,7 @@ router.get(
 function systemHealth() {
   const mem = process.memoryUsage();
   return {
-    version: '2.0.0',
+    version: config.version,
     node: process.version,
     platform: `${os.type()} ${os.release()}`,
     uptimeSec: Math.round(process.uptime()),
@@ -1345,7 +1528,10 @@ function systemHealth() {
     totalMemMb: Math.round(os.totalmem() / 1024 / 1024),
     freeMemMb: Math.round(os.freemem() / 1024 / 1024),
     smsProvider: config.smsProvider,
-    pushEnabled: allPushTokens().length >= 0, // table exists; FCM gating is separate
+    // Whether FCM is actually configured (service-account present), not just
+    // whether the token table exists.
+    pushEnabled: pushEnabled(),
+    pushTokens: allPushTokens().length,
     requirePhoneVerification: config.requirePhoneVerification,
   };
 }
@@ -1363,10 +1549,10 @@ router.post(
   '/admin/broadcast',
   requireAdmin,
   h(async (req, res) => {
-    const { title, body } = parse(adminBroadcastSchema, req.body);
+    const { title, body, route } = parse(adminBroadcastSchema, req.body);
     const online = new Set(onlineUserIds());
     for (const id of online) {
-      sendToUser(id, 'announcement', { title: title || 'Ping', body });
+      sendToUser(id, 'announcement', { title: title || 'Ping', body, route });
     }
     // Push to offline devices (online users already saw the live announcement).
     const offline = [
@@ -1375,7 +1561,7 @@ router.post(
     const pushed = await sendPushToUsers(offline, {
       title: title || 'Ping',
       body,
-      data: { type: 'announcement' },
+      data: { type: 'announcement', ...(route ? { route } : {}) },
     });
     recordBroadcast({ title: title || '', body, delivered: online.size, pushed });
     res.json({ ok: true, delivered: online.size, pushed });
@@ -1467,13 +1653,11 @@ router.post(
       return res.status(409).json({ error: 'Diese E-Mail-Adresse ist schon registriert.' });
     }
     const passwordHash = await hashPassword(password);
-    const user = createUser({
-      phone: normalized,
-      email,
-      passwordHash,
-      displayName,
-      isAdmin: !!isAdmin,
-    });
+    const user = tryCreateUser(
+      { phone: normalized, email, passwordHash, displayName, isAdmin: !!isAdmin },
+      res
+    );
+    if (!user) return;
     res.status(201).json({ user: adminUser(user) });
   })
 );
@@ -1509,6 +1693,10 @@ router.patch(
       }
       user = setEmail(user.id, email);
     }
+    // Track what changed so we only emit the live updates that matter.
+    const profileChanged = displayName !== undefined || about !== undefined;
+    const nowDisabled = disabled === true && !user.disabled;
+
     if (displayName !== undefined) user = setName(user.id, displayName);
     if (about !== undefined) user = setAbout(user.id, about);
     if (isAdmin !== undefined) user = setAdmin(user.id, isAdmin);
@@ -1516,6 +1704,15 @@ router.patch(
     if (password !== undefined) {
       user = setPassword(user.id, await hashPassword(password));
     }
+
+    // Make the change take effect immediately on every connected device:
+    //  • profile edits (name/about) → peers refresh their cached copy,
+    //  • any account change → the user's own app updates `me` live,
+    //  • disabling → kick every live session so access stops at once.
+    if (profileChanged) broadcastProfile(user);
+    broadcastSelf(user);
+    if (nowDisabled) disconnectUser(user.id, 'disabled');
+
     res.json({ user: adminUser(user) });
   })
 );
@@ -1527,14 +1724,76 @@ router.post(
   h(async (req, res) => {
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
-    const { title, body } = parse(adminBroadcastSchema, req.body);
-    sendToUser(user.id, 'announcement', { title: title || 'Ping', body });
+    const { title, body, route } = parse(adminBroadcastSchema, req.body);
+    sendToUser(user.id, 'announcement', { title: title || 'Ping', body, route });
     const pushed = await sendPushToUsers([user.id], {
       title: title || 'Ping',
       body,
-      data: { type: 'announcement' },
+      data: { type: 'announcement', ...(route ? { route } : {}) },
     });
     res.json({ ok: true, pushed });
+  })
+);
+
+// Send a real, persisted DM to one user from the official "Ping Team" channel.
+// Unlike /message (a transient popup) this lands as a normal chat message the
+// user keeps — but in a read-only channel, so they can't reply.
+router.post(
+  '/admin/users/:id/dm',
+  requireAdmin,
+  h(async (req, res) => {
+    ensureOfficialUser();
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    const { body } = parse(officialMessageSchema, req.body);
+    const ok = deliverOfficialMessage(user.id, { body });
+    res.json({ ok });
+  })
+);
+
+// Send a private one-way message to every user (WhatsApp-style broadcast): each
+// user gets the message in their own read-only "Ping Team" channel.
+router.post(
+  '/admin/broadcast-dm',
+  requireAdmin,
+  h(async (req, res) => {
+    ensureOfficialUser();
+    const { body } = parse(officialMessageSchema, req.body);
+    let delivered = 0;
+    for (const id of allActiveUserIds()) {
+      if (deliverOfficialMessage(id, { body })) delivered++;
+    }
+    recordBroadcast({ title: 'Direktnachricht', body, delivered, pushed: 0 });
+    res.json({ ok: true, delivered });
+  })
+);
+
+// Post an official status ("story") from the Ping Team that every user sees.
+router.post(
+  '/admin/status',
+  requireAdmin,
+  h(async (req, res) => {
+    ensureOfficialUser();
+    const { type = 'text', body = '', attachment, bgColor } = parse(
+      adminStatusSchema,
+      req.body || {}
+    );
+    const att = attachment
+      ? { ...attachment, kind: attachment.kind || (type === 'video' ? 'video' : 'image') }
+      : null;
+    const row = createStatus({
+      userId: OFFICIAL_USER_ID,
+      type,
+      body: (body || '').trim(),
+      attachment: att,
+      bgColor: bgColor || null,
+    });
+    // Official statuses are visible to everyone, so nudge every connected user
+    // to refresh their Status tab.
+    for (const id of onlineUserIds()) {
+      sendToUser(id, 'status-added', { userId: OFFICIAL_USER_ID });
+    }
+    res.status(201).json({ status: statusView(row, OFFICIAL_USER_ID) });
   })
 );
 
@@ -1545,9 +1804,10 @@ router.get(
   h(async (_req, res) => {
     const rows = listUsers('').map((u) => adminUser(u));
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const iso = (t) => (t ? new Date(t).toISOString() : '');
     const header = 'id,name,phone,email,admin,disabled,created_at,last_seen';
     const lines = rows.map((u) =>
-      [u.id, u.displayName, u.phone, u.email, u.isAdmin, u.disabled, new Date(u.createdAt).toISOString(), new Date(u.lastSeen).toISOString()]
+      [u.id, u.displayName, u.phone, u.email, u.isAdmin, u.disabled, iso(u.createdAt), iso(u.lastSeen)]
         .map(esc)
         .join(',')
     );
@@ -1563,9 +1823,31 @@ router.delete(
   h(async (req, res) => {
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    // Gather everyone who shares a chat with them before we tear the rows down,
+    // so we can show their bubbles as a deleted account afterwards.
+    const peers = new Set();
+    for (const chat of getUserChats(user.id)) {
+      for (const memberId of getMemberIds(chat.id)) {
+        if (memberId !== user.id) peers.add(memberId);
+      }
+    }
     deleteAvatar(user.id);
     detachCreatedChats(user.id);
     deleteUser(user.id);
+    // End the deleted user's sessions and let their peers refresh.
+    disconnectUser(user.id, 'deleted');
+    const tombstone = {
+      id: user.id,
+      displayName: 'Gelöschtes Konto',
+      avatarColor: '#78909C',
+      about: '',
+      hasAvatar: false,
+      avatarVersion: 0,
+      lastSeen: null,
+    };
+    for (const peerId of peers) {
+      sendToUser(peerId, 'user-updated', { user: tombstone });
+    }
     res.status(204).end();
   })
 );

@@ -87,7 +87,7 @@ export function requireAdmin(req, res, next) {
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const payload = token ? verifyToken(token) : null;
   const user = payload ? findUser.get(payload.sub) : null;
-  if (user && user.is_admin) {
+  if (user && user.is_admin && !user.disabled) {
     req.user = user;
     return next();
   }

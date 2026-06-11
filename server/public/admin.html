@@ -65,6 +65,9 @@
     .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px}
     .topbar h2{margin:0;font-size:24px;letter-spacing:-.5px}
     .topbar .muted{font-size:13.5px}
+    .topbar-actions{display:flex;gap:8px;align-items:center}
+    .switch{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;user-select:none}
+    .switch input{width:auto}
     @media(max-width:840px){
       .shell{grid-template-columns:1fr}
       .side{position:static;height:auto;flex-direction:row;align-items:center;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
@@ -112,7 +115,6 @@
     .pill.on{background:rgba(34,197,94,.2);color:#86efac}
     .pill.off{background:rgba(144,164,190,.14);color:var(--muted)}
     .pill.ban{background:rgba(240,80,110,.22);color:#ffb3c0}
-    .pill.grp{background:rgba(52,183,241,.18);color:#9ad8f5}
     .rowact{display:flex;gap:6px;justify-content:flex-end}
     .empty{color:var(--muted);font-size:13.5px;margin-top:14px}
     .scroll{overflow-x:auto}
@@ -125,9 +127,6 @@
     .modal .mh h3{margin:0;font-size:20px}
     .kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
     .kv span{color:var(--muted)}
-    .msgline{padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
-    .msgline .who{font-weight:700;font-size:12.5px;color:var(--brand2)}
-    .msgline .meta{color:var(--muted);font-size:11.5px;float:right}
     .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
     .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);opacity:0;background:#0f1d2c;border:1px solid var(--line);padding:13px 20px;border-radius:13px;font-size:14px;transition:.25s;pointer-events:none;z-index:80}
@@ -135,6 +134,7 @@
     .hidden{display:none}
     .row-inline{display:flex;gap:10px;flex-wrap:wrap}
     .row-inline>*{flex:1;min-width:150px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
   </style>
 </head>
 <body>
@@ -161,7 +161,6 @@
       <div class="nav">
         <div class="navitem active" data-tab="overview"><span class="i">📊</span><span class="lbl">Übersicht</span></div>
         <div class="navitem" data-tab="users"><span class="i">👤</span><span class="lbl">Nutzer</span></div>
-        <div class="navitem" data-tab="chats"><span class="i">💬</span><span class="lbl">Chats</span></div>
         <div class="navitem" data-tab="broadcast"><span class="i">📣</span><span class="lbl">Durchsagen</span></div>
         <div class="navitem" data-tab="system"><span class="i">🖥️</span><span class="lbl">System</span></div>
       </div>
@@ -172,7 +171,10 @@
       <!-- OVERVIEW -->
       <section data-pane="overview">
         <div class="topbar"><div><h2>Übersicht</h2><div class="muted">Live-Statistik &amp; Aktivität</div></div>
-          <button class="btn sec sm" data-reload="overview">↻ Aktualisieren</button></div>
+          <div class="topbar-actions">
+            <label class="switch"><input type="checkbox" id="autoRefresh"> Auto</label>
+            <button class="btn sec sm" data-reload="overview">↻ Aktualisieren</button>
+          </div></div>
         <div class="stats" id="stats"></div>
         <div class="card two">
           <div><h3>Neue Nutzer · 7 Tage</h3><div class="chart" id="chartUsers"></div></div>
@@ -182,8 +184,8 @@
 
       <!-- USERS -->
       <section data-pane="users" class="hidden">
-        <div class="topbar"><div><h2>Nutzer</h2><div class="muted">Konten verwalten, sperren, anschreiben</div></div>
-          <div style="display:flex;gap:8px"><a class="btn sec sm" id="csvBtn">⬇ CSV</a><button class="btn sec sm" data-reload="users">↻</button></div></div>
+        <div class="topbar"><div><h2>Nutzer</h2><div class="muted">Konten verwalten, sperren, anschreiben — Änderungen wirken sofort live</div></div>
+          <div class="topbar-actions"><a class="btn sec sm" id="csvBtn">⬇ CSV</a><button class="btn sec sm" data-reload="users">↻</button></div></div>
         <div class="card">
           <h3>Nutzer anlegen</h3>
           <div class="grid2">
@@ -204,28 +206,35 @@
         </div>
       </section>
 
-      <!-- CHATS -->
-      <section data-pane="chats" class="hidden">
-        <div class="topbar"><div><h2>Chats</h2><div class="muted">Moderation – Inhalte ansehen, Chats entfernen</div></div>
-          <button class="btn sec sm" data-reload="chats">↻</button></div>
-        <div class="card">
-          <div class="toolbar"><div><label>Chats durchsuchen</label><input id="cq" placeholder="Titel suchen …" /></div></div>
-          <div class="scroll"><table><thead><tr><th>Titel</th><th>Typ</th><th>Mitglieder</th><th>Nachrichten</th><th>Letzte Aktivität</th><th></th></tr></thead><tbody id="chatRows"></tbody></table></div>
-          <p id="chatEmpty" class="empty hidden">Keine Chats gefunden.</p>
-        </div>
-      </section>
-
       <!-- BROADCAST -->
       <section data-pane="broadcast" class="hidden">
-        <div class="topbar"><div><h2>Durchsagen</h2><div class="muted">An alle senden – live &amp; als Push</div></div>
+        <div class="topbar"><div><h2>Durchsagen</h2><div class="muted">An alle senden – live &amp; als Push, auch wenn die App zu ist</div></div>
           <button class="btn sec sm" data-reload="broadcast">↻</button></div>
         <div class="card">
           <h3>📣 Neue Durchsage</h3>
-          <div class="row-inline">
-            <div style="flex:0 0 220px"><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
-            <div style="flex:2"><label>Nachricht</label><input id="b_body" placeholder="z. B. Wartung um 22 Uhr" /></div>
-            <div style="flex:0 0 auto;display:flex;align-items:end"><button class="btn" id="broadcastBtn">Senden</button></div>
+          <div class="grid2">
+            <div><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
+            <div><label>Beim Antippen öffnen</label><select id="b_route"></select></div>
           </div>
+          <label>Nachricht</label>
+          <textarea id="b_body" placeholder="z. B. Neue Datenschutz-Einstellungen verfügbar – schau sie dir an."></textarea>
+          <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="broadcastBtn">An alle senden</button></div>
+          <p class="hint">Wähle eine Zielseite, damit Nutzer beim Antippen direkt z. B. in den Datenschutz-Einstellungen landen.</p>
+        </div>
+        <div class="card">
+          <h3>✉️ Private Nachricht an alle</h3>
+          <div class="muted" style="margin-bottom:10px">Jeder Nutzer bekommt sie in seinem „Ping Team"-Chat – wie WhatsApp, ohne Antwortmöglichkeit.</div>
+          <textarea id="dm_body" placeholder="z. B. Danke, dass du Ping nutzt! Schreib uns dein Feedback."></textarea>
+          <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="dmAllBtn">Privat an alle senden</button></div>
+        </div>
+        <div class="card">
+          <h3>🟢 Status für alle</h3>
+          <div class="muted" style="margin-bottom:10px">Erscheint 24 Stunden lang im Status-Tab aller Nutzer.</div>
+          <div class="grid2">
+            <div style="grid-column:1 / -1"><label>Status-Text</label><textarea id="st_body" placeholder="z. B. Wir haben gerade ein Update veröffentlicht 🎉"></textarea></div>
+            <div><label>Hintergrundfarbe</label><input id="st_color" type="color" value="#5C6BC0" style="height:42px;padding:4px" /></div>
+          </div>
+          <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="statusBtn">Status posten</button></div>
         </div>
         <div class="card">
           <h3>Verlauf</h3>
@@ -261,6 +270,12 @@
   <script>
     const $=(id)=>document.getElementById(id);
     let token=sessionStorage.getItem('ping_admin_token')||'';
+    let autoTimer=null;
+    // In-app destinations a notification can deep-link to (must match the
+    // server's appRouteSchema and the app's AppRoutes).
+    const ROUTES=[['','Posteingang (Standard)'],['settings','Einstellungen'],['privacy','Datenschutz'],['notifications','Benachrichtigungen'],['design','Design & Farben'],['security','Sicherung & Login'],['backup','Backup'],['saved','Gespeichert'],['update','App-Update'],['profile','Profil']];
+    function routeOptions(){return ROUTES.map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('');}
+
     function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
     function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
     function fmtDate(ms){if(!ms)return'–';try{return new Date(ms).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'});}catch{return'–';}}
@@ -276,20 +291,28 @@
       if(!res.ok)throw new Error((body&&body.error)||('Fehler '+res.status));
       return body;
     }
-    function showLogin(){$('login').classList.remove('hidden');$('dash').classList.add('hidden');}
+    function showLogin(){$('login').classList.remove('hidden');$('dash').classList.add('hidden');stopAuto();}
     function showDash(){$('login').classList.add('hidden');$('dash').classList.remove('hidden');}
     function logout(){token='';sessionStorage.removeItem('ping_admin_token');showLogin();}
     async function login(){const v=$('token').value.trim();if(!v)return;token=v;
       try{await loadOverview();sessionStorage.setItem('ping_admin_token',token);showDash();switchTab('overview');}
       catch(e){token='';$('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.';}}
 
+    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,system:loadSystem};
+    let activeTab='overview';
     function switchTab(name){
+      activeTab=name;
       document.querySelectorAll('.navitem').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
       document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));
-      ({overview:loadOverview,users:loadUsers,chats:loadChats,broadcast:loadBroadcasts,system:loadSystem}[name]||(()=>{}))().catch(e=>toast(e.message));
+      (LOADERS[name]||(()=>{}))().catch(e=>toast(e.message));
     }
     document.querySelectorAll('.navitem').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
-    document.querySelectorAll('[data-reload]').forEach(b=>b.onclick=()=>({overview:loadOverview,users:loadUsers,chats:loadChats,broadcast:loadBroadcasts,system:loadSystem}[b.dataset.reload])().catch(e=>toast(e.message)));
+    document.querySelectorAll('[data-reload]').forEach(b=>b.onclick=()=>(LOADERS[b.dataset.reload])().catch(e=>toast(e.message)));
+
+    // ---- auto refresh (overview) ----
+    function startAuto(){stopAuto();autoTimer=setInterval(()=>{if(activeTab==='overview')loadOverview().catch(()=>{});},10000);}
+    function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
+    $('autoRefresh').onchange=(e)=>{e.target.checked?startAuto():stopAuto();};
 
     // ---- overview ----
     function stat(n,l,icon,cls,d){return '<div class="stat"><div class="ic">'+(icon||'')+'</div><div class="n '+(cls||'')+'">'+n+'</div><div class="l">'+l+'</div>'+(d?'<div class="d">'+d+'</div>':'')+'</div>';}
@@ -336,7 +359,7 @@
       const body={displayName:$('c_name').value.trim(),phone:$('c_phone').value.trim(),email:$('c_email').value.trim(),password:$('c_pw').value,isAdmin:$('c_admin').checked};
       try{await api('/admin/users',{method:'POST',body:JSON.stringify(body)});$('c_name').value=$('c_phone').value=$('c_email').value=$('c_pw').value='';$('c_admin').checked=false;toast('Nutzer angelegt.');loadUsers();}catch(e){toast(e.message);}
     }
-    async function setBan(u,disabled){try{await api('/admin/users/'+u.id,{method:'PATCH',body:JSON.stringify({disabled})});toast(disabled?'Konto gesperrt.':'Konto entsperrt.');loadUsers();}catch(e){toast(e.message);}}
+    async function setBan(u,disabled){try{await api('/admin/users/'+u.id,{method:'PATCH',body:JSON.stringify({disabled})});toast(disabled?'Konto gesperrt — Sitzungen beendet.':'Konto entsperrt.');loadUsers();}catch(e){toast(e.message);}}
     async function delUser(u){if(!confirm('„'+u.displayName+'“ wirklich löschen?'))return;try{await api('/admin/users/'+u.id,{method:'DELETE'});toast('Nutzer gelöscht.');loadUsers();}catch(e){toast(e.message);}}
 
     async function openUser(id){
@@ -354,47 +377,33 @@
         '<label>Über mich</label><input id="m_about" value="'+esc(u.about||'')+'" />'+
         '<label>Neues Passwort (optional)</label><input id="m_pw" type="text" placeholder="leer = unverändert" />'+
         '<div class="grid2" style="margin-top:14px"><button class="btn" data-save>Speichern</button><button class="btn sec" data-admin>'+(u.isAdmin?'Admin entziehen':'Zum Admin machen')+'</button></div>'+
-        '<label style="margin-top:16px">Direkte Nachricht senden</label><div class="row-inline"><input id="m_msg" placeholder="Nachricht an '+esc(u.displayName.split(' ')[0])+' …" style="flex:2"/><button class="btn sec" data-msg style="flex:0 0 auto">Senden</button></div>'+
+        '<label style="margin-top:16px">Direkte Nachricht senden</label><textarea id="m_msg" placeholder="Nachricht an '+esc(u.displayName.split(" ")[0])+' …"></textarea>'+
+        '<div class="grid2" style="margin-top:8px"><div><label style="margin-top:0">Beim Antippen öffnen</label><select id="m_route">'+routeOptions()+'</select></div><div style="display:flex;align-items:end"><button class="btn sec" data-msg style="width:100%">Als Banner</button></div></div>'+
+        '<div style="margin-top:8px"><button class="btn" data-dm style="width:100%">💬 Als „Ping Team"-Chat senden</button></div>'+
+        '<p class="hint">Banner = kurzes Pop-up. Chat = bleibende Nachricht im „Ping Team"-Chat des Nutzers (keine Antwort möglich).</p>'+
         '<div style="margin-top:16px;display:flex;gap:10px"><button class="btn '+(u.disabled?'sec':'danger')+'" data-ban style="flex:1">'+(u.disabled?'Entsperren':'Sperren')+'</button><button class="btn danger" data-del style="flex:1">Löschen</button></div>'+
         '</div>';
       m.querySelector('[data-x]').onclick=closeModal;
       m.querySelector('[data-admin]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({isAdmin:!u.isAdmin})});toast('Gespeichert.');closeModal();loadUsers();}catch(e){toast(e.message);}};
-      m.querySelector('[data-ban]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({disabled:!u.disabled})});toast(u.disabled?'Entsperrt.':'Gesperrt.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-ban]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({disabled:!u.disabled})});toast(u.disabled?'Entsperrt.':'Gesperrt — Sitzungen beendet.');closeModal();loadUsers();}catch(e){toast(e.message);}};
       m.querySelector('[data-del]').onclick=async()=>{if(!confirm('Konto löschen?'))return;try{await api('/admin/users/'+id,{method:'DELETE'});toast('Gelöscht.');closeModal();loadUsers();}catch(e){toast(e.message);}};
-      m.querySelector('[data-msg]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;try{await api('/admin/users/'+id+'/message',{method:'POST',body:JSON.stringify({body})});toast('Nachricht gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
-      m.querySelector('[data-save]').onclick=async()=>{const body={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)body.password=pw;try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Gespeichert.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-msg]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;const route=$('m_route').value;try{await api('/admin/users/'+id+'/message',{method:'POST',body:JSON.stringify(route?{body,route}:{body})});toast('Banner gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
+      m.querySelector('[data-dm]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;try{await api('/admin/users/'+id+'/dm',{method:'POST',body:JSON.stringify({body})});toast('Als Chat gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
+      m.querySelector('[data-save]').onclick=async()=>{const body={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)body.password=pw;try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Gespeichert — wirkt sofort beim Nutzer.');closeModal();loadUsers();}catch(e){toast(e.message);}};
       $('modalRoot').appendChild(m);
     }
     function closeModal(){$('modalRoot').innerHTML='';}
 
-    // ---- chats ----
-    async function loadChats(){
-      const q=encodeURIComponent($('cq').value.trim());
-      const {chats}=await api('/admin/chats?q='+q);
-      const rows=$('chatRows');rows.innerHTML='';$('chatEmpty').classList.toggle('hidden',chats.length>0);
-      for(const c of chats){
-        const tr=document.createElement('tr');
-        tr.innerHTML='<td><b>'+esc(c.title)+'</b></td><td>'+(c.type==='group'?'<span class="pill grp">Gruppe</span>':'Direkt')+'</td><td>'+c.members+'</td><td>'+c.messages+'</td><td>'+fmtDateTime(c.lastActivity)+'</td>'+
-          '<td><div class="rowact"><button class="btn sec sm" data-peek>Ansehen</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
-        tr.querySelector('[data-peek]').onclick=()=>peekChat(c);
-        tr.querySelector('[data-del]').onclick=()=>delChat(c);
-        rows.appendChild(tr);
-      }
-    }
-    async function peekChat(c){
-      let data;try{data=await api('/admin/chats/'+c.id+'/messages');}catch(e){return toast(e.message);}
-      closeModal();const m=document.createElement('div');m.className='overlay';m.onclick=(e)=>{if(e.target===m)closeModal();};
-      const list=data.messages.slice().reverse().map(x=>'<div class="msgline"><span class="who">'+esc(x.sender)+'</span><span class="meta">'+fmtDateTime(x.createdAt)+'</span><div>'+esc(x.preview)+'</div></div>').join('')||'<p class="empty">Keine Nachrichten.</p>';
-      m.innerHTML='<div class="modal"><div class="mh"><h3>'+esc(c.title)+'</h3><button class="btn ghost" data-x>✕</button></div><p class="muted" style="margin-top:0">Letzte '+data.messages.length+' Nachrichten</p>'+list+'</div>';
-      m.querySelector('[data-x]').onclick=closeModal;$('modalRoot').appendChild(m);
-    }
-    async function delChat(c){if(!confirm('Chat „'+c.title+'“ samt Nachrichten löschen?'))return;try{await api('/admin/chats/'+c.id,{method:'DELETE'});toast('Chat gelöscht.');loadChats();}catch(e){toast(e.message);}}
-
     // ---- broadcast ----
     async function broadcast(){const body=$('b_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
-      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify({title:$('b_title').value.trim(),body})});$('b_body').value='';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);}}
+      const route=$('b_route').value;const payload={title:$('b_title').value.trim(),body};if(route)payload.route=route;
+      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify(payload)});$('b_body').value='';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);}}
     async function loadBroadcasts(){const {broadcasts}=await api('/admin/broadcasts');const rows=$('bcRows');rows.innerHTML='';$('bcEmpty').classList.toggle('hidden',broadcasts.length>0);
       for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML='<td>'+fmtDateTime(b.createdAt)+'</td><td>'+esc(b.title||'–')+'</td><td>'+esc(b.body)+'</td><td>'+b.delivered+'</td><td>'+b.pushed+'</td>';rows.appendChild(tr);}}
+    async function broadcastDm(){const body=$('dm_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
+      try{const r=await api('/admin/broadcast-dm',{method:'POST',body:JSON.stringify({body})});$('dm_body').value='';toast('Privat an '+r.delivered+' Nutzer gesendet.');loadBroadcasts();}catch(e){toast(e.message);}}
+    async function postStatus(){const body=$('st_body').value.trim();if(!body)return toast('Bitte einen Status-Text eingeben.');
+      try{await api('/admin/status',{method:'POST',body:JSON.stringify({body,bgColor:$('st_color').value})});$('st_body').value='';toast('Status für alle gepostet.');}catch(e){toast(e.message);}}
 
     // ---- system ----
     async function loadSystem(){
@@ -404,8 +413,8 @@
         stat(s.rssMb+' MB','Speicher (RSS)','📈')+stat(s.heapMb+' MB','Heap','🧠')+
         stat(s.freeMemMb+'/'+s.totalMemMb,'RAM frei/ges. (MB)','💾')+
         stat((s.loadAvg&&s.loadAvg[0]!=null?s.loadAvg[0]:'–'),'Last 1m','⚙️')+
-        stat(s.smsProvider,'SMS-Anbieter','✉️')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht','🔐')+stat(o.backups,'Backups','🗄️');
-      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> · '+human(d.size)+'<br><span class="muted" style="font-size:12px">sha256 '+d.sha256.slice(0,16)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
+        stat(s.smsProvider,'SMS-Anbieter','✉️')+stat(s.pushEnabled?'aktiv':'aus','Push (FCM)','🔔',s.pushEnabled?'on':'')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht','🔐')+stat(o.backups,'Backups','🗄️');
+      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> ('+(d.build||d.version)+') · '+human(d.size)+'<br><span class="muted" style="font-size:12px">sha256 '+(d.sha256||'').slice(0,16)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
       loadBackups();
     }
     async function loadBackups(){const {backups}=await api('/admin/backups');const rows=$('backupRows');rows.innerHTML='';$('backupEmpty').classList.toggle('hidden',backups.length>0);
@@ -413,11 +422,12 @@
     async function makeBackup(){try{await api('/admin/backups',{method:'POST'});toast('Backup erstellt.');loadSystem();}catch(e){toast(e.message);}}
 
     // ---- wire ----
+    $('b_route').innerHTML=routeOptions();
     $('loginBtn').onclick=login;$('token').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
     $('logoutBtn').onclick=logout;$('broadcastBtn').onclick=broadcast;$('createBtn').onclick=createUser;$('backupBtn').onclick=makeBackup;
+    $('dmAllBtn').onclick=broadcastDm;$('statusBtn').onclick=postStatus;
     $('csvBtn').onclick=async()=>{try{const r=await fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}});const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}catch{toast('Export fehlgeschlagen.');}};
     $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
-    $('cq').addEventListener('input',()=>{clearTimeout(window._tc);window._tc=setTimeout(()=>loadChats().catch(()=>{}),300);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
 
     (async()=>{if(token){try{await loadOverview();showDash();switchTab('overview');return;}catch{logout();}}showLogin();})();
