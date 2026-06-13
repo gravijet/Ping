@@ -6,6 +6,7 @@ process.env.DB_FILE = `:memory:`;
 process.env.JWT_SECRET = 'test-secret-test-secret';
 process.env.NODE_ENV = 'test';
 process.env.AUTH_RATE_MAX = '100000';
+process.env.API_RATE_MAX = '1000000';
 process.env.ADMIN_TOKEN = 'test-admin-token';
 
 const { createServer } = await import('../src/index.js');
@@ -1149,6 +1150,85 @@ test('admin posts an official status every user can see', async () => {
   const team = feed.json.others.find((o) => o.user.displayName === 'Ping Team');
   assert.ok(team, 'expected the official status in the feed');
   assert.ok(team.items.some((i) => i.body === 'Frohe Feiertage!'));
+  // The Ping Team account is flagged official so the app can badge it.
+  assert.equal(team.user.official, true);
+});
+
+test('admin uploads media and posts an image status for everyone', async () => {
+  const viewer = await register('0699 4100001', 'media-status@example.com', 'MediaStatus');
+
+  // Upload an image via the admin-token-gated upload twin.
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const up = await fetch(base + '/api/admin/upload', {
+    method: 'POST',
+    headers: {
+      'x-admin-token': ADMIN,
+      'content-type': 'image/png',
+      'x-filename': 'announcement.png',
+    },
+    body: png,
+  });
+  const upJson = await up.json();
+  assert.equal(up.status, 201, JSON.stringify(upJson));
+  assert.equal(upJson.upload.kind, 'image');
+
+  const posted = await api('/api/admin/status', {
+    method: 'POST', admin: ADMIN,
+    body: { type: 'image', attachment: { url: upJson.upload.url }, body: 'Neu!' },
+  });
+  assert.equal(posted.status, 201, JSON.stringify(posted.json));
+  assert.equal(posted.json.status.type, 'image');
+  assert.ok(posted.json.status.attachment, 'expected an attachment on the status');
+
+  // Every user sees the image status, and can fetch its media with their JWT.
+  const feed = await api('/api/status', { token: viewer.token });
+  const team = feed.json.others.find((o) => o.user.official === true);
+  assert.ok(team, 'expected the official status group');
+  const img = team.items.find((i) => i.type === 'image');
+  assert.ok(img && img.attachment, 'expected an image status item');
+  const media = await fetch(base + img.attachment.url, {
+    headers: { authorization: `Bearer ${viewer.token}` },
+  });
+  assert.equal(media.status, 200);
+});
+
+test('admin grants Ping Premium and peers see the badge flag', async () => {
+  const a = await register('0699 4200001', 'prem-a@example.com', 'PremA');
+  const b = await register('0699 4200002', 'prem-b@example.com', 'PremB');
+  // They share a chat so A appears in B's public views.
+  await api('/api/chats/direct', {
+    method: 'POST', token: b.token, body: { phone: a.user.phone },
+  });
+
+  const grant = await api(`/api/admin/users/${a.user.id}`, {
+    method: 'PATCH', admin: ADMIN, body: { premium: true },
+  });
+  assert.equal(grant.status, 200, JSON.stringify(grant.json));
+  assert.equal(grant.json.user.premium, true);
+
+  // B's chat list now shows A flagged premium (publicUser surfaces it).
+  const chats = await api('/api/chats', { token: b.token });
+  const direct = chats.json.chats.find((c) => c.otherUser && c.otherUser.id === a.user.id);
+  assert.ok(direct, 'expected the direct chat');
+  assert.equal(direct.otherUser.premium, true);
+
+  // Revoking clears it again.
+  const revoke = await api(`/api/admin/users/${a.user.id}`, {
+    method: 'PATCH', admin: ADMIN, body: { premium: false },
+  });
+  assert.equal(revoke.json.user.premium, false);
+});
+
+test('the official Ping Team account is protected from admin edits/deletion', async () => {
+  const patch = await api('/api/admin/users/ping-official', {
+    method: 'PATCH', admin: ADMIN, body: { displayName: 'Hacked' },
+  });
+  assert.equal(patch.status, 403);
+
+  const del = await api('/api/admin/users/ping-official', {
+    method: 'DELETE', admin: ADMIN,
+  });
+  assert.equal(del.status, 403);
 });
 
 // ---- v2.3.0: password reset, archive, search, privacy, hardening ------------
@@ -1503,4 +1583,86 @@ test('hide for me: message disappears for one user only', async () => {
   assert.ok(!search.json.messages.some((m) => m.id === msgId));
   const searchA = await api('/api/messages/search?q=peinlich', { token: a.token });
   assert.ok(searchA.json.messages.some((m) => m.id === msgId));
+});
+
+// ---- v2.6.0: Newsroom, Changelog & public stats -----------------------------
+
+test('admin can create/list/update/delete posts; public only sees published', async () => {
+  // Create a published news article + a draft.
+  const created = await api('/api/admin/posts', {
+    method: 'POST', admin: ADMIN,
+    body: { kind: 'news', title: 'Ping startet durch', summary: 'Großes Update', body: 'Hallo Welt', category: 'Produkt' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  assert.equal(created.json.post.slug, 'ping-startet-durch');
+  assert.equal(created.json.post.published, true);
+
+  const draft = await api('/api/admin/posts', {
+    method: 'POST', admin: ADMIN,
+    body: { kind: 'news', title: 'Geheimer Entwurf', published: false },
+  });
+  assert.equal(draft.status, 201);
+  assert.equal(draft.json.post.published, false);
+
+  // Admin list shows both (draft included).
+  const adminList = await api('/api/admin/posts?kind=news', { admin: ADMIN });
+  assert.ok(adminList.json.posts.some((p) => p.id === created.json.post.id));
+  assert.ok(adminList.json.posts.some((p) => p.id === draft.json.post.id));
+
+  // Public list shows the published one only.
+  const pub = await api('/api/news');
+  assert.ok(pub.json.posts.some((p) => p.slug === 'ping-startet-durch'));
+  assert.ok(!pub.json.posts.some((p) => p.id === draft.json.post.id));
+
+  // Public single-article lookup by slug works; the draft 404s.
+  const one = await api('/api/news/ping-startet-durch');
+  assert.equal(one.status, 200);
+  assert.equal(one.json.post.title, 'Ping startet durch');
+  const draftSlug = draft.json.post.slug;
+  const hidden = await api('/api/news/' + draftSlug);
+  assert.equal(hidden.status, 404);
+
+  // Publishing the draft makes it public.
+  const upd = await api('/api/admin/posts/' + draft.json.post.id, {
+    method: 'PATCH', admin: ADMIN, body: { published: true },
+  });
+  assert.equal(upd.status, 200);
+  assert.equal(upd.json.post.published, true);
+  assert.ok((await api('/api/news/' + draftSlug)).json.post);
+
+  // Delete it again.
+  const del = await api('/api/admin/posts/' + draft.json.post.id, {
+    method: 'DELETE', admin: ADMIN,
+  });
+  assert.equal(del.status, 204);
+  assert.equal((await api('/api/news/' + draftSlug)).status, 404);
+});
+
+test('changelog posts are a separate kind and not mixed into news', async () => {
+  await api('/api/admin/posts', {
+    method: 'POST', admin: ADMIN,
+    body: { kind: 'changelog', title: 'v2.6.0', version: '2.6.0', tag: 'feature', body: 'Newsroom + Changelog' },
+  });
+  const log = await api('/api/changelog');
+  assert.ok(log.json.posts.some((p) => p.version === '2.6.0' && p.tag === 'feature'));
+  const news = await api('/api/news');
+  assert.ok(!news.json.posts.some((p) => p.version === '2.6.0'));
+});
+
+test('posts require the admin token', async () => {
+  const r = await api('/api/admin/posts', {
+    method: 'POST', body: { kind: 'news', title: 'Ohne Token' },
+  });
+  assert.equal(r.status, 401);
+});
+
+test('public stats expose non-sensitive aggregate counters', async () => {
+  const r = await api('/api/public/stats');
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.json.users, 'number');
+  assert.equal(typeof r.json.messages, 'number');
+  assert.ok(r.json.version);
+  // No per-user fields leak.
+  assert.equal(r.json.phone, undefined);
+  assert.equal(r.json.email, undefined);
 });

@@ -22,9 +22,11 @@ const _statusEmojis = [
   '🌟', '☀️', '🍕', '⚽',
 ];
 
-/// Compose a coloured text status.
+/// Compose a coloured text status. When [official] is set, it's posted as the
+/// "Ping Team" account (admin only) and seen by every user.
 class StatusTextComposer extends StatefulWidget {
-  const StatusTextComposer({super.key});
+  final bool official;
+  const StatusTextComposer({super.key, this.official = false});
 
   @override
   State<StatusTextComposer> createState() => _StatusTextComposerState();
@@ -68,7 +70,12 @@ class _StatusTextComposerState extends State<StatusTextComposer> {
     if (text.isEmpty) return;
     setState(() => _busy = true);
     try {
-      await context.read<AppState>().postTextStatus(text, _color);
+      final state = context.read<AppState>();
+      if (widget.official) {
+        await state.postOfficialStatus(type: 'text', body: text, bgColor: _color);
+      } else {
+        await state.postTextStatus(text, _color);
+      }
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
       if (mounted) {
@@ -87,7 +94,7 @@ class _StatusTextComposerState extends State<StatusTextComposer> {
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Status'),
+        title: Text(widget.official ? 'Ping-Team-Status' : 'Status'),
         actions: [
           IconButton(
             tooltip: 'Farbe',
@@ -204,12 +211,14 @@ class StatusImageComposer extends StatefulWidget {
   final Uint8List bytes;
   final String contentType;
   final String filename;
+  final bool official;
 
   const StatusImageComposer({
     super.key,
     required this.bytes,
     required this.contentType,
     required this.filename,
+    this.official = false,
   });
 
   @override
@@ -236,7 +245,12 @@ class _StatusImageComposerState extends State<StatusImageComposer> {
         filename: widget.filename,
         kind: 'image',
       );
-      await state.postImageStatus(att, caption: _caption.text.trim());
+      if (widget.official) {
+        await state.postOfficialStatus(
+            type: 'image', attachment: att, body: _caption.text.trim());
+      } else {
+        await state.postImageStatus(att, caption: _caption.text.trim());
+      }
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
       if (mounted) {
@@ -255,7 +269,7 @@ class _StatusImageComposerState extends State<StatusImageComposer> {
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Status'),
+        title: Text(widget.official ? 'Ping-Team-Status' : 'Status'),
       ),
       body: Column(
         children: [
@@ -307,12 +321,14 @@ class StatusVideoComposer extends StatefulWidget {
   final String path;
   final String contentType;
   final String filename;
+  final bool official;
 
   const StatusVideoComposer({
     super.key,
     required this.path,
     required this.contentType,
     required this.filename,
+    this.official = false,
   });
 
   @override
@@ -364,7 +380,12 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
         filename: widget.filename,
         kind: 'video',
       );
-      await state.postVideoStatus(att, caption: _caption.text.trim());
+      if (widget.official) {
+        await state.postOfficialStatus(
+            type: 'video', attachment: att, body: _caption.text.trim());
+      } else {
+        await state.postVideoStatus(att, caption: _caption.text.trim());
+      }
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
       if (mounted) {
@@ -383,7 +404,7 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Status'),
+        title: Text(widget.official ? 'Ping-Team-Status' : 'Status'),
       ),
       body: Column(
         children: [

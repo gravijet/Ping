@@ -116,6 +116,26 @@ export function mountDownloads(app, publicDir) {
   // Landing page.
   app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
+  // Marketing site sub-pages. The newsroom, changelog and status pages are
+  // static shells that fill themselves in from the public JSON API
+  // (/api/news, /api/changelog, /api/public/stats). `/news/:slug` serves the
+  // same shell, which reads the slug from the URL to render a single article.
+  const page = (name) => (_req, res) => res.sendFile(path.join(publicDir, name));
+  app.get('/news', page('news.html'));
+  app.get('/news/:slug', page('news.html'));
+  app.get('/changelog', page('changelog.html'));
+  app.get('/status', page('status.html'));
+  app.get('/legal', page('legal.html'));
+
+  // Shared design system + helpers, served with long-lived caching headers.
+  const asset = (name, type) => (_req, res) => {
+    res.setHeader('Content-Type', type);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.sendFile(path.join(publicDir, name));
+  };
+  app.get('/site.css', asset('site.css', 'text/css; charset=utf-8'));
+  app.get('/site.js', asset('site.js', 'application/javascript; charset=utf-8'));
+
   // Metadata for the landing page (version / size / hash).
   app.get('/download/info', (_req, res) => {
     const info = apkInfo();

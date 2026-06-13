@@ -1,13 +1,64 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ping/models/message.dart';
+import 'package:ping/models/user.dart';
 import 'package:ping/widgets/avatar.dart';
 import 'package:ping/widgets/message_bubble.dart';
 import 'package:ping/widgets/receipt_ticks.dart';
+import 'package:ping/widgets/verified_badge.dart';
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
+  group('trust badges', () {
+    test('badgeKindFor follows the official > verified > premium priority', () {
+      PingUser u({bool o = false, bool v = false, bool p = false}) => PingUser(
+            id: 'x',
+            phone: '+4900',
+            displayName: 'X',
+            avatarColor: '#000000',
+            official: o,
+            verified: v,
+            premium: p,
+          );
+      expect(badgeKindFor(null), isNull);
+      expect(badgeKindFor(u()), isNull);
+      expect(badgeKindFor(u(o: true, v: true, p: true)), BadgeKind.official);
+      expect(badgeKindFor(u(v: true, p: true)), BadgeKind.verified);
+      expect(badgeKindFor(u(p: true)), BadgeKind.premium);
+    });
+
+    testWidgets('NameWithBadge renders the name and a badge for an official user',
+        (tester) async {
+      const team = PingUser(
+        id: 'ping-official',
+        phone: '',
+        displayName: 'Ping Team',
+        avatarColor: '#5C6BC0',
+        official: true,
+      );
+      await tester.pumpWidget(_wrap(
+        const NameWithBadge(name: 'Ping Team', user: team),
+      ));
+      expect(find.text('Ping Team'), findsOneWidget);
+      expect(find.byType(PingBadge), findsOneWidget);
+    });
+
+    testWidgets('NameWithBadge shows no badge for a plain user', (tester) async {
+      const plain = PingUser(
+        id: '1',
+        phone: '+4901',
+        displayName: 'Lena',
+        avatarColor: '#EF5350',
+      );
+      await tester.pumpWidget(_wrap(
+        const NameWithBadge(name: 'Lena', user: plain),
+      ));
+      expect(find.text('Lena'), findsOneWidget);
+      expect(find.byType(PingBadge), findsNothing);
+    });
+  });
+
   testWidgets('avatar shows initials and online dot', (tester) async {
     await tester.pumpWidget(_wrap(
       const PingAvatar(initials: 'LM', color: Colors.indigo, online: true),

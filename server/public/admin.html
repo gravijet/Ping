@@ -135,6 +135,16 @@
     .row-inline{display:flex;gap:10px;flex-wrap:wrap}
     .row-inline>*{flex:1;min-width:150px}
     .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    .seg{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:5px;margin:14px 0 2px}
+    .seg button{cursor:pointer;border:none;background:transparent;color:var(--muted);font-weight:700;padding:9px 18px;border-radius:10px;font-size:14px;transition:.15s}
+    .seg button.active{background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff;box-shadow:0 6px 18px rgba(10,132,255,.3)}
+    .pill.draft{background:rgba(245,158,11,.18);color:#fcd9a0}
+    .pill.live{background:rgba(34,197,94,.2);color:#86efac}
+    .pill.pin{background:rgba(108,92,255,.22);color:#cfc9ff}
+    .pill.feature{background:rgba(34,197,94,.16);color:#86efac}
+    .pill.improvement{background:rgba(52,183,241,.16);color:#9bdcff}
+    .pill.fix{background:rgba(245,158,11,.16);color:#fcd9a0}
+    .pill.security{background:rgba(240,80,110,.18);color:#ffb3c0}
   </style>
 </head>
 <body>
@@ -162,6 +172,7 @@
         <div class="navitem active" data-tab="overview"><span class="i">📊</span><span class="lbl">Übersicht</span></div>
         <div class="navitem" data-tab="users"><span class="i">👤</span><span class="lbl">Nutzer</span></div>
         <div class="navitem" data-tab="broadcast"><span class="i">📣</span><span class="lbl">Durchsagen</span></div>
+        <div class="navitem" data-tab="content"><span class="i">📰</span><span class="lbl">Inhalte</span></div>
         <div class="navitem" data-tab="system"><span class="i">🖥️</span><span class="lbl">System</span></div>
       </div>
       <div class="foot"><button class="btn ghost" id="logoutBtn">⎋ Abmelden</button></div>
@@ -229,17 +240,66 @@
         </div>
         <div class="card">
           <h3>🟢 Status für alle</h3>
-          <div class="muted" style="margin-bottom:10px">Erscheint 24 Stunden lang im Status-Tab aller Nutzer.</div>
+          <div class="muted" style="margin-bottom:10px">Erscheint 24 Stunden lang im Status-Tab aller Nutzer – als Text, Bild oder Video.</div>
           <div class="grid2">
-            <div style="grid-column:1 / -1"><label>Status-Text</label><textarea id="st_body" placeholder="z. B. Wir haben gerade ein Update veröffentlicht 🎉"></textarea></div>
-            <div><label>Hintergrundfarbe</label><input id="st_color" type="color" value="#5C6BC0" style="height:42px;padding:4px" /></div>
+            <div style="grid-column:1 / -1"><label>Text / Beschriftung</label><textarea id="st_body" placeholder="z. B. Wir haben gerade ein Update veröffentlicht 🎉"></textarea></div>
+            <div><label>Bild oder Video (optional)</label><input id="st_file" type="file" accept="image/*,video/*" /></div>
+            <div><label>Hintergrundfarbe (nur Text)</label><input id="st_color" type="color" value="#5C6BC0" style="height:42px;padding:4px" /></div>
           </div>
+          <p class="hint">Mit Datei wird ein Bild-/Video-Status gepostet; ohne Datei ein farbiger Text-Status.</p>
           <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="statusBtn">Status posten</button></div>
         </div>
         <div class="card">
           <h3>Verlauf</h3>
           <div class="scroll"><table><thead><tr><th>Zeitpunkt</th><th>Titel</th><th>Nachricht</th><th>Live</th><th>Push</th></tr></thead><tbody id="bcRows"></tbody></table></div>
           <p id="bcEmpty" class="empty hidden">Noch keine Durchsagen.</p>
+        </div>
+      </section>
+
+      <!-- CONTENT (newsroom + changelog) -->
+      <section data-pane="content" class="hidden">
+        <div class="topbar"><div><h2>Inhalte</h2><div class="muted">Newsroom-Beiträge &amp; Changelog-Einträge für die Website verwalten</div></div>
+          <div class="topbar-actions">
+            <a class="btn sec sm" href="/news" target="_blank">↗ Newsroom</a>
+            <a class="btn sec sm" href="/changelog" target="_blank">↗ Changelog</a>
+            <button class="btn sec sm" data-reload="content">↻</button>
+          </div></div>
+
+        <div class="seg" id="kindSeg">
+          <button data-k="news" class="active">📰 Newsroom</button>
+          <button data-k="changelog">🧾 Changelog</button>
+        </div>
+
+        <div class="card">
+          <h3 id="editorTitle">Neuer Beitrag</h3>
+          <input type="hidden" id="p_id" />
+          <div class="grid2">
+            <div style="grid-column:1 / -1"><label>Titel</label><input id="p_title" placeholder="z. B. Ping 2.6 ist da" /></div>
+            <div data-news><label>Kategorie</label><input id="p_category" placeholder="Produkt · Unternehmen · Sicherheit" /></div>
+            <div data-log class="hidden"><label>Version</label><input id="p_version" placeholder="2.6.0" /></div>
+            <div data-log class="hidden"><label>Art der Änderung</label>
+              <select id="p_tag"><option value="feature">Neu (Feature)</option><option value="improvement">Verbessert</option><option value="fix">Behoben</option><option value="security">Sicherheit</option></select></div>
+            <div><label>Autor</label><input id="p_author" placeholder="Ping Team" /></div>
+            <div><label>Slug (optional)</label><input id="p_slug" placeholder="wird aus dem Titel erzeugt" /></div>
+          </div>
+          <label>Kurzbeschreibung</label>
+          <textarea id="p_summary" placeholder="Ein, zwei Sätze – erscheint in der Vorschau."></textarea>
+          <label>Text <span class="muted" style="font-weight:400">(Markdown-leicht: ## Überschrift, - Liste, **fett**)</span></label>
+          <textarea id="p_body" style="min-height:150px" placeholder="Der vollständige Beitragstext …"></textarea>
+          <div class="grid2" style="margin-top:4px">
+            <div data-news><label>Titelbild (optional)</label><input id="p_cover_file" type="file" accept="image/*" /><div class="hint" id="coverHint"></div></div>
+            <div style="display:flex;gap:18px;align-items:end;flex-wrap:wrap">
+              <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="p_pinned" type="checkbox" style="width:auto" /> Angepinnt</label>
+              <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="p_published" type="checkbox" style="width:auto" checked /> Veröffentlicht</label>
+            </div>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:10px"><button class="btn" id="savePostBtn">Speichern</button><button class="btn ghost hidden" id="cancelEditBtn">Abbrechen</button></div>
+        </div>
+
+        <div class="card">
+          <h3 id="listTitle">Newsroom-Beiträge</h3>
+          <div class="scroll"><table><thead><tr><th>Titel</th><th>Meta</th><th>Status</th><th>Datum</th><th></th></tr></thead><tbody id="postRows"></tbody></table></div>
+          <p id="postEmpty" class="empty hidden">Noch keine Beiträge.</p>
         </div>
       </section>
 
@@ -298,7 +358,7 @@
       try{await loadOverview();sessionStorage.setItem('ping_admin_token',token);showDash();switchTab('overview');}
       catch(e){token='';$('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.';}}
 
-    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,system:loadSystem};
+    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,content:loadContent,system:loadSystem};
     let activeTab='overview';
     function switchTab(name){
       activeTab=name;
@@ -333,7 +393,9 @@
         stat(s.admins,'Admins','🛡️')+
         stat(s.pushTokens,'Push-Geräte','🔔')+
         stat(s.blocks,'Blockierungen','🚫')+
-        stat(human(s.uploadBytes),'Medien ('+s.uploads+')','🖼️');
+        stat(human(s.uploadBytes),'Medien ('+s.uploads+')','🖼️')+
+        stat(s.news??0,'Newsroom','📰')+
+        stat(s.changelog??0,'Changelog','🧾');
       chart($('chartUsers'),o.charts.usersPerDay,false);
       chart($('chartMsgs'),o.charts.messagesPerDay,true);
     }
@@ -402,8 +464,99 @@
       for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML='<td>'+fmtDateTime(b.createdAt)+'</td><td>'+esc(b.title||'–')+'</td><td>'+esc(b.body)+'</td><td>'+b.delivered+'</td><td>'+b.pushed+'</td>';rows.appendChild(tr);}}
     async function broadcastDm(){const body=$('dm_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
       try{const r=await api('/admin/broadcast-dm',{method:'POST',body:JSON.stringify({body})});$('dm_body').value='';toast('Privat an '+r.delivered+' Nutzer gesendet.');loadBroadcasts();}catch(e){toast(e.message);}}
-    async function postStatus(){const body=$('st_body').value.trim();if(!body)return toast('Bitte einen Status-Text eingeben.');
-      try{await api('/admin/status',{method:'POST',body:JSON.stringify({body,bgColor:$('st_color').value})});$('st_body').value='';toast('Status für alle gepostet.');}catch(e){toast(e.message);}}
+    async function adminUpload(file){
+      const r=await fetch('/api/admin/upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Admin-Token':token,'X-Filename':encodeURIComponent(file.name||'datei')},body:file});
+      if(!r.ok){let m='Upload fehlgeschlagen.';try{m=(await r.json()).error||m;}catch{}throw new Error(m);}
+      return (await r.json()).upload;}
+    async function postStatus(){
+      const body=$('st_body').value.trim();
+      const fileEl=$('st_file');const file=fileEl.files&&fileEl.files[0];
+      if(!file&&!body)return toast('Bitte einen Text eingeben oder eine Datei wählen.');
+      const btn=$('statusBtn');btn.disabled=true;
+      try{
+        let payload;
+        if(file){
+          const up=await adminUpload(file);
+          const type=(up.kind==='video')?'video':'image';
+          payload={type,attachment:up,body};
+        }else{
+          payload={type:'text',body,bgColor:$('st_color').value};
+        }
+        await api('/admin/status',{method:'POST',body:JSON.stringify(payload)});
+        $('st_body').value='';fileEl.value='';toast('Status für alle gepostet.');
+      }catch(e){toast(e.message);}finally{btn.disabled=false;}}
+
+    // ---- content (newsroom + changelog) ----
+    let contentKind='news';
+    let pendingCover='';   // /api/uploads/<id> URL once a cover file is uploaded
+    function applyKindUI(){
+      document.querySelectorAll('#kindSeg button').forEach(b=>b.classList.toggle('active',b.dataset.k===contentKind));
+      const isNews=contentKind==='news';
+      document.querySelectorAll('[data-news]').forEach(e=>e.classList.toggle('hidden',!isNews));
+      document.querySelectorAll('[data-log]').forEach(e=>e.classList.toggle('hidden',isNews));
+      $('listTitle').textContent=isNews?'Newsroom-Beiträge':'Changelog-Einträge';
+    }
+    document.querySelectorAll('#kindSeg button').forEach(b=>b.onclick=()=>{contentKind=b.dataset.k;applyKindUI();resetEditor();loadContent().catch(e=>toast(e.message));});
+
+    function resetEditor(){
+      $('p_id').value='';pendingCover='';
+      ['p_title','p_category','p_version','p_author','p_slug','p_summary','p_body'].forEach(id=>$(id).value='');
+      $('p_tag').value='feature';$('p_pinned').checked=false;$('p_published').checked=true;
+      const cf=$('p_cover_file');if(cf)cf.value='';$('coverHint').textContent='';
+      $('editorTitle').textContent='Neuer Beitrag';$('savePostBtn').textContent='Speichern';$('cancelEditBtn').classList.add('hidden');
+    }
+    async function loadContent(){
+      applyKindUI();
+      const {posts}=await api('/admin/posts?kind='+contentKind);
+      const rows=$('postRows');rows.innerHTML='';$('postEmpty').classList.toggle('hidden',posts.length>0);
+      for(const p of posts){
+        const tr=document.createElement('tr');tr.className='click';
+        const meta=contentKind==='news'
+          ? (p.category?esc(p.category):'–')
+          : ((p.version?('v'+esc(p.version)+' '):'')+(p.tag?'<span class="pill '+esc(p.tag)+'">'+esc(p.tag)+'</span>':''));
+        const status=(p.published?'<span class="pill live">live</span>':'<span class="pill draft">Entwurf</span>')+(p.pinned?' <span class="pill pin">angepinnt</span>':'');
+        tr.innerHTML='<td><b>'+esc(p.title)+'</b><div class="muted" style="font-size:12px">'+esc(p.summary||'')+'</div></td>'+
+          '<td>'+meta+'</td><td>'+status+'</td><td>'+fmtDate(p.publishedAt||p.createdAt)+'</td>'+
+          '<td><div class="rowact"><button class="btn sec sm" data-pub>'+(p.published?'Verbergen':'Live')+'</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
+        tr.querySelector('[data-pub]').onclick=(e)=>{e.stopPropagation();togglePub(p);};
+        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delPost(p);};
+        tr.onclick=()=>editPost(p);
+        rows.appendChild(tr);
+      }
+    }
+    function editPost(p){
+      contentKind=p.kind;applyKindUI();
+      $('p_id').value=p.id;$('p_title').value=p.title||'';$('p_category').value=p.category||'';
+      $('p_version').value=p.version||'';$('p_tag').value=p.tag||'feature';$('p_author').value=p.author||'';
+      $('p_slug').value=p.slug||'';$('p_summary').value=p.summary||'';$('p_body').value=p.body||'';
+      $('p_pinned').checked=!!p.pinned;$('p_published').checked=!!p.published;
+      pendingCover=p.cover||'';$('coverHint').textContent=p.cover?'Aktuelles Bild gesetzt.':'';
+      $('editorTitle').textContent='Beitrag bearbeiten';$('savePostBtn').textContent='Aktualisieren';$('cancelEditBtn').classList.remove('hidden');
+      document.querySelector('[data-pane="content"] .card').scrollIntoView({behavior:'smooth',block:'start'});
+    }
+    async function savePost(){
+      const id=$('p_id').value;
+      const title=$('p_title').value.trim();
+      if(!title)return toast('Bitte gib einen Titel ein.');
+      // Upload a freshly chosen cover image first (news only).
+      const cf=$('p_cover_file');const file=cf&&cf.files&&cf.files[0];
+      if(file&&contentKind==='news'){
+        try{$('coverHint').textContent='Bild wird hochgeladen …';const up=await adminUpload(file);pendingCover=up.url;$('coverHint').textContent='Bild hochgeladen.';}
+        catch(e){return toast(e.message);}
+      }
+      const body={kind:contentKind,title,summary:$('p_summary').value.trim(),body:$('p_body').value,
+        author:$('p_author').value.trim()||undefined,slug:$('p_slug').value.trim()||undefined,
+        pinned:$('p_pinned').checked,published:$('p_published').checked,cover:pendingCover||''};
+      if(contentKind==='news'){body.category=$('p_category').value.trim();}
+      else{body.version=$('p_version').value.trim();body.tag=$('p_tag').value;}
+      try{
+        if(id){await api('/admin/posts/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Beitrag aktualisiert.');}
+        else{await api('/admin/posts',{method:'POST',body:JSON.stringify(body)});toast('Beitrag erstellt.');}
+        resetEditor();loadContent();
+      }catch(e){toast(e.message);}
+    }
+    async function togglePub(p){try{await api('/admin/posts/'+p.id,{method:'PATCH',body:JSON.stringify({published:!p.published})});toast(p.published?'Verborgen.':'Veröffentlicht.');loadContent();}catch(e){toast(e.message);}}
+    async function delPost(p){if(!confirm('„'+p.title+'“ wirklich löschen?'))return;try{await api('/admin/posts/'+p.id,{method:'DELETE'});toast('Gelöscht.');loadContent();}catch(e){toast(e.message);}}
 
     // ---- system ----
     async function loadSystem(){
@@ -426,6 +579,7 @@
     $('loginBtn').onclick=login;$('token').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
     $('logoutBtn').onclick=logout;$('broadcastBtn').onclick=broadcast;$('createBtn').onclick=createUser;$('backupBtn').onclick=makeBackup;
     $('dmAllBtn').onclick=broadcastDm;$('statusBtn').onclick=postStatus;
+    $('savePostBtn').onclick=savePost;$('cancelEditBtn').onclick=resetEditor;
     $('csvBtn').onclick=async()=>{try{const r=await fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}});const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}catch{toast('Export fehlgeschlagen.');}};
     $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});

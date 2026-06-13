@@ -8,6 +8,7 @@ import '../widgets/brand.dart';
 import '../widgets/invite_sheet.dart';
 import '../widgets/ping_logo.dart';
 import '../widgets/update_sheet.dart';
+import '../widgets/verified_badge.dart';
 import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
@@ -50,10 +51,26 @@ class SettingsScreen extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(me.label,
-                              style: Theme.of(context).textTheme.titleLarge),
+                          NameWithBadge(
+                            name: me.label,
+                            user: me,
+                            badgeSize: 20,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
                           Text(me.phone,
                               style: TextStyle(color: scheme.onSurfaceVariant)),
+                          if (me.premium)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                'Ping Premium ✨',
+                                style: TextStyle(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ),
                           if (me.about.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
@@ -131,7 +148,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 2.4.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 2.5.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(

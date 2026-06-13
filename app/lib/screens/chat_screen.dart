@@ -21,6 +21,7 @@ import '../widgets/chat_wallpaper.dart';
 import '../widgets/forward_sheet.dart';
 import '../widgets/message_actions.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/verified_badge.dart';
 import 'chat_info_screen.dart';
 import 'image_viewer_screen.dart';
 import 'sticker_draw_screen.dart';
@@ -383,6 +384,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ? '${state.cachedUser(typingUsers.first)?.displayName.split(' ').first ?? 'Jemand'} tippt …'
               : 'mehrere tippen …')
           : 'tippt …';
+    } else if (chat.otherUser?.official == true) {
+      subtitle = 'Offizieller Kanal · verifiziert';
     } else if (chat.isGroup) {
       subtitle = '${chat.memberIds.length} Mitglieder';
     } else if (online) {
@@ -390,6 +393,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else {
       subtitle = TimeFormat.lastSeen(chat.otherUser?.lastSeen);
     }
+    final headerUser = chat.isGroup ? null : chat.otherUser;
 
     return AppBar(
       titleSpacing: 0,
@@ -418,10 +422,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    chat.displayTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  NameWithBadge(
+                    name: chat.displayTitle,
+                    user: headerUser,
+                    glow: headerUser?.official == true,
+                    badgeSize: 18,
                     style: const TextStyle(
                         fontSize: 17, fontWeight: FontWeight.w700),
                   ),
@@ -431,10 +436,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12.5,
-                      color: typingUsers.isNotEmpty || online
+                      color: headerUser?.official == true
                           ? scheme.primary
-                          : scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w500,
+                          : typingUsers.isNotEmpty || online
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant,
+                      fontWeight: headerUser?.official == true
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                   ),
                 ],
@@ -669,6 +678,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       showSenderName: chat.isGroup && !isMine,
       senderName: sender?.displayName,
       senderColor: sender?.color ?? Theme.of(context).colorScheme.primary,
+      senderBadge: chat.isGroup && !isMine ? badgeKindFor(sender) : null,
+      official: chat.locked && chat.otherUser?.official == true,
       repliedTo: replied,
       repliedToSender: repliedSender,
       starred: state.isStarred(m.id),
@@ -1826,7 +1837,8 @@ class _BlockedBar extends StatelessWidget {
 }
 
 /// Shown instead of the composer in a read-only channel (an official "Ping
-/// Team" broadcast): you receive messages here but can't reply.
+/// Team" broadcast): you receive messages here but can't reply. Styled to read
+/// as a trusted, official surface rather than just a greyed-out bar.
 class _ReadOnlyBar extends StatelessWidget {
   const _ReadOnlyBar();
 
@@ -1836,18 +1848,30 @@ class _ReadOnlyBar extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-        color: scheme.surfaceContainerHigh,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          border: Border(
+            top: BorderSide(
+              color: scheme.primary.withValues(alpha: 0.35),
+              width: 1.5,
+            ),
+          ),
+        ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.lock_outline_rounded,
-                color: scheme.onSurfaceVariant, size: 18),
+            const PingBadge(kind: BadgeKind.official, size: 20),
             const SizedBox(width: 10),
             Flexible(
               child: Text(
-                'Nur Ping kann hier schreiben.',
-                style: TextStyle(color: scheme.onSurfaceVariant),
+                'Offizielle Mitteilungen vom Ping-Team. Antworten ist nicht möglich.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],

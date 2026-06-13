@@ -10,62 +10,22 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/site.css">
   <style>
-    :root{
-      --bg:#05080f; --text:#eaf1fb; --muted:#94a8c2;
-      --brand:#0a84ff; --brand2:#34b7f1; --accent:#6c5cff; --pink:#ff4d8d;
-      --glass:rgba(255,255,255,.055); --line:rgba(255,255,255,.10); --ok:#22c55e;
-    }
-    *{box-sizing:border-box}
-    html{scroll-behavior:smooth}
-    body{margin:0;font-family:"Plus Jakarta Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-      color:var(--text);background:var(--bg);overflow-x:hidden;-webkit-font-smoothing:antialiased}
-    /* animated background blobs */
-    .blobs{position:fixed;inset:0;z-index:-2;overflow:hidden}
-    .blob{position:absolute;border-radius:50%;filter:blur(80px);opacity:.55;animation:float 18s ease-in-out infinite}
-    .blob.a{width:520px;height:520px;background:radial-gradient(circle,#0a84ff,transparent 70%);top:-160px;left:-120px}
-    .blob.b{width:560px;height:560px;background:radial-gradient(circle,#6c5cff,transparent 70%);top:6%;right:-180px;animation-delay:-6s}
-    .blob.c{width:480px;height:480px;background:radial-gradient(circle,#ff4d8d,transparent 70%);bottom:-160px;left:18%;animation-delay:-12s;opacity:.4}
-    .grid-overlay{position:fixed;inset:0;z-index:-1;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:54px 54px;mask-image:radial-gradient(circle at 50% 0%,black,transparent 80%)}
-    @keyframes float{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(40px,-30px) scale(1.08)}66%{transform:translate(-30px,20px) scale(.95)}}
-
-    .wrap{max-width:1140px;margin:0 auto;padding:0 22px}
-    /* nav */
-    nav{position:sticky;top:0;z-index:30;backdrop-filter:blur(14px);background:rgba(5,8,15,.55);border-bottom:1px solid transparent;transition:border-color .3s}
-    nav.scrolled{border-color:var(--line)}
-    .nav-in{display:flex;align-items:center;justify-content:space-between;height:68px}
-    .brand{display:flex;align-items:center;gap:12px}
-    .logo{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--accent));box-shadow:0 8px 26px rgba(10,132,255,.5)}
-    .logo svg{width:24px;height:24px}
-    .nm{font-weight:800;font-size:19px;letter-spacing:-.4px}
-    .nav-links{display:flex;gap:26px;align-items:center}
-    .nav-links a{color:var(--muted);text-decoration:none;font-weight:600;font-size:14.5px;transition:color .2s}
-    .nav-links a:hover{color:var(--text)}
-    .nav-cta{padding:9px 16px;border-radius:11px;background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff !important;box-shadow:0 8px 22px rgba(10,132,255,.4)}
-    @media(max-width:720px){.nav-links a:not(.nav-cta){display:none}}
-
     /* hero */
-    .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;padding:70px 0 40px}
-    @media(max-width:880px){.hero{grid-template-columns:1fr;text-align:center;padding:44px 0 20px}}
+    .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center;padding:64px 0 36px}
+    @media(max-width:880px){.hero{grid-template-columns:1fr;text-align:center;padding:40px 0 18px}}
     .badge{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:var(--glass);
       border:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted);margin-bottom:22px}
     .badge .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.2);animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(34,197,94,.2)}50%{box-shadow:0 0 0 7px rgba(34,197,94,0)}}
     h1{font-size:clamp(40px,6.4vw,68px);line-height:1.02;letter-spacing:-2px;margin:0 0 18px;font-weight:800}
     h1 .g{background:linear-gradient(110deg,var(--brand2) 10%,var(--accent) 55%,var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
-    .lead{font-size:19px;color:var(--muted);line-height:1.6;max-width:38ch;margin:0 auto}
+    .lead{font-size:19px;color:var(--muted);line-height:1.6;max-width:40ch;margin:0 auto}
     @media(min-width:881px){.lead{margin:0}}
     .cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:30px}
     @media(max-width:880px){.cta{justify-content:center}}
-    .btn{cursor:pointer;border:none;font:inherit;font-weight:700;border-radius:15px;padding:16px 26px;display:inline-flex;
-      align-items:center;gap:11px;text-decoration:none;color:#fff;background:linear-gradient(135deg,var(--brand),var(--accent));
-      box-shadow:0 16px 40px rgba(10,132,255,.45);transition:transform .15s,box-shadow .15s;position:relative;overflow:hidden}
-    .btn::after{content:"";position:absolute;top:0;left:-80%;width:60%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);animation:sheen 3.6s infinite}
-    @keyframes sheen{0%{left:-80%}55%,100%{left:140%}}
-    .btn:hover{transform:translateY(-3px);box-shadow:0 24px 54px rgba(10,132,255,.6)}
-    .btn.ghost{background:var(--glass);border:1px solid var(--line);box-shadow:none;color:var(--text)}
-    .btn.ghost::after{display:none}
-    .btn svg{width:22px;height:22px}
+    .btn.big{padding:16px 26px;border-radius:15px;font-weight:700}
     .meta{margin-top:18px;font-size:13.5px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap}
     @media(max-width:880px){.meta{justify-content:center}}
     .meta b{color:var(--text)}
@@ -90,15 +50,16 @@
     @keyframes pop{to{opacity:1;transform:translateY(0)}}
     .notch{position:absolute;top:13px;left:50%;transform:translateX(-50%);width:120px;height:26px;background:#0a1422;border-radius:0 0 16px 16px;z-index:2}
 
-    /* logos / trust band */
-    .band{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin:30px 0 10px;opacity:.9}
-    .chip{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:12px;background:var(--glass);border:1px solid var(--line);font-size:13.5px;font-weight:600;color:var(--muted)}
+    /* live stats band */
+    .live{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:8px 0 6px}
+    @media(max-width:680px){.live{grid-template-columns:1fr 1fr}}
+    .live .box{background:var(--glass);border:1px solid var(--line);border-radius:18px;padding:20px;text-align:center}
+    .live .box .n{font-size:clamp(26px,4vw,34px);font-weight:800;letter-spacing:-1px;background:linear-gradient(110deg,var(--brand2),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+    .live .box .k{color:var(--faint);font-size:12.5px;text-transform:uppercase;letter-spacing:.05em;margin-top:4px;font-weight:600}
 
-    /* sections */
-    section.s{padding:64px 0}
-    .eyebrow{text-align:center;color:var(--brand2);font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:13px;margin-bottom:10px}
-    .h2{text-align:center;font-size:clamp(28px,4.4vw,40px);letter-spacing:-1px;margin:0 0 14px;font-weight:800}
-    .sub{text-align:center;color:var(--muted);max-width:52ch;margin:0 auto 42px;font-size:17px;line-height:1.6}
+    .band{margin:26px 0 10px}
+
+    /* features */
     .features{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
     @media(max-width:880px){.features{grid-template-columns:1fr 1fr}}
     @media(max-width:560px){.features{grid-template-columns:1fr}}
@@ -109,9 +70,6 @@
     .feat h3{margin:0 0 8px;font-size:18px;font-weight:700}
     .feat p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
 
-    .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1)}
-    .reveal.in{opacity:1;transform:none}
-
     /* steps */
     .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;max-width:920px;margin:0 auto}
     @media(max-width:760px){.steps{grid-template-columns:1fr}}
@@ -119,6 +77,21 @@
     .step .num{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,var(--brand),var(--accent));display:grid;place-items:center;font-weight:800;font-size:18px;margin-bottom:14px;box-shadow:0 8px 22px rgba(10,132,255,.4)}
     .step h4{margin:0 0 6px;font-size:17px}
     .step p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
+
+    /* teasers (newsroom + changelog) */
+    .teaser-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:22px}
+    .teaser-head a.more{color:var(--brand2);font-weight:700;font-size:14.5px;white-space:nowrap}
+    .tcard{display:flex;flex-direction:column;gap:9px;background:var(--glass);border:1px solid var(--line);border-radius:18px;padding:20px;color:var(--text);transition:transform .25s,border-color .25s}
+    .tcard:hover{transform:translateY(-5px);border-color:rgba(52,183,241,.4)}
+    .tcard h4{margin:0;font-size:17px;font-weight:700;line-height:1.3}
+    .tcard p{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+    .tcard .m{margin-top:auto;color:var(--faint);font-size:12.5px;padding-top:4px}
+    .log-list{display:flex;flex-direction:column;gap:12px}
+    .log-item{display:flex;gap:14px;align-items:flex-start;background:var(--glass);border:1px solid var(--line);border-radius:16px;padding:16px 20px}
+    .log-item .v{font-weight:800;font-size:16px;min-width:64px}
+    .log-item .x{flex:1}
+    .log-item .x b{font-size:15px}
+    .log-item .x p{margin:3px 0 0;color:var(--muted);font-size:13.5px}
 
     /* download CTA card */
     .dlcard{background:linear-gradient(135deg,rgba(10,132,255,.18),rgba(108,92,255,.16));border:1px solid var(--line);border-radius:28px;
@@ -138,10 +111,6 @@
     .faq details[open] summary::after{transform:rotate(45deg)}
     .faq p{margin:0 0 18px;color:var(--muted);line-height:1.6;font-size:15px}
 
-    footer{border-top:1px solid var(--line);margin-top:40px}
-    .foot{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:26px 0;color:var(--muted);font-size:13.5px;flex-wrap:wrap}
-    .foot a{color:var(--brand2);text-decoration:none}
-
     /* sticky mobile download bar */
     .sticky{position:fixed;left:0;right:0;bottom:0;z-index:40;padding:12px 16px;backdrop-filter:blur(14px);
       background:rgba(5,8,15,.8);border-top:1px solid var(--line);display:none;align-items:center;gap:12px;transform:translateY(100%);transition:transform .3s}
@@ -153,22 +122,8 @@
     .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   </style>
 </head>
-<body>
-  <div class="blobs"><div class="blob a"></div><div class="blob b"></div><div class="blob c"></div></div>
-  <div class="grid-overlay"></div>
-
-  <nav id="nav"><div class="wrap nav-in">
-    <div class="brand">
-      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".96"/><circle cx="9" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="13" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="17" cy="10.5" r="1.5" fill="#0a84ff"/></svg></div>
-      <div class="nm">Ping</div>
-    </div>
-    <div class="nav-links">
-      <a href="#features">Funktionen</a>
-      <a href="#how">Installation</a>
-      <a href="#faq">FAQ</a>
-      <a class="nav-cta" href="/download" id="navdl">Herunterladen</a>
-    </div>
-  </div></nav>
+<body data-active="home">
+  <div id="nav"></div>
 
   <div class="wrap">
     <section class="hero">
@@ -178,11 +133,11 @@
         <p class="lead">Ping ist ein blitzschneller, moderner Messenger – Echtzeit-Chats, Gruppen, Status,
           Reaktionen, Sticker und Sprachnachrichten. Keine Werbung, kein Schnickschnack.</p>
         <div class="cta">
-          <a class="btn" id="dl" href="/download">
+          <a class="btn big" id="dl" href="/download">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zM12 2l-1.5 1.5v9.6L7 9.6 5.5 11 12 17.5 18.5 11 17 9.6l-3.5 3.5V3.5L12 2z"/></svg>
             Für Android laden
           </a>
-          <a class="btn ghost" href="#how">So funktioniert's</a>
+          <a class="btn ghost big" href="#how">So funktioniert's</a>
         </div>
         <div class="meta">
           <span>Version <b id="ver">…</b></span><span><b id="size">…</b></span><span>Android 6.0+</span><span>🔒 Privat by default</span>
@@ -205,32 +160,47 @@
       </div>
     </section>
 
+    <!-- live stats -->
+    <div class="live reveal" id="live">
+      <div class="box"><div class="n" data-stat="users">–</div><div class="k">Nutzer</div></div>
+      <div class="box"><div class="n" data-stat="messages">–</div><div class="k">Nachrichten</div></div>
+      <div class="box"><div class="n" data-stat="online">–</div><div class="k">Gerade online</div></div>
+      <div class="box"><div class="n">99,9%</div><div class="k">Verfügbarkeit</div></div>
+    </div>
+
     <div class="band reveal">
       <span class="chip">⚡ Echtzeit-WebSocket</span>
       <span class="chip">🔔 Push-Benachrichtigungen</span>
-      <span class="chip">🎨 8+ Themes</span>
+      <span class="chip">🎨 14+ Themes</span>
       <span class="chip">🇦🇹 +43 Standard</span>
       <span class="chip">🛡️ Keine Werbung</span>
     </div>
 
     <section class="s" id="features">
-      <div class="eyebrow reveal">Funktionen</div>
-      <h2 class="h2 reveal">Alles drin, nichts zu viel</h2>
-      <p class="sub reveal">Ein vollwertiger Messenger – durchdacht, schnell und schön.</p>
+      <div class="center" style="margin-bottom:42px">
+        <div class="eyebrow reveal">Funktionen</div>
+        <h2 class="h2 reveal">Alles drin, nichts zu viel</h2>
+        <p class="sub reveal">Ein vollwertiger Messenger – durchdacht, schnell und schön.</p>
+      </div>
       <div class="features">
         <div class="feat reveal"><div class="ic">⚡</div><h3>Echtzeit &amp; zuverlässig</h3><p>Nachrichten, Tipp-Anzeige und Lesebestätigungen live – ohne Verzögerung.</p></div>
         <div class="feat reveal"><div class="ic">😍</div><h3>Reaktionen &amp; Antworten</h3><p>Reagiere mit Emojis, zitiere Nachrichten und sende Sprachnachrichten.</p></div>
         <div class="feat reveal"><div class="ic">👥</div><h3>Gruppen &amp; Status</h3><p>Gruppenchats mit Admin-Rechten und 24-Stunden-Status mit Foto &amp; Video.</p></div>
-        <div class="feat reveal"><div class="ic">🎨</div><h3>Themes &amp; Sticker</h3><p>Viele Designs, eigene Chat-Hintergründe und selbstgezeichnete Sticker.</p></div>
+        <div class="feat reveal"><div class="ic">🎨</div><h3>Themes &amp; Sticker</h3><p>14+ Designs, eigene Chat-Hintergründe und selbstgezeichnete Sticker.</p></div>
+        <div class="feat reveal"><div class="ic">📊</div><h3>Umfragen &amp; Polls</h3><p>Frag deine Gruppe – mit Einfach- oder Mehrfachauswahl und Live-Ergebnissen.</p></div>
+        <div class="feat reveal"><div class="ic">⏳</div><h3>Selbstlöschende Chats</h3><p>Verschwindende Nachrichten mit Timer – für alles, was nicht bleiben soll.</p></div>
         <div class="feat reveal"><div class="ic">🔔</div><h3>Push &amp; offline</h3><p>Verpasse nichts dank Push-Benachrichtigungen, auch wenn die App zu ist.</p></div>
+        <div class="feat reveal"><div class="ic">🔄</div><h3>Auto-Updates</h3><p>Neue Versionen meldet die App selbst und installiert sie mit einem Tipp.</p></div>
         <div class="feat reveal"><div class="ic">🔒</div><h3>Privat by default</h3><p>Gefunden wirst du nur über deine Nummer. Dein Adressbuch bleibt lokal.</p></div>
       </div>
     </section>
 
     <section class="s" id="how">
-      <div class="eyebrow reveal">Installation</div>
-      <h2 class="h2 reveal">In 30 Sekunden startklar</h2>
-      <p class="sub reveal">Ping kommt als APK direkt von hier – keine App-Store-Wartezeit.</p>
+      <div class="center" style="margin-bottom:42px">
+        <div class="eyebrow reveal">Installation</div>
+        <h2 class="h2 reveal">In 30 Sekunden startklar</h2>
+        <p class="sub reveal">Ping kommt als APK direkt von hier – keine App-Store-Wartezeit.</p>
+      </div>
       <div class="steps">
         <div class="step reveal"><div class="num">1</div><h4>APK laden</h4><p>Tippe auf „Für Android laden“ – die neueste Version kommt direkt von hier.</p></div>
         <div class="step reveal"><div class="num">2</div><h4>Installation erlauben</h4><p>Android fragt nach „Unbekannte Quellen“ – einmal zustimmen.</p></div>
@@ -238,16 +208,44 @@
       </div>
     </section>
 
+    <!-- Newsroom teaser -->
+    <section class="s" id="newsroom">
+      <div class="teaser-head">
+        <div><div class="eyebrow reveal">Newsroom</div><h2 class="h2 reveal" style="margin:6px 0 0">Frisch aus dem Team</h2></div>
+        <a class="more reveal" href="/news">Alle Neuigkeiten →</a>
+      </div>
+      <div class="grid g3" id="newsTeaser">
+        <div class="tcard skeleton" style="height:150px"></div>
+        <div class="tcard skeleton" style="height:150px"></div>
+        <div class="tcard skeleton" style="height:150px"></div>
+      </div>
+    </section>
+
+    <!-- Changelog teaser -->
+    <section class="s" id="changelog-teaser">
+      <div class="teaser-head">
+        <div><div class="eyebrow reveal">Changelog</div><h2 class="h2 reveal" style="margin:6px 0 0">Zuletzt verbessert</h2></div>
+        <a class="more reveal" href="/changelog">Vollständiger Changelog →</a>
+      </div>
+      <div class="log-list" id="logTeaser">
+        <div class="log-item skeleton" style="height:64px"></div>
+        <div class="log-item skeleton" style="height:64px"></div>
+      </div>
+    </section>
+
     <section class="s" id="faq">
-      <div class="eyebrow reveal">FAQ</div>
-      <h2 class="h2 reveal">Häufige Fragen</h2>
-      <p class="sub reveal">Alles, was du vor dem Loslegen wissen musst.</p>
+      <div class="center" style="margin-bottom:42px">
+        <div class="eyebrow reveal">FAQ</div>
+        <h2 class="h2 reveal">Häufige Fragen</h2>
+        <p class="sub reveal">Alles, was du vor dem Loslegen wissen musst.</p>
+      </div>
       <div class="faq">
         <details class="reveal"><summary>Ist Ping kostenlos?</summary><p>Ja. Ping ist komplett kostenlos, werbefrei und ohne versteckte Käufe.</p></details>
         <details class="reveal"><summary>Warum kommt die App als APK und nicht aus dem Play Store?</summary><p>So bekommst du Updates sofort und direkt von uns. Lade die APK, erlaube einmalig die Installation aus unbekannten Quellen – fertig. Die App hält sich danach selbst aktuell.</p></details>
         <details class="reveal"><summary>Bekomme ich automatisch Updates?</summary><p>Ja. Sobald eine neue Version verfügbar ist, bietet dir die App das Update direkt an und installiert es auf Wunsch mit einem Tipp.</p></details>
         <details class="reveal"><summary>Wie privat ist Ping?</summary><p>Du wirst nur über deine Telefonnummer gefunden – nie über Namens- oder E-Mail-Suche. Dein Adressbuch bleibt auf deinem Gerät und wird nie gespeichert.</p></details>
         <details class="reveal"><summary>Welche Android-Version brauche ich?</summary><p>Android 6.0 oder neuer. Die App ist schlank und läuft auch auf älteren Geräten flüssig.</p></details>
+        <details class="reveal"><summary>Unter welcher Adresse läuft Ping?</summary><p>Die Hauptadresse ist <b>example.invalid</b>. Die alte Adresse example.invalid funktioniert weiterhin.</p></details>
       </div>
     </section>
 
@@ -255,7 +253,7 @@
       <div class="dlcard reveal">
         <h2>Bereit für bessere Chats?</h2>
         <p>Lad dir Ping und hol deine Leute dazu. Kostenlos, werbefrei, sofort einsatzbereit.</p>
-        <a class="btn" href="/download" id="dl2">
+        <a class="btn big" href="/download" id="dl2">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zM12 2l-1.5 1.5v9.6L7 9.6 5.5 11 12 17.5 18.5 11 17 9.6l-3.5 3.5V3.5L12 2z"/></svg>
           Jetzt herunterladen
         </a>
@@ -263,36 +261,62 @@
     </section>
   </div>
 
-  <footer><div class="wrap foot">
-    <div>© <span id="yr"></span> Ping · Messenger</div>
-    <div><a href="#features">Funktionen</a> · <a href="#faq">FAQ</a> · <a href="/download/info">Build-Info</a></div>
-  </div></footer>
+  <div id="footer"></div>
 
   <div class="sticky" id="sticky">
     <div class="t"><b>Ping für Android</b><span id="sticky-meta">Neueste Version</span></div>
-    <a class="btn" href="/download" style="padding:12px 18px">Laden</a>
+    <a class="btn sm" href="/download">Laden</a>
   </div>
   <div class="toast" id="toast">Download startet … danach Installation aus unbekannten Quellen erlauben.</div>
 
+  <script src="/site.js"></script>
   <script>
-    document.getElementById('yr').textContent=new Date().getFullYear();
-    function human(b){ if(!b) return '—'; const u=['B','KB','MB','GB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i>0?1:0)+' '+u[i]; }
+    const P = window.Ping;
+    // Build info (version / size).
     fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{ if(!d) return;
       document.getElementById('ver').textContent='v'+d.version;
-      document.getElementById('size').textContent=human(d.size);
-      document.getElementById('sticky-meta').textContent='v'+d.version+' · '+human(d.size);
+      document.getElementById('size').textContent=P.human(d.size);
+      document.getElementById('sticky-meta').textContent='v'+d.version+' · '+P.human(d.size);
     }).catch(()=>{});
 
-    // sticky nav border + mobile download bar on scroll
-    const nav=document.getElementById('nav'), sticky=document.getElementById('sticky');
-    addEventListener('scroll',()=>{ const y=scrollY; nav.classList.toggle('scrolled',y>10); sticky.classList.toggle('show',y>520); });
+    // Live stats with a count-up once the band scrolls into view.
+    fetch('/api/public/stats').then(r=>r.ok?r.json():null).then(s=>{ if(!s) return;
+      const io=new IntersectionObserver((es)=>es.forEach(e=>{ if(e.isIntersecting){
+        document.querySelectorAll('[data-stat]').forEach(el=>P.countUp(el, s[el.dataset.stat]||0));
+        io.disconnect();
+      }}),{threshold:.4});
+      io.observe(document.getElementById('live'));
+    }).catch(()=>{});
 
-    // scroll reveal
-    const io=new IntersectionObserver((es)=>es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} }),{threshold:.12});
-    document.querySelectorAll('.reveal').forEach((el,i)=>{ el.style.transitionDelay=(i%3*0.06)+'s'; io.observe(el); });
+    // Newsroom teaser.
+    fetch('/api/news?limit=3').then(r=>r.ok?r.json():null).then(d=>{
+      const el=document.getElementById('newsTeaser');
+      const posts=(d&&d.posts)||[];
+      if(!posts.length){ document.getElementById('newsroom').style.display='none'; return; }
+      el.innerHTML=posts.map(p=>`<a class="tcard reveal" href="/news/${P.esc(p.slug)}">
+        ${p.category?`<span class="pill news" style="align-self:flex-start">${P.esc(p.category)}</span>`:''}
+        <h4>${P.esc(p.title)}</h4>
+        <p>${P.esc(p.summary||'')}</p>
+        <div class="m">${P.fmtDate(p.publishedAt||p.createdAt)}</div></a>`).join('');
+      P.reveal();
+    }).catch(()=>{ document.getElementById('newsroom').style.display='none'; });
 
-    // Manual download only — show a brief hint when the user taps a download link.
-    ['dl','dl2','navdl'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',()=>{ const t=document.getElementById('toast'); t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),4000); }); });
+    // Changelog teaser.
+    fetch('/api/changelog?limit=3').then(r=>r.ok?r.json():null).then(d=>{
+      const el=document.getElementById('logTeaser');
+      const posts=(d&&d.posts)||[];
+      if(!posts.length){ document.getElementById('changelog-teaser').style.display='none'; return; }
+      el.innerHTML=posts.map(p=>`<a class="log-item reveal" href="/changelog" style="color:inherit">
+        <div class="v">${p.version?('v'+P.esc(p.version)):''}</div>
+        <div class="x"><b>${P.esc(p.title)}</b> ${p.tag?`<span class="pill ${P.esc(p.tag)}">${P.esc(P.tag(p.tag))}</span>`:''}
+        <p>${P.esc(p.summary||'')}</p></div></a>`).join('');
+      P.reveal();
+    }).catch(()=>{ document.getElementById('changelog-teaser').style.display='none'; });
+
+    // Sticky bar on scroll.
+    addEventListener('scroll',()=>{ document.getElementById('sticky').classList.toggle('show',scrollY>520); });
+    // Download hint toast.
+    ['dl','dl2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',()=>{ const t=document.getElementById('toast'); t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),4000); }); });
   </script>
 </body>
 </html>

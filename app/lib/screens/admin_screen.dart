@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../widgets/verified_badge.dart';
+import 'status_tab.dart';
 
 /// In-app admin panel, available to accounts with the admin flag. Talks to the
 /// same /api/admin/* endpoints as the web portal, authorised by the user's JWT.
@@ -162,43 +164,18 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  /// Post an official status ("story") that every user sees.
+  /// Post an official status ("story") — text, photo or video — that every user
+  /// sees for 24 hours. Reuses the full-screen status composer in official mode.
   Future<void> _postStatus() async {
-    final body = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Status für alle'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Erscheint im Status-Tab aller Nutzer (24 Stunden lang).',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: body,
-              maxLines: 3,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Status-Text'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Abbrechen')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Posten')),
-        ],
-      ),
-    );
-    if (ok != true || body.text.trim().isEmpty) return;
+    await showAddStatusSheet(context, official: true);
+  }
+
+  Future<void> _togglePremium(Map u) async {
+    final premium = u['premium'] == true;
     try {
-      await _api.post('/admin/status', {'body': body.text.trim()});
-      _toast('Status für alle gepostet.');
+      await _api.patch('/admin/users/${u['id']}', {'premium': !premium});
+      _toast(premium ? 'Premium entzogen.' : 'Premium vergeben. ✨');
+      await _refresh();
     } on ApiException catch (e) {
       _toast(e.message);
     }
@@ -437,6 +414,7 @@ class _AdminScreenState extends State<AdminScreen> {
 
   Widget _userTile(Map u) {
     final isAdmin = u['isAdmin'] == true;
+    final premium = u['premium'] == true;
     final online = u['online'] == true;
     final disabled = u['disabled'] == true;
     final scheme = Theme.of(context).colorScheme;
@@ -445,11 +423,20 @@ class _AdminScreenState extends State<AdminScreen> {
         children: [
           Flexible(
             child: Text('${u['displayName']}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     decoration:
                         disabled ? TextDecoration.lineThrough : null)),
           ),
-          if (isAdmin) _chip('Admin', scheme.primaryContainer),
+          if (isAdmin) ...[
+            const SizedBox(width: 5),
+            const PingBadge(kind: BadgeKind.verified, size: 15),
+          ],
+          if (premium) ...[
+            const SizedBox(width: 5),
+            const PingBadge(kind: BadgeKind.premium, size: 15),
+          ],
           if (disabled) _chip('gesperrt', scheme.errorContainer),
         ],
       ),
@@ -463,6 +450,8 @@ class _AdminScreenState extends State<AdminScreen> {
           switch (v) {
             case 'admin':
               _toggleAdmin(u);
+            case 'premium':
+              _togglePremium(u);
             case 'ban':
               _toggleBan(u);
             case 'msg':
@@ -477,6 +466,9 @@ class _AdminScreenState extends State<AdminScreen> {
           PopupMenuItem(
               value: 'admin',
               child: Text(isAdmin ? 'Admin entziehen' : 'Zum Admin machen')),
+          PopupMenuItem(
+              value: 'premium',
+              child: Text(premium ? 'Premium entziehen' : 'Premium vergeben')),
           PopupMenuItem(
               value: 'ban',
               child: Text(disabled ? 'Entsperren' : 'Sperren')),

@@ -7,11 +7,14 @@ import '../models/user.dart';
 import '../services/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/avatar.dart';
+import '../widgets/verified_badge.dart';
 import 'status_composer_screen.dart';
 import 'status_viewer_screen.dart';
 
 /// Offer text / photo / video statuses (gallery or camera), then route there.
-Future<void> showAddStatusSheet(BuildContext context) async {
+/// When [official] is set, the composer posts as the "Ping Team" account so the
+/// update reaches every user (admin only) — text, image *and* video are allowed.
+Future<void> showAddStatusSheet(BuildContext context, {bool official = false}) async {
   await showModalBottomSheet(
     context: context,
     showDragHandle: true,
@@ -19,6 +22,22 @@ Future<void> showAddStatusSheet(BuildContext context) async {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (official)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: Row(
+                children: [
+                  PingBadge(kind: BadgeKind.official, size: 22),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Offizieller Status — für alle Ping-Nutzer sichtbar.',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ListTile(
             leading: const CircleAvatar(child: Icon(Icons.title_rounded)),
             title: const Text('Text'),
@@ -26,7 +45,7 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             onTap: () {
               Navigator.pop(ctx);
               Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const StatusTextComposer()));
+                  builder: (_) => StatusTextComposer(official: official)));
             },
           ),
           ListTile(
@@ -35,7 +54,7 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             subtitle: const Text('Mit der Kamera ein Bild machen'),
             onTap: () {
               Navigator.pop(ctx);
-              _pickStatusImage(context, ImageSource.camera);
+              _pickStatusImage(context, ImageSource.camera, official);
             },
           ),
           ListTile(
@@ -44,7 +63,7 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             subtitle: const Text('Teile ein Bild aus der Galerie'),
             onTap: () {
               Navigator.pop(ctx);
-              _pickStatusImage(context, ImageSource.gallery);
+              _pickStatusImage(context, ImageSource.gallery, official);
             },
           ),
           ListTile(
@@ -53,7 +72,7 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             subtitle: const Text('Bis zu 30 Sekunden'),
             onTap: () {
               Navigator.pop(ctx);
-              _pickStatusVideo(context, ImageSource.camera);
+              _pickStatusVideo(context, ImageSource.camera, official);
             },
           ),
           ListTile(
@@ -62,7 +81,7 @@ Future<void> showAddStatusSheet(BuildContext context) async {
             subtitle: const Text('Ein Video aus der Galerie teilen'),
             onTap: () {
               Navigator.pop(ctx);
-              _pickStatusVideo(context, ImageSource.gallery);
+              _pickStatusVideo(context, ImageSource.gallery, official);
             },
           ),
           const SizedBox(height: 8),
@@ -72,7 +91,8 @@ Future<void> showAddStatusSheet(BuildContext context) async {
   );
 }
 
-Future<void> _pickStatusImage(BuildContext context, ImageSource source) async {
+Future<void> _pickStatusImage(
+    BuildContext context, ImageSource source, bool official) async {
   final file = await ImagePicker()
       .pickImage(source: source, imageQuality: 85, maxWidth: 1920);
   if (file == null || !context.mounted) return;
@@ -83,11 +103,13 @@ Future<void> _pickStatusImage(BuildContext context, ImageSource source) async {
       bytes: bytes,
       contentType: file.mimeType ?? 'image/jpeg',
       filename: file.name,
+      official: official,
     ),
   ));
 }
 
-Future<void> _pickStatusVideo(BuildContext context, ImageSource source) async {
+Future<void> _pickStatusVideo(
+    BuildContext context, ImageSource source, bool official) async {
   final file = await ImagePicker()
       .pickVideo(source: source, maxDuration: const Duration(seconds: 30));
   if (file == null || !context.mounted) return;
@@ -96,6 +118,7 @@ Future<void> _pickStatusVideo(BuildContext context, ImageSource source) async {
       path: file.path,
       contentType: file.mimeType ?? 'video/mp4',
       filename: file.name,
+      official: official,
     ),
   ));
 }
@@ -243,10 +266,12 @@ class _StatusGroupTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final official = group.user.official;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: _Ring(
         hasUnseen: group.hasUnseen,
+        official: official,
         child: PingAvatar(
           initials: group.user.initials,
           color: group.user.color,
@@ -255,37 +280,67 @@ class _StatusGroupTile extends StatelessWidget {
           imageHeaders: state.authHeaders,
         ),
       ),
-      title: Text(group.user.label,
-          style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(TimeFormat.messageTime(
-          DateTime.fromMillisecondsSinceEpoch(group.updatedAt))),
+      title: NameWithBadge(
+        name: group.user.label,
+        user: group.user,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        official
+            ? 'Offizielles Update · ${TimeFormat.messageTime(DateTime.fromMillisecondsSinceEpoch(group.updatedAt))}'
+            : TimeFormat.messageTime(
+                DateTime.fromMillisecondsSinceEpoch(group.updatedAt)),
+        style: official
+            ? TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w600)
+            : null,
+      ),
       onTap: onTap,
     );
   }
 }
 
 /// A status "ring" around an avatar: a blue gradient when there's something
-/// unseen, otherwise a subtle grey.
+/// unseen, otherwise a subtle grey. The official "Ping Team" ring always glows
+/// in the brand gradient so it stands apart from everyone else's.
 class _Ring extends StatelessWidget {
   final bool hasUnseen;
+  final bool official;
   final Widget child;
-  const _Ring({required this.hasUnseen, required this.child});
+  const _Ring({
+    required this.hasUnseen,
+    required this.child,
+    this.official = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final showGradient = hasUnseen || official;
     return Container(
       padding: const EdgeInsets.all(2.5),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: hasUnseen
+        gradient: showGradient
             ? const LinearGradient(
                 colors: [Color(0xFF0A84FF), Color(0xFF34B7F1)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
             : null,
-        color: hasUnseen ? null : scheme.outlineVariant.withValues(alpha: 0.6),
+        color: showGradient
+            ? null
+            : scheme.outlineVariant.withValues(alpha: 0.6),
+        boxShadow: official
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF0A84FF).withValues(alpha: 0.45),
+                  blurRadius: 10,
+                  spreadRadius: 0.5,
+                ),
+              ]
+            : null,
       ),
       child: Container(
         padding: const EdgeInsets.all(2),

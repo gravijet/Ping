@@ -29,8 +29,16 @@ Online-Status, Lesebestätigungen).
   (aufnehmen & abspielen) versenden, mit Vollbild-Bildbetrachter.
 - **Vorlesen (Text-to-Speech)** – Nachrichten vorlesen lassen, optional
   automatisch im offenen Chat; Sprache, Tempo und Tonhöhe einstellbar.
-- **Status** – wie bei WhatsApp: Text- oder Bild-Updates, die nach 24 h ablaufen,
-  mit „gesehen"-Ringen und Betrachterliste.
+- **Status** – wie bei WhatsApp: Text-, Bild- **oder Video**-Updates, die nach
+  24 h ablaufen, mit „gesehen"-Ringen und Betrachterliste.
+- **Verifizierungs-Badges** – ein unverkennbares **offizielles Siegel** für das
+  „Ping-Team"-Konto, ein **blauer Haken** für Ping-Mitarbeiter/Admins und ein
+  goldenes **Ping-Premium**-Abzeichen. Die Badges erscheinen überall neben dem
+  Namen (Chatliste, Chat-Kopf, Status, Profil), damit offizielle Mitteilungen
+  klar erkennbar sind. Premium vergeben Admins pro Konto.
+- **Offizielle Mitteilungen** – Admins posten **offizielle Status** (Text/Bild/
+  Video) für alle, senden Durchsagen, private „Ping-Team"-Nachrichten an einzelne
+  oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
 - **Selbstlöschende Nachrichten** – per-Chat-Timer (1 h bis 90 Tage); neue
@@ -50,7 +58,8 @@ Online-Status, Lesebestätigungen).
 - **Viele Einstellungen** – Lesebestätigungen, Benachrichtigungen (Vorschau,
   Vibration), „mit Enter senden", Schriftgröße, Chat-Hintergrund, Vorlesen u. v. m.
 - **Admin** – Web-Portal **und** In-App-Panel (für Admin-Konten): Statistik,
-  Nutzerverwaltung und Durchsagen an alle.
+  Nutzerverwaltung, Premium vergeben, Durchsagen und offizielle Status (auch mit
+  Bild/Video) an alle.
 - **Benachrichtigungen** – lokale Hinweise bei neuen Nachrichten (Android).
 - **Konto löschen** – jede Person kann ihr eigenes Konto dauerhaft löschen
   (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
@@ -116,7 +125,7 @@ Tests:
 
 ```bash
 cd server
-npm test           # 60 End-to-End-Tests (Konto, Kontakte, Medien, Status, Blockieren, Admin …)
+npm test           # 67 End-to-End-Tests (Konto, Kontakte, Medien, Status, Badges, Premium, Admin, Newsroom/Changelog …)
 ```
 
 ### 2. App starten
@@ -177,16 +186,50 @@ sich jederzeit auf dem Login-Screen oder in den Einstellungen unter
 Unter **`/admin`** (z. B. `https://<dein-server>/admin`) gibt es eine schlanke
 Web-Oberfläche zum Verwalten der Nutzer:
 
-- Statistik (Nutzer, online, Chats, Gruppen, Nachrichten, aktive Status),
+- Statistik (Nutzer, online, Chats, Gruppen, Nachrichten, aktive Status,
+  Newsroom- & Changelog-Beiträge),
 - Durchsage an alle verbundenen Apps senden,
+- offizielle **Status für alle** posten – als Text **oder mit Bild/Video** (Upload
+  direkt im Portal),
+- private „Ping-Team"-Nachrichten an einzelne Nutzer oder an alle,
+- **Inhalte** verwalten: **Newsroom-Artikel** (Kategorie, Titelbild, Markdown-
+  leichter Text) und **Changelog-Einträge** (Version, Art der Änderung) anlegen,
+  bearbeiten, anpinnen, als Entwurf speichern oder veröffentlichen,
 - Nutzer anlegen (Nummer, E-Mail, Passwort, optional Admin-Flag),
-- Liste durchsuchen, Namen/Passwörter ändern, Admin-Rechte setzen, Nutzer löschen.
+- **Ping Premium** vergeben/entziehen (Premium-Badge),
+- Liste durchsuchen, Namen/Passwörter ändern, Admin-Rechte setzen, sperren,
+  Nutzer löschen. Das geschützte „Ping-Team"-Systemkonto lässt sich nicht
+  bearbeiten oder löschen.
 
 Der Zugang geht über das **`ADMIN_TOKEN`** (Header `X-Admin-Token`, timing-sicher
 verglichen) **oder** über ein angemeldetes Admin-Konto — Letzteres treibt auch
 das **In-App-Admin-Panel** (Einstellungen → Verwaltung) an. In Produktion ohne
 gesetztes Token und ohne Admin-Konto bleibt das Portal deaktiviert (`503`). In
 der Entwicklung lautet das Token `ping-admin-dev`.
+
+---
+
+## Website
+
+Die öffentliche Marketing-Seite läuft unter der Hauptadresse
+**`example.invalid`** (die alte Adresse `example.invalid` bleibt als
+Alias erhalten und zeigt auf dasselbe Backend). Alle Seiten teilen sich ein
+Design-System (`server/public/site.css` + `site.js`):
+
+- **`/`** – Startseite mit Live-Statistik, Funktionsüberblick, Newsroom- &
+  Changelog-Teasern und direktem APK-Download.
+- **`/news`** (+ `/news/:slug`) – **Newsroom** mit Artikeln, Kategorien und
+  Titelbildern; Einzelartikel mit eigenem Layout.
+- **`/changelog`** – **Changelog** als Timeline, filterbar nach Art der Änderung
+  (Neu/Verbessert/Behoben/Sicherheit).
+- **`/status`** – öffentliche **System-Status-Seite**: zeigt live, ob API,
+  Echtzeit-Verbindung und Daten-Dienste laufen, inkl. Live-Zählern und Uptime.
+- **`/legal`** – Impressum & Datenschutzerklärung.
+
+Newsroom und Changelog speisen sich aus der öffentlichen JSON-API
+(`/api/news`, `/api/news/:slug`, `/api/changelog`, `/api/public/stats`) und werden
+im Admin-Portal unter **Inhalte** gepflegt. Eine Startbefüllung gibt es per
+`node scripts/seed-content.mjs` (liest `ADMIN_TOKEN` aus `server/.env`).
 
 ---
 
@@ -200,14 +243,16 @@ cd server && npm test
 cd app && flutter analyze && flutter test
 ```
 
-- **Backend:** 25 Tests decken Registrierung (Nummer + E-Mail + Passwort,
+- **Backend:** 67 Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
   schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
   Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,
   Gruppen, Bearbeiten/Löschen, Zugriffsschutz, **Medien-Uploads & -Nachrichten**,
   **Status** (posten/sehen/Betrachter), **Blockieren**, Profilbild-Upload sowie
-  das Admin-Portal (Token **oder** Admin-Konto) inkl. Durchsagen. Geprüft wird
-  außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
+  das Admin-Portal (Token **oder** Admin-Konto) inkl. Durchsagen sowie die
+  **Newsroom-/Changelog-Verwaltung** (Entwürfe bleiben privat, öffentliche
+  Listen zeigen nur Veröffentlichtes) und die öffentlichen **Live-Statistiken**.
+  Geprüft wird außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
 - **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt.
 
 ---
@@ -218,13 +263,24 @@ cd app && flutter analyze && flutter test
 ping/
 ├── server/
 │   ├── public/
+│   │   ├── index.html    # Landing-Page (Live-Stats, Newsroom/Changelog-Teaser)
+│   │   ├── news.html     # Newsroom (Liste + Einzelartikel)
+│   │   ├── changelog.html# Changelog-Timeline
+│   │   ├── status.html   # Öffentliche System-Status-Seite
+│   │   ├── legal.html    # Impressum & Datenschutz
+│   │   ├── site.css/.js  # Gemeinsames Web-Design-System (Nav, Footer, Helfer)
 │   │   └── admin.html    # Admin-Portal (statische Seite, tokengeschützt)
+│   ├── scripts/
+│   │   ├── publish-apk.sh   # Release-APK in den Download-Ordner kopieren
+│   │   └── seed-content.mjs # Newsroom/Changelog mit Startinhalten füllen
 │   └── src/
 │       ├── index.js      # HTTP + WS Server, Security-Middleware, /admin
-│       ├── routes.js     # REST-Endpunkte (inkl. Kontaktabgleich, Admin)
+│       ├── routes.js     # REST-Endpunkte (inkl. Kontaktabgleich, Admin, Content)
+│       ├── download.js   # Landing-/Web-Seiten + APK-Auslieferung
 │       ├── hub.js        # WebSocket-Hub: Präsenz, Tippen, Zustellung
 │       ├── chatRepo.js   # Chats & Nachrichten (SQLite)
 │       ├── repo.js       # Nutzer, Avatare, Kontaktabgleich, Serialisierung
+│       ├── postsRepo.js  # Newsroom-Artikel & Changelog-Einträge (SQLite)
 │       ├── auth.js       # JWT + bcrypt + Admin-Token-Middleware
 │       ├── phone.js      # Telefonnummer-Normalisierung (E.164)
 │       ├── avatars.js    # Profilbilder auf der Platte

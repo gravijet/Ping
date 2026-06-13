@@ -69,6 +69,9 @@ export const config = {
   presenceTimeoutMs: 35_000,
   // Requests allowed per 15 min window on the auth endpoints (per IP).
   authRateMax: Number(process.env.AUTH_RATE_MAX) || 40,
+  // Requests allowed per minute on the general API (per IP). Raise it in tests
+  // (the suite fires far more than a human ever would in one minute).
+  apiRateMax: Number(process.env.API_RATE_MAX) || 300,
 
   // Numbers entered without a country code are assumed to belong to this one
   // (43 = Austria). Always overridable per input by typing +<cc>.
@@ -136,6 +139,8 @@ export const config = {
     process.env.APK_DIR ||
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'downloads'),
   // The public URL of this deployment (used in invite links / landing copy).
+  // Primary domain is example.invalid; example.invalid stays a
+  // working alias for the same backend.
   publicUrl: (process.env.PUBLIC_URL || 'https://example.invalid').replace(/\/$/, ''),
 
   // ---- SMS phone verification (server-side OTP) ----------------------------

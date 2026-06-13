@@ -19,6 +19,13 @@ class PingUser {
   final String messageStorage; // 'server' (default) | 'local'
   final bool showLastSeen; // privacy: share "zuletzt online" (own account only)
 
+  /// Trust badges shown next to the name everywhere. [official] is the system
+  /// "Ping Team" account; [verified] is a Ping staff/admin check; [premium] is a
+  /// Ping Premium member. At most one is rendered, in that priority order.
+  final bool official;
+  final bool verified;
+  final bool premium;
+
   const PingUser({
     required this.id,
     required this.phone,
@@ -34,7 +41,13 @@ class PingUser {
     this.isAdmin = false,
     this.messageStorage = 'server',
     this.showLastSeen = true,
+    this.official = false,
+    this.verified = false,
+    this.premium = false,
   });
+
+  /// Whether this account carries any trust badge at all.
+  bool get hasBadge => official || verified || premium;
 
   Color get color {
     final hex = avatarColor.replaceFirst('#', '');
@@ -75,6 +88,9 @@ class PingUser {
     bool? isAdmin,
     String? messageStorage,
     bool? showLastSeen,
+    bool? official,
+    bool? verified,
+    bool? premium,
   }) =>
       PingUser(
         id: id,
@@ -91,6 +107,9 @@ class PingUser {
         isAdmin: isAdmin ?? this.isAdmin,
         messageStorage: messageStorage ?? this.messageStorage,
         showLastSeen: showLastSeen ?? this.showLastSeen,
+        official: official ?? this.official,
+        verified: verified ?? this.verified,
+        premium: premium ?? this.premium,
       );
 
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
@@ -108,6 +127,9 @@ class PingUser {
         isAdmin: (json['isAdmin'] ?? false) as bool,
         messageStorage: (json['messageStorage'] ?? 'server') as String,
         showLastSeen: (json['showLastSeen'] ?? true) as bool,
+        official: (json['official'] ?? false) as bool,
+        verified: (json['verified'] ?? false) as bool,
+        premium: (json['premium'] ?? false) as bool,
       );
 }
 

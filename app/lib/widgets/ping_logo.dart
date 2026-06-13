@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Ping's logo: a rounded chat bubble with three "signal" dots and a little
-/// tail, drawn entirely in code so it scales crisply at any size and tints with
-/// the brand blue. Used on the splash, login and about surfaces.
+/// Ping's logo: a rounded chat bubble with a "ping" sonar signal (a dot sending
+/// out two radiating waves) and a little tail, drawn entirely in code so it
+/// scales crisply at any size and tints with the brand blue. Used on the splash,
+/// login and about surfaces.
 class PingLogo extends StatelessWidget {
   final double size;
 
@@ -35,20 +36,41 @@ class PingLogo extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF0A84FF), Color(0xFF34B7F1)],
+          colors: [Color(0xFF0B6BFF), Color(0xFF1E9BFF), Color(0xFF38D0FF)],
+          stops: [0.0, 0.55, 1.0],
         ),
-        borderRadius: BorderRadius.circular(size * 0.26),
+        borderRadius: BorderRadius.circular(size * 0.27),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0A84FF).withValues(alpha: 0.35),
-            blurRadius: size * 0.22,
-            offset: Offset(0, size * 0.08),
+            color: const Color(0xFF0A84FF).withValues(alpha: 0.45),
+            blurRadius: size * 0.26,
+            offset: Offset(0, size * 0.10),
           ),
         ],
       ),
-      child: Padding(
-        padding: EdgeInsets.all(size * 0.24),
-        child: CustomPaint(painter: _PingGlyphPainter(Colors.white)),
+      child: Stack(
+        children: [
+          // A soft top-left sheen gives the tile a glassy, premium finish.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(size * 0.27),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.center,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.28),
+                    Colors.white.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.all(size * 0.24),
+            child: CustomPaint(painter: _PingGlyphPainter(Colors.white)),
+          ),
+        ],
       ),
     );
   }
@@ -62,31 +84,47 @@ class _PingGlyphPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    final paint = Paint()..color = color;
+    final paint = Paint()
+      ..color = color
+      ..isAntiAlias = true;
 
-    // Punching transparent holes needs its own layer.
+    // Punching transparent holes (the sonar signal) needs its own layer.
     canvas.saveLayer(Rect.fromLTWH(0, 0, w, h), Paint());
 
-    // Speech bubble body.
+    // Speech-bubble body with a soft tail at the bottom-left.
     final r = RRect.fromRectAndRadius(
       Rect.fromLTWH(0, 0, w, h * 0.82),
-      Radius.circular(w * 0.28),
+      Radius.circular(w * 0.30),
     );
     final path = Path()..addRRect(r);
-    // Tail at the bottom-left.
-    path.moveTo(w * 0.20, h * 0.74);
-    path.lineTo(w * 0.06, h);
-    path.lineTo(w * 0.42, h * 0.78);
+    path.moveTo(w * 0.20, h * 0.72);
+    path.lineTo(w * 0.05, h * 1.00);
+    path.lineTo(w * 0.44, h * 0.78);
     path.close();
     canvas.drawPath(path, paint);
 
-    // Three "ping" dots punched out of the bubble.
-    final hole = Paint()..blendMode = BlendMode.clear;
-    final cy = h * 0.40;
-    final rad = w * 0.072;
-    for (final cx in [w * 0.32, w * 0.5, w * 0.68]) {
-      canvas.drawCircle(Offset(cx, cy), rad, hole);
-    }
+    // The "ping": a dot at the lower-left sending two sonar waves up-right.
+    final clear = Paint()
+      ..blendMode = BlendMode.clear
+      ..isAntiAlias = true;
+    final origin = Offset(w * 0.36, h * 0.52);
+
+    canvas.drawCircle(origin, w * 0.072, clear);
+
+    final wave = Paint()
+      ..blendMode = BlendMode.clear
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = w * 0.062
+      ..isAntiAlias = true;
+    // Arcs open toward the upper-right (≈ -80° → +6°).
+    const start = -1.40;
+    const sweep = 1.50;
+    canvas.drawArc(
+        Rect.fromCircle(center: origin, radius: w * 0.20), start, sweep, false, wave);
+    canvas.drawArc(
+        Rect.fromCircle(center: origin, radius: w * 0.30), start, sweep, false, wave);
+
     canvas.restore();
   }
 

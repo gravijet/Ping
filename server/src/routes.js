@@ -43,6 +43,8 @@ import {
   adminStatusSchema,
   pushTokenSchema,
   messageStorageSchema,
+  postCreateSchema,
+  postUpdateSchema,
 } from './validation.js';
 import {
   createUser,
@@ -60,6 +62,7 @@ import {
   setAbout,
   setAdmin,
   setDisabled,
+  setPremium,
   setMessageStorage,
   setShowLastSeen,
   deleteUser,
@@ -158,6 +161,17 @@ import {
   removeUserPushToken,
   allPushTokens,
 } from './pushRepo.js';
+import {
+  createPost,
+  updatePost,
+  deletePost,
+  getPostById,
+  getPublicPostBySlug,
+  listPublicPosts,
+  adminListPosts,
+  countPublishedPosts,
+  postView,
+} from './postsRepo.js';
 
 export const router = Router();
 
@@ -286,6 +300,58 @@ function deliverOfficialMessage(targetUserId, { body, type = 'text', attachment 
   pushForMessage(freshChat, msg, OFFICIAL_USER_ID);
   return true;
 }
+
+// ---- Public content (newsroom, changelog, live stats) ---------------------
+
+// The marketing site (and the in-app "Neuigkeiten" view) read these. Only
+// published posts are returned; drafts stay in the admin portal.
+router.get(
+  '/news',
+  h(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    res.json({ posts: listPublicPosts('news', limit) });
+  })
+);
+
+router.get(
+  '/news/:slug',
+  h(async (req, res) => {
+    const row = getPublicPostBySlug(req.params.slug);
+    if (!row || row.kind !== 'news') {
+      return res.status(404).json({ error: 'Diesen Beitrag gibt es nicht.' });
+    }
+    res.json({ post: postView(row) });
+  })
+);
+
+router.get(
+  '/changelog',
+  h(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    res.json({ posts: listPublicPosts('changelog', limit) });
+  })
+);
+
+// Non-sensitive aggregate counters for the landing page's live stat band, plus
+// a tiny system snapshot for the public status page. No per-user data.
+router.get(
+  '/public/stats',
+  h(async (_req, res) => {
+    res.json({
+      version: config.version,
+      users: countUsers(),
+      messages: countMessages(),
+      chats: countChats(),
+      groups: countGroups(),
+      statuses: countActiveStatuses(),
+      online: onlineUserIds().length,
+      news: countPublishedPosts('news'),
+      changelog: countPublishedPosts('changelog'),
+      uptimeSec: Math.round(process.uptime()),
+      time: Date.now(),
+    });
+  })
+);
 
 // ---- Auth ------------------------------------------------------------------
 
@@ -1660,6 +1726,8 @@ router.get(
         newUsers7d: countUsersSince(tNow - 7 * day),
         messages24h: countMessagesSince(tNow - day),
         messages7d: countMessagesSince(tNow - 7 * day),
+        news: countPublishedPosts('news'),
+        changelog: countPublishedPosts('changelog'),
       },
       charts: {
         usersPerDay: usersPerDay(7),
@@ -1728,6 +1796,53 @@ router.get(
   '/admin/broadcasts',
   requireAdmin,
   h(async (_req, res) => res.json({ broadcasts: listBroadcasts(30) }))
+);
+
+// ---- Admin: newsroom + changelog (content management) ----------------------
+
+// List posts (drafts included). Filter by ?kind=news|changelog.
+router.get(
+  '/admin/posts',
+  requireAdmin,
+  h(async (req, res) => {
+    const kind = ['news', 'changelog'].includes(req.query.kind) ? req.query.kind : '';
+    res.json({ posts: adminListPosts(kind) });
+  })
+);
+
+router.post(
+  '/admin/posts',
+  requireAdmin,
+  h(async (req, res) => {
+    const data = parse(postCreateSchema, req.body);
+    const post = createPost(data);
+    res.status(201).json({ post: postView(post) });
+  })
+);
+
+router.patch(
+  '/admin/posts/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    if (!getPostById(req.params.id)) {
+      return res.status(404).json({ error: 'Diesen Beitrag gibt es nicht.' });
+    }
+    const data = parse(postUpdateSchema, req.body);
+    const post = updatePost(req.params.id, data);
+    res.json({ post: postView(post) });
+  })
+);
+
+router.delete(
+  '/admin/posts/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    if (!getPostById(req.params.id)) {
+      return res.status(404).json({ error: 'Diesen Beitrag gibt es nicht.' });
+    }
+    deletePost(req.params.id);
+    res.status(204).end();
+  })
 );
 
 // ---- Admin: chat moderation ----
@@ -1835,10 +1950,13 @@ router.patch(
   '/admin/users/:id',
   requireAdmin,
   h(async (req, res) => {
-    const { displayName, password, isAdmin, email, about, disabled } = parse(
-      adminUpdateSchema,
-      req.body
-    );
+    // The official "Ping Team" system account is protected — it can't be renamed,
+    // demoted, banned or otherwise edited away.
+    if (req.params.id === OFFICIAL_USER_ID) {
+      return res.status(403).json({ error: 'Das Ping-Team-Konto ist geschützt.' });
+    }
+    const { displayName, password, isAdmin, email, about, disabled, premium } =
+      parse(adminUpdateSchema, req.body);
     let user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
     if (email !== undefined) {
@@ -1848,14 +1966,17 @@ router.patch(
       }
       user = setEmail(user.id, email);
     }
-    // Track what changed so we only emit the live updates that matter.
-    const profileChanged = displayName !== undefined || about !== undefined;
+    // Track what changed so we only emit the live updates that matter. A premium
+    // grant changes the public badge, so it counts as a profile change too.
+    const profileChanged =
+      displayName !== undefined || about !== undefined || premium !== undefined;
     const nowDisabled = disabled === true && !user.disabled;
 
     if (displayName !== undefined) user = setName(user.id, displayName);
     if (about !== undefined) user = setAbout(user.id, about);
     if (isAdmin !== undefined) user = setAdmin(user.id, isAdmin);
     if (disabled !== undefined) user = setDisabled(user.id, disabled);
+    if (premium !== undefined) user = setPremium(user.id, premium);
     if (password !== undefined) {
       user = setPassword(user.id, await hashPassword(password));
     }
@@ -1923,6 +2044,50 @@ router.post(
   })
 );
 
+// Upload media for an official status/message from the admin portal. The portal
+// authenticates with the admin token (not a user JWT), so it can't use the
+// user-only /uploads route — this admin-gated twin stores the file under the
+// official account so it can be attached to /admin/status.
+router.post(
+  '/admin/upload',
+  requireAdmin,
+  express.raw({ type: () => true, limit: config.maxUploadBytes }),
+  h(async (req, res) => {
+    ensureOfficialUser();
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'Keine Datei empfangen.' });
+    }
+    let mime = (req.headers['content-type'] || 'application/octet-stream')
+      .toString()
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const sniffed = sniffImage(buf);
+    const isGif = buf.length > 6 && buf.toString('ascii', 0, 4) === 'GIF8';
+    if (mime.startsWith('image/') || sniffed || isGif) {
+      if (sniffed) mime = sniffed;
+      else if (isGif) mime = 'image/gif';
+      else {
+        return res
+          .status(400)
+          .json({ error: 'Dieses Bildformat wird nicht unterstützt.' });
+      }
+    }
+    let name = null;
+    const rawName = req.headers['x-filename'];
+    if (rawName) {
+      try {
+        name = decodeURIComponent(rawName.toString()).slice(0, 200);
+      } catch {
+        name = rawName.toString().slice(0, 200);
+      }
+    }
+    const meta = saveUpload({ buf, mime, name, ownerId: OFFICIAL_USER_ID });
+    res.status(201).json({ upload: meta });
+  })
+);
+
 // Post an official status ("story") from the Ping Team that every user sees.
 router.post(
   '/admin/status',
@@ -1976,6 +2141,9 @@ router.delete(
   '/admin/users/:id',
   requireAdmin,
   h(async (req, res) => {
+    if (req.params.id === OFFICIAL_USER_ID) {
+      return res.status(403).json({ error: 'Das Ping-Team-Konto ist geschützt.' });
+    }
     const user = getUserById(req.params.id);
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
     // Gather everyone who shares a chat with them before we tear the rows down,

@@ -6,6 +6,7 @@ import '../models/status.dart';
 import '../services/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/avatar.dart';
+import '../widgets/verified_badge.dart';
 
 /// Full-screen story viewer that steps through one or more contacts' statuses
 /// with timed progress bars, tap-to-advance and (for your own) a viewer count.
@@ -116,7 +117,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                           imageUrl: state.avatarUrl(v.user),
                           imageHeaders: state.authHeaders,
                         ),
-                        title: Text(v.user.label),
+                        title: NameWithBadge(name: v.user.label, user: v.user),
                         subtitle: Text(TimeFormat.messageTime(
                             DateTime.fromMillisecondsSinceEpoch(v.viewedAt))),
                       ),
@@ -356,14 +357,18 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                widget.mine ? 'Mein Status' : group.user.label,
+              NameWithBadge(
+                name: widget.mine ? 'Mein Status' : group.user.label,
+                user: widget.mine ? null : group.user,
+                glow: group.user.official,
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.w700),
               ),
               Text(
-                TimeFormat.messageTime(
-                    DateTime.fromMillisecondsSinceEpoch(status.createdAt)),
+                group.user.official && !widget.mine
+                    ? 'Offizielles Update · ${TimeFormat.messageTime(DateTime.fromMillisecondsSinceEpoch(status.createdAt))}'
+                    : TimeFormat.messageTime(
+                        DateTime.fromMillisecondsSinceEpoch(status.createdAt)),
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],

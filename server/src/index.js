@@ -29,7 +29,9 @@ export function createApp() {
           // Allow Google Fonts on the landing page + admin portal for nicer type.
           'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
           'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
-          'img-src': ["'self'", 'data:'],
+          // Allow https images so the newsroom can show externally-hosted cover
+          // images alongside our own /api/uploads/ ones.
+          'img-src': ["'self'", 'data:', 'https:'],
           // Helmet enables `upgrade-insecure-requests` by default, which makes
           // the browser rewrite the admin portal's same-origin `fetch('/api/…')`
           // calls to https://. When Ping is served over plain HTTP (a self-hosted
@@ -101,7 +103,7 @@ export function createApp() {
     '/api',
     rateLimit({
       windowMs: 60 * 1000,
-      max: 300,
+      max: config.apiRateMax,
       standardHeaders: true,
       legacyHeaders: false,
       keyGenerator: clientKey,

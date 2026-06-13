@@ -209,6 +209,34 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON broadcasts(created_at);
+
+  -- Public content the marketing site + in-app "Neuigkeiten" surface: newsroom
+  -- articles and changelog entries. One table, distinguished by the kind column.
+  -- Drafts (published = 0) are visible only in the admin portal.
+  CREATE TABLE IF NOT EXISTS posts (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL CHECK (kind IN ('news','changelog')),
+    slug         TEXT NOT NULL UNIQUE,
+    title        TEXT NOT NULL,
+    summary      TEXT NOT NULL DEFAULT '',
+    body         TEXT NOT NULL DEFAULT '',
+    -- Newsroom: an editorial category ("Produkt", "Unternehmen" …).
+    category     TEXT NOT NULL DEFAULT '',
+    -- Changelog: the release version this entry documents (e.g. "2.6.0").
+    version      TEXT NOT NULL DEFAULT '',
+    -- Changelog: the kind of change — 'feature' | 'improvement' | 'fix' | 'security'.
+    tag          TEXT NOT NULL DEFAULT '',
+    -- Optional cover image (an /api/uploads/<id> URL or any absolute https URL).
+    cover        TEXT NOT NULL DEFAULT '',
+    pinned       INTEGER NOT NULL DEFAULT 0,
+    published    INTEGER NOT NULL DEFAULT 1,
+    author       TEXT NOT NULL DEFAULT 'Ping Team',
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    published_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_posts_kind
+    ON posts(kind, published, created_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -291,6 +319,11 @@ function ensureColumns() {
   if (!userCols.includes('show_last_seen')) {
     // Privacy: when 0, other people never see this user's "zuletzt online".
     db.exec('ALTER TABLE users ADD COLUMN show_last_seen INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!userCols.includes('premium')) {
+    // Ping Premium: an admin-granted flag that surfaces a premium badge next to
+    // the user's name everywhere. Cosmetic today; the hook for paid perks later.
+    db.exec('ALTER TABLE users ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   }
   const memberCols = db.prepare('PRAGMA table_info(chat_members)').all().map((c) => c.name);
   if (!memberCols.includes('archived')) {

@@ -43,7 +43,9 @@ const serverLabel = 'Ping Cloud';
 String _resolveDefaultServer() {
   const override = String.fromEnvironment('PING_SERVER');
   if (override.isNotEmpty) return override;
-  const packed = 'aHR0cHM6Ly9waW5nLm91dGRleC1ob3N0aW5nLmRl';
+  // Primary domain (example.invalid). The old example.invalid host
+  // keeps serving the same backend, so existing installs keep working.
+  const packed = 'aHR0cHM6Ly9waW5nLmJlbmphbWluYmVyZ2VyLmF0';
   try {
     return utf8.decode(base64.decode(packed));
   } catch (_) {
@@ -1493,6 +1495,23 @@ class AppState extends ChangeNotifier {
       'type': 'video',
       'attachment': att.toJson(),
       if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
+    });
+    await loadStatus();
+  }
+
+  /// Post an official "Ping Team" status that every user sees (admin only).
+  /// Supports a coloured text card or an image/video with an optional caption.
+  Future<void> postOfficialStatus({
+    required String type, // 'text' | 'image' | 'video'
+    Attachment? attachment,
+    String? body,
+    String? bgColor,
+  }) async {
+    await _api.post('/admin/status', {
+      'type': type,
+      if (attachment != null) 'attachment': attachment.toJson(),
+      if (body != null && body.trim().isNotEmpty) 'body': body.trim(),
+      if (bgColor != null) 'bgColor': bgColor,
     });
     await loadStatus();
   }

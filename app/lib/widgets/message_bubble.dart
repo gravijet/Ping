@@ -6,6 +6,7 @@ import '../services/audio_player_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import 'receipt_ticks.dart';
+import 'verified_badge.dart';
 
 /// A single chat bubble, WhatsApp-style: mine on the right in a tinted blue,
 /// others on the left in a light surface, with the time + ticks tucked into the
@@ -16,6 +17,13 @@ class MessageBubble extends StatelessWidget {
   final bool showSenderName;
   final String? senderName;
   final Color senderColor;
+
+  /// A trust badge to show beside the sender name in groups (verified/premium).
+  final BadgeKind? senderBadge;
+
+  /// This bubble is an official "Ping Team" broadcast → branded, unmistakable
+  /// styling with a header seal.
+  final bool official;
   final Message? repliedTo;
   final String? repliedToSender;
   final VoidCallback? onLongPress;
@@ -56,6 +64,8 @@ class MessageBubble extends StatelessWidget {
     this.showSenderName = false,
     this.senderName,
     this.senderColor = Colors.indigo,
+    this.senderBadge,
+    this.official = false,
     this.repliedTo,
     this.repliedToSender,
     this.onLongPress,
@@ -92,6 +102,8 @@ class MessageBubble extends StatelessWidget {
     final hasText = message.body.trim().isNotEmpty;
     // Emoji-only messages render large and bubble-less, like a sticker.
     final jumbo = !hasMedia && message.isEmojiOnly && repliedTo == null;
+    // An incoming official "Ping Team" broadcast → branded, trustworthy bubble.
+    final officialIn = official && !isMine && !jumbo;
 
     // A whisper of the accent at the tail corner gives my own bubbles depth —
     // the difference between a flat box and something that feels designed.
@@ -112,8 +124,16 @@ class MessageBubble extends StatelessWidget {
       padding:
           EdgeInsets.fromLTRB(hasMedia ? 5 : 12, 7, hasMedia ? 5 : 12, 7),
       decoration: BoxDecoration(
-        color: jumbo ? Colors.transparent : (gradient == null ? bg : null),
+        color: jumbo
+            ? Colors.transparent
+            : officialIn
+                ? (Color.lerp(bg, scheme.primary, 0.07) ?? bg)
+                : (gradient == null ? bg : null),
         gradient: gradient,
+        border: officialIn
+            ? Border.all(
+                color: scheme.primary.withValues(alpha: 0.45), width: 1.2)
+            : null,
         borderRadius: BorderRadius.only(
           topLeft: radius,
           topRight: radius,
@@ -124,8 +144,10 @@ class MessageBubble extends StatelessWidget {
             ? null
             : [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.10),
-                  blurRadius: 4,
+                  color: officialIn
+                      ? scheme.primary.withValues(alpha: 0.18)
+                      : Colors.black.withValues(alpha: 0.10),
+                  blurRadius: officialIn ? 8 : 4,
                   offset: const Offset(0, 1.5),
                 ),
               ],
@@ -134,16 +156,49 @@ class MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (officialIn)
+            Padding(
+              padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 1, 0, 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const PingBadge(kind: BadgeKind.official, size: 15),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Ping-Team',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (showSenderName && !isMine)
             Padding(
               padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 1, 0, 3),
-              child: Text(
-                senderName ?? '',
-                style: TextStyle(
-                  color: senderColor,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      senderName ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: senderColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  if (senderBadge != null) ...[
+                    const SizedBox(width: 4),
+                    PingBadge(kind: senderBadge!, size: 13),
+                  ],
+                ],
               ),
             ),
           if (repliedTo != null)

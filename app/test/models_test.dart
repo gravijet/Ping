@@ -45,6 +45,42 @@ void main() {
       expect(u.hasPassword, true);
       expect(u.initials, 'SA');
     });
+
+    test('parses trust badge flags and defaults them to false', () {
+      final plain = PingUser.fromJson({
+        'id': '4',
+        'phone': '+491700000004',
+        'displayName': 'Plain',
+        'avatarColor': '#26A69A',
+      });
+      expect(plain.official, false);
+      expect(plain.verified, false);
+      expect(plain.premium, false);
+      expect(plain.hasBadge, false);
+
+      final team = PingUser.fromJson({
+        'id': 'ping-official',
+        'displayName': 'Ping Team',
+        'avatarColor': '#5C6BC0',
+        'official': true,
+        'verified': false,
+        'premium': false,
+      });
+      expect(team.official, true);
+      expect(team.hasBadge, true);
+      // copyWith preserves the flags.
+      expect(team.copyWith(displayName: 'X').official, true);
+
+      final premium = PingUser.fromJson({
+        'id': '5',
+        'phone': '+491700000005',
+        'displayName': 'Gold',
+        'avatarColor': '#FFB300',
+        'premium': true,
+      });
+      expect(premium.premium, true);
+      expect(premium.hasBadge, true);
+    });
   });
 
   group('ContactMatch', () {

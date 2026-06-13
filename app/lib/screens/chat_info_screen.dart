@@ -8,6 +8,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../services/wallpaper_service.dart';
 import '../widgets/avatar.dart';
+import '../widgets/verified_badge.dart';
 import '../widgets/wallpaper_picker.dart';
 import '../utils/format.dart';
 import 'add_members_screen.dart';
@@ -122,9 +123,14 @@ class ChatInfoScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Flexible(
-                  child: Text(chat.title,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall),
+                  child: NameWithBadge(
+                    name: chat.title,
+                    user: chat.isGroup ? null : chat.otherUser,
+                    glow: chat.otherUser?.official == true,
+                    badgeSize: 22,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
                 ),
                 if (isOwner) ...[
                   const SizedBox(width: 4),

@@ -7,6 +7,7 @@ import '../services/app_state.dart';
 import '../utils/format.dart';
 import 'avatar.dart';
 import 'receipt_ticks.dart';
+import 'verified_badge.dart';
 
 class ChatTile extends StatelessWidget {
   final Chat chat;
@@ -67,10 +68,10 @@ class ChatTile extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          chat.displayTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        child: NameWithBadge(
+                          name: chat.displayTitle,
+                          user: chat.isGroup ? null : chat.otherUser,
+                          badgeSize: 17,
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 16,

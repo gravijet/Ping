@@ -11,6 +11,7 @@ import '../services/notification_target.dart';
 import '../widgets/brand.dart';
 import '../widgets/chat_tile.dart';
 import '../widgets/update_sheet.dart';
+import '../widgets/verified_badge.dart';
 import 'app_navigation.dart';
 import 'archived_chats_screen.dart';
 import 'chat_screen.dart';
@@ -116,8 +117,23 @@ class _HomeScreenState extends State<HomeScreen>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.campaign_rounded),
-        title: Text(title),
+        icon: const PingBadge(kind: BadgeKind.official, size: 40, glow: true),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Offizielle Mitteilung',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
+                color: Theme.of(ctx).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(title, textAlign: TextAlign.center),
+          ],
+        ),
         content: Text(body),
         actions: [
           if (hasTarget)

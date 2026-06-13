@@ -217,6 +217,12 @@ export function setDisabled(id, disabled) {
   return stmts.userById.get(id);
 }
 
+/** Ping Premium: grant or revoke the premium badge (admin only). */
+export function setPremium(id, premium) {
+  db.prepare('UPDATE users SET premium = ? WHERE id = ?').run(premium ? 1 : 0, id);
+  return stmts.userById.get(id);
+}
+
 /** Privacy: whether other people may see this user's "zuletzt online". */
 export function setShowLastSeen(id, show) {
   db.prepare('UPDATE users SET show_last_seen = ? WHERE id = ?').run(show ? 1 : 0, id);
@@ -330,6 +336,7 @@ export function matchContacts(phones, emails, exceptId) {
 // can only reach people you already know (via contacts or exact lookup).
 export function publicUser(u) {
   if (!u) return null;
+  const official = u.id === OFFICIAL_USER_ID;
   return {
     id: u.id,
     displayName: u.display_name,
@@ -337,6 +344,13 @@ export function publicUser(u) {
     about: u.about,
     hasAvatar: !!u.avatar_mime,
     avatarVersion: u.avatar_version,
+    // Trust badges, surfaced next to the name across the app:
+    //  • official → the unmistakable "Ping Team" seal (system account),
+    //  • verified → a blue check for Ping staff/admins,
+    //  • premium  → a gold badge for Ping Premium members.
+    official,
+    verified: !official && !!u.is_admin,
+    premium: !!u.premium,
     // Hidden when the user turned "zuletzt online" off in their privacy
     // settings (the column may be missing on rows from very old exports).
     lastSeen: u.show_last_seen === 0 ? null : u.last_seen,
@@ -370,6 +384,7 @@ export function adminUser(u) {
     avatarColor: u.avatar_color,
     hasAvatar: !!u.avatar_mime,
     isAdmin: !!u.is_admin,
+    premium: !!u.premium,
     disabled: !!u.disabled,
     createdAt: u.created_at,
     lastSeen: u.last_seen,

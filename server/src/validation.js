@@ -195,6 +195,7 @@ export const adminUpdateSchema = z
     email: emailSchema.optional(),
     about: aboutSchema.optional(),
     disabled: z.boolean().optional(),
+    premium: z.boolean().optional(),
   })
   .refine(
     (d) =>
@@ -203,7 +204,8 @@ export const adminUpdateSchema = z
       d.isAdmin !== undefined ||
       d.email !== undefined ||
       d.about !== undefined ||
-      d.disabled !== undefined,
+      d.disabled !== undefined ||
+      d.premium !== undefined,
     { message: 'Nichts zu ändern.' }
   );
 
@@ -317,6 +319,44 @@ export const expireTimerSchema = z.object({
     .max(365 * 86400, 'Höchstens 1 Jahr.')
     .refine((s) => s === 0 || s >= 60, 'Mindestens 1 Minute.'),
 });
+
+// ---- Newsroom + changelog (public content) ---------------------------------
+
+// A cover image / link: either one of our own uploads or an absolute https URL.
+const coverSchema = z
+  .string()
+  .trim()
+  .max(512)
+  .refine(
+    (v) => v === '' || v.startsWith('/api/uploads/') || /^https:\/\//.test(v),
+    'Ungültige Bild-URL.'
+  );
+
+// A newsroom article or a changelog entry. `kind` decides which extra fields
+// matter (category for news; version + tag for changelog) but all are optional.
+export const postCreateSchema = z.object({
+  kind: z.enum(['news', 'changelog']),
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib einen Titel ein.')
+    .max(140, 'Der Titel ist zu lang.'),
+  slug: z.string().trim().max(80).optional(),
+  summary: z.string().trim().max(400, 'Die Kurzbeschreibung ist zu lang.').optional(),
+  body: z.string().max(20000, 'Der Text ist zu lang.').optional(),
+  category: z.string().trim().max(40).optional(),
+  version: z.string().trim().max(40).optional(),
+  tag: z.enum(['feature', 'improvement', 'fix', 'security', '']).optional(),
+  cover: coverSchema.optional(),
+  author: z.string().trim().max(60).optional(),
+  pinned: z.boolean().optional(),
+  published: z.boolean().optional(),
+});
+
+// Editing: every field optional, but at least one must be present.
+export const postUpdateSchema = postCreateSchema
+  .partial()
+  .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
 
 export const pushTokenSchema = z.object({
   token: z.string().trim().min(1, 'Token fehlt.').max(4096),

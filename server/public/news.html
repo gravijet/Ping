@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Newsroom · Ping</title>
+  <meta name="description" content="Neuigkeiten, Ankündigungen und Geschichten rund um Ping – den schnellen, werbefreien Messenger." />
+  <meta property="og:title" content="Ping Newsroom" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/site.css">
+  <style>
+    .news-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+    @media(max-width:880px){.news-grid{grid-template-columns:1fr 1fr}}
+    @media(max-width:560px){.news-grid{grid-template-columns:1fr}}
+    .post{display:flex;flex-direction:column;background:var(--glass);border:1px solid var(--line);border-radius:22px;overflow:hidden;transition:transform .25s,border-color .25s;color:var(--text)}
+    .post:hover{transform:translateY(-6px);border-color:rgba(52,183,241,.4)}
+    .post .cover{height:172px;background:linear-gradient(135deg,rgba(10,132,255,.5),rgba(108,92,255,.5));background-size:cover;background-position:center;position:relative}
+    .post .cover .cat{position:absolute;left:14px;top:14px}
+    .post .body{padding:20px;display:flex;flex-direction:column;gap:9px;flex:1}
+    .post h3{margin:0;font-size:19px;font-weight:700;letter-spacing:-.3px;line-height:1.25}
+    .post p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55}
+    .post .meta{margin-top:auto;color:var(--faint);font-size:12.5px;display:flex;gap:10px;align-items:center;padding-top:4px}
+    .post.feature-post{grid-column:1 / -1;flex-direction:row}
+    .post.feature-post .cover{width:46%;height:auto;min-height:260px}
+    .post.feature-post .body{padding:30px;justify-content:center}
+    .post.feature-post h3{font-size:28px}
+    .post.feature-post p{font-size:16px}
+    @media(max-width:760px){.post.feature-post{flex-direction:column}.post.feature-post .cover{width:auto;min-height:180px}}
+
+    /* single article */
+    .article{max-width:760px;margin:0 auto}
+    .article .cover{height:320px;border-radius:22px;margin:8px 0 26px;background:linear-gradient(135deg,rgba(10,132,255,.5),rgba(108,92,255,.5));background-size:cover;background-position:center}
+    .article h1{font-size:clamp(30px,5vw,46px);letter-spacing:-1.2px;margin:0 0 14px;font-weight:800;line-height:1.08}
+    .article .lead{color:var(--muted);font-size:19px;margin:0 0 18px}
+    .article .ameta{display:flex;gap:12px;align-items:center;color:var(--faint);font-size:14px;margin-bottom:24px;padding-bottom:24px;border-bottom:1px solid var(--line)}
+    .article .content{font-size:17px;line-height:1.75;color:#dbe6f4}
+    .article .content h3{font-size:22px;margin:32px 0 10px;color:var(--text)}
+    .article .content p{margin:0 0 18px}
+    .article .content ul{margin:0 0 18px;padding-left:22px;display:flex;flex-direction:column;gap:8px}
+    .back{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-weight:600;margin-bottom:10px}
+    .back:hover{color:var(--text)}
+    .empty{text-align:center;color:var(--muted);padding:50px 0}
+    .sk-card{height:300px;border-radius:22px}
+  </style>
+</head>
+<body data-active="news">
+  <div id="nav"></div>
+
+  <main class="wrap" id="root">
+    <!-- filled by JS -->
+    <div class="page-head"><div class="eyebrow">Newsroom</div><h1>Neuigkeiten von Ping</h1>
+      <p>Produkt-Updates, Ankündigungen und Geschichten – direkt vom Team.</p></div>
+    <div class="news-grid">
+      <div class="sk-card skeleton"></div><div class="sk-card skeleton"></div><div class="sk-card skeleton"></div>
+    </div>
+  </main>
+
+  <div id="footer"></div>
+  <script src="/site.js"></script>
+  <script>
+    const root = document.getElementById('root');
+    const P = window.Ping;
+
+    function coverStyle(cover){ return cover ? `style="background-image:linear-gradient(rgba(5,8,15,.15),rgba(5,8,15,.45)),url('${P.esc(cover)}')"` : ''; }
+
+    function card(p, feature){
+      const cat = p.category ? `<span class="pill news cat">${P.esc(p.category)}</span>` : '';
+      return `<a class="post ${feature?'feature-post':''}" href="/news/${P.esc(p.slug)}">
+        <div class="cover" ${coverStyle(p.cover)}>${cat}</div>
+        <div class="body">
+          <h3>${P.esc(p.title)}</h3>
+          <p>${P.esc(p.summary||'')}</p>
+          <div class="meta">${P.esc(p.author||'Ping Team')} · ${P.fmtDate(p.publishedAt||p.createdAt)}</div>
+        </div>
+      </a>`;
+    }
+
+    async function renderList(){
+      let data;
+      try{ data = await P.json('/api/news'); }catch{ root.innerHTML = head() + `<div class="empty">Newsroom gerade nicht erreichbar.</div>`; return; }
+      const posts = data.posts || [];
+      if(!posts.length){ root.innerHTML = head() + `<div class="empty">Noch keine Beiträge. Schau bald wieder vorbei. 👋</div>`; return; }
+      const [first, ...rest] = posts;
+      root.innerHTML = head() +
+        `<div class="news-grid">` + card(first, posts.length>2) + rest.map(p=>card(p,false)).join('') + `</div>`;
+      P.reveal();
+    }
+    function head(){
+      return `<div class="page-head reveal"><div class="eyebrow">Newsroom</div><h1>Neuigkeiten von Ping</h1>
+        <p>Produkt-Updates, Ankündigungen und Geschichten – direkt vom Team.</p></div>`;
+    }
+
+    async function renderArticle(slug){
+      let data;
+      try{ data = await P.json('/api/news/'+encodeURIComponent(slug)); }
+      catch{ root.innerHTML = `<div class="page-head"><h1>Beitrag nicht gefunden</h1><p>Diesen Artikel gibt es nicht (mehr).</p><p><a class="btn sm" href="/news">← Zum Newsroom</a></p></div>`; return; }
+      const p = data.post;
+      document.title = p.title + ' · Ping Newsroom';
+      root.innerHTML = `<article class="article" style="padding-top:40px">
+        <a class="back" href="/news">← Newsroom</a>
+        ${p.category?`<div><span class="pill news">${P.esc(p.category)}</span></div>`:''}
+        <h1>${P.esc(p.title)}</h1>
+        ${p.summary?`<p class="lead">${P.esc(p.summary)}</p>`:''}
+        <div class="ameta">${P.esc(p.author||'Ping Team')} · ${P.fmtDate(p.publishedAt||p.createdAt)}</div>
+        ${p.cover?`<div class="cover" style="background-image:url('${P.esc(p.cover)}')"></div>`:''}
+        <div class="content">${P.richText(p.body)}</div>
+        <div style="margin-top:34px"><a class="btn" href="/download">Ping herunterladen</a></div>
+      </article>`;
+    }
+
+    const m = location.pathname.match(/^\/news\/([^\/]+)\/?$/);
+    if(m) renderArticle(decodeURIComponent(m[1])); else renderList();
+  </script>
+</body>
+</html>
