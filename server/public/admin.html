@@ -1,203 +1,296 @@
 <!doctype html>
-<html lang="de">
+<html lang="de" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Ping · Admin</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      try {
+        var m = localStorage.getItem('ping_admin_theme');
+        var light = m === 'light' || (m !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+        document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root{
-      --bg:#060b14; --panel:rgba(255,255,255,.045); --panel2:rgba(255,255,255,.07);
-      --line:rgba(255,255,255,.10); --text:#eaf2fb; --muted:#90a4be;
-      --brand:#0a84ff; --brand2:#34b7f1; --accent:#6c5cff; --pink:#ff4d8d;
-      --danger:#f0506e; --ok:#22c55e; --warn:#f59e0b;
+    :root {
+      color-scheme: dark;
+      --bg: #07090e; --bg-soft: #0b0e15; --surface: #0e121b; --surface-2: #131825;
+      --raise: rgba(255,255,255,.025); --line: rgba(255,255,255,.09); --line-strong: rgba(255,255,255,.16);
+      --text: #eef2f8; --muted: #9aa7bd; --faint: #677188;
+      --accent: #4d9bff; --accent-press: #2f7df0; --accent-soft: rgba(77,155,255,.14);
+      --mint: #3fe0bd; --ok: #3ddc84; --warn: #f5a623; --danger: #ff5d73;
+      --shadow: 0 24px 60px -28px rgba(0,0,0,.8);
+      --fd: "Bricolage Grotesque","Hanken Grotesk",system-ui,sans-serif;
+      --fb: "Hanken Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      --fm: "JetBrains Mono",ui-monospace,Menlo,monospace;
     }
-    *{box-sizing:border-box}
-    body{margin:0;font-family:"Plus Jakarta Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text);
-      background:
-        radial-gradient(1000px 560px at 0% -8%, rgba(108,92,255,.20), transparent 60%),
-        radial-gradient(900px 520px at 100% 0%, rgba(52,183,241,.14), transparent 55%),
-        var(--bg);
-      min-height:100vh;-webkit-font-smoothing:antialiased}
-    a{color:var(--brand2)}
-    button,input,select,textarea{font:inherit}
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #eef1f8; --bg-soft: #e7ebf4; --surface: #fff; --surface-2: #f6f8fd;
+      --raise: rgba(13,23,45,.015); --line: rgba(13,23,45,.1); --line-strong: rgba(13,23,45,.18);
+      --text: #101626; --muted: #51607a; --faint: #8390a8;
+      --accent: #1f6bff; --accent-press: #1857da; --accent-soft: rgba(31,107,255,.1);
+      --mint: #0fb999; --ok: #14a05a; --warn: #c97a00; --danger: #e23a52;
+      --shadow: 0 18px 50px -30px rgba(20,35,80,.4);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--fb); color: var(--text); background: var(--bg);
+      min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+    .atmos { position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background: radial-gradient(900px 480px at 0% -10%, var(--accent-soft), transparent 60%),
+                  radial-gradient(700px 420px at 100% 0%, rgba(63,224,189,.06), transparent 60%); }
+    a { color: var(--accent); text-decoration: none; }
+    h1,h2,h3,h4 { font-family: var(--fd); margin: 0; letter-spacing: -.02em; }
+    button, input, select, textarea { font: inherit; }
+    .mono { font-family: var(--fm); font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    ::selection { background: var(--accent); color: #fff; }
 
-    /* ---------- login ---------- */
-    .login-wrap{min-height:100vh;display:grid;place-items:center;padding:22px}
-    .login-card{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--line);border-radius:24px;
-      padding:30px;backdrop-filter:blur(16px);box-shadow:0 30px 80px rgba(0,0,0,.5)}
-    .login-card .logo{margin:0 auto 16px}
-    .logo{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--accent));box-shadow:0 10px 30px rgba(10,132,255,.5)}
-    .logo svg{width:30px;height:30px}
-    .login-card h1{text-align:center;font-size:22px;margin:0 0 4px}
-    .login-card .muted{text-align:center}
-    .muted{color:var(--muted)}
-    label{display:block;font-size:12.5px;color:var(--muted);margin:14px 0 6px;font-weight:600}
-    input,select,textarea{width:100%;border-radius:12px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);padding:11px 13px;outline:none;transition:border-color .2s,box-shadow .2s}
-    input:focus,textarea:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(10,132,255,.25)}
-    textarea{resize:vertical;min-height:64px}
-    .btn{cursor:pointer;border:none;border-radius:12px;padding:11px 16px;font-weight:700;color:#fff;
-      background:linear-gradient(135deg,var(--brand),var(--accent));box-shadow:0 10px 26px rgba(10,132,255,.35);transition:transform .14s,box-shadow .14s}
-    .btn:hover{transform:translateY(-1px);box-shadow:0 14px 32px rgba(10,132,255,.5)}
-    .btn.sec{background:var(--panel2);border:1px solid var(--line);color:var(--text);box-shadow:none}
-    .btn.danger{background:linear-gradient(135deg,#f0506e,#ff4d8d);box-shadow:none}
-    .btn.ghost{background:transparent;color:var(--muted);box-shadow:none}
-    .btn.sm{padding:7px 11px;font-size:13px;border-radius:10px}
-    .btn:disabled{opacity:.5;cursor:default}
+    label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
+    input, select, textarea { width: 100%; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-2);
+      color: var(--text); padding: 11px 13px; outline: none; transition: border-color .15s, box-shadow .15s; }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    textarea { resize: vertical; min-height: 70px; }
+    input[type=checkbox] { width: auto; }
 
-    /* ---------- app shell ---------- */
-    .shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
-    .side{position:sticky;top:0;height:100vh;border-right:1px solid var(--line);padding:22px 16px;display:flex;flex-direction:column;
-      background:rgba(255,255,255,.02);backdrop-filter:blur(8px)}
-    .side .brand{display:flex;align-items:center;gap:12px;padding:0 8px 18px}
-    .side .brand .logo{width:42px;height:42px;border-radius:12px}
-    .side .brand b{font-size:18px;letter-spacing:-.3px}
-    .nav{display:flex;flex-direction:column;gap:4px;margin-top:8px}
-    .navitem{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:12px;color:var(--muted);font-weight:600;cursor:pointer;font-size:14.5px;transition:.18s}
-    .navitem .i{width:20px;text-align:center;font-size:16px}
-    .navitem:hover{background:var(--panel);color:var(--text)}
-    .navitem.active{background:linear-gradient(135deg,rgba(10,132,255,.9),rgba(108,92,255,.9));color:#fff;box-shadow:0 8px 22px rgba(10,132,255,.35)}
-    .side .foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--line)}
-    .main{padding:26px 30px 70px;max-width:1180px}
-    .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:8px}
-    .topbar h2{margin:0;font-size:24px;letter-spacing:-.5px}
-    .topbar .muted{font-size:13.5px}
-    .topbar-actions{display:flex;gap:8px;align-items:center}
-    .switch{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;user-select:none}
-    .switch input{width:auto}
-    @media(max-width:840px){
-      .shell{grid-template-columns:1fr}
-      .side{position:static;height:auto;flex-direction:row;align-items:center;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:12px}
-      .side .brand{padding:0 12px 0 4px}.side .brand b{display:none}
-      .nav{flex-direction:row;margin:0}.navitem .lbl{display:none}.navitem{padding:10px}.side .foot{margin:0 0 0 auto;border:none;padding:0}
-      .main{padding:18px}
+    .btn { cursor: pointer; border: 1px solid transparent; border-radius: 11px; padding: 11px 16px; font-weight: 600;
+      font-size: 14px; color: #fff; background: var(--accent); transition: transform .14s, background .14s, border-color .14s;
+      display: inline-flex; align-items: center; gap: 8px; }
+    .btn:hover { background: var(--accent-press); transform: translateY(-1px); }
+    .btn svg { width: 16px; height: 16px; }
+    .btn.sec { background: var(--surface-2); color: var(--text); border-color: var(--line); }
+    .btn.sec:hover { background: var(--surface); border-color: var(--accent); }
+    .btn.ghost { background: transparent; color: var(--muted); border: 1px solid transparent; }
+    .btn.ghost:hover { color: var(--text); background: var(--raise); }
+    .btn.danger { background: var(--danger); }
+    .btn.danger:hover { background: color-mix(in srgb, var(--danger) 80%, #000); }
+    .btn.sm { padding: 7px 11px; font-size: 13px; border-radius: 9px; }
+    .btn:disabled { opacity: .5; cursor: default; transform: none; }
+    .ico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; cursor: pointer;
+      background: var(--raise); border: 1px solid var(--line); color: var(--muted); }
+    .ico:hover { color: var(--text); border-color: var(--line-strong); }
+    .ico svg { width: 17px; height: 17px; }
+
+    /* login */
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 22px; }
+    .login-card { width: 100%; max-width: 392px; background: var(--surface); border: 1px solid var(--line);
+      border-radius: 22px; padding: 32px; box-shadow: var(--shadow); }
+    .logo { width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center;
+      background: linear-gradient(150deg, var(--accent), var(--mint)); }
+    .logo svg { width: 28px; height: 28px; }
+    .login-card .logo { margin: 0 auto 16px; }
+    .login-card h1 { text-align: center; font-size: 22px; }
+    .login-card .muted { text-align: center; font-size: 14px; margin-top: 4px; }
+
+    /* shell */
+    .shell { display: grid; grid-template-columns: 244px 1fr; min-height: 100vh; }
+    .side { position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--line); padding: 22px 14px;
+      display: flex; flex-direction: column; background: var(--bg-soft); }
+    .side .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 20px; font-family: var(--fd);
+      font-weight: 800; font-size: 18px; letter-spacing: -.03em; }
+    .side .brand .logo { width: 36px; height: 36px; border-radius: 10px; }
+    .side .brand .logo svg { width: 20px; height: 20px; }
+    .nav { display: flex; flex-direction: column; gap: 3px; }
+    .navitem { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 10px; color: var(--muted);
+      font-weight: 500; font-size: 14.5px; cursor: pointer; transition: .14s; border: 1px solid transparent; }
+    .navitem svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .navitem:hover { background: var(--raise); color: var(--text); }
+    .navitem.active { background: var(--accent-soft); color: var(--text); border-color: rgba(77,155,255,.25); }
+    .navitem.active svg { color: var(--accent); }
+    .side .spacer { flex: 1; }
+    .side .cmdk { font-family: var(--fm); font-size: 11.5px; color: var(--faint); border: 1px solid var(--line);
+      border-radius: 9px; padding: 9px 12px; display: flex; justify-content: space-between; cursor: pointer; margin-bottom: 10px; }
+    .side .cmdk:hover { border-color: var(--line-strong); color: var(--muted); }
+    .side kbd { font-family: var(--fm); background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+
+    .main { padding: 24px 30px 80px; max-width: 1240px; width: 100%; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 4px; }
+    .topbar h2 { font-size: 25px; }
+    .topbar .sub { font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+    .topbar-actions { display: flex; gap: 8px; align-items: center; }
+    .switch { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; }
+      .side { position: static; height: auto; flex-direction: row; overflow-x: auto; border-right: none;
+        border-bottom: 1px solid var(--line); padding: 10px; align-items: center; }
+      .side .brand { padding: 0 10px 0 4px; } .side .brand span { display: none; }
+      .nav { flex-direction: row; } .navitem span { display: none; } .navitem { padding: 10px; }
+      .side .spacer, .side .cmdk { display: none; } .side .foot { margin-left: auto; }
+      .main { padding: 18px; }
     }
 
-    /* ---------- cards / stats ---------- */
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;margin-top:18px;backdrop-filter:blur(10px)}
-    .card h3{margin:0 0 14px;font-size:16px}
-    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
-    .stat{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px 18px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s}
-    .stat:hover{transform:translateY(-3px);border-color:rgba(52,183,241,.35)}
-    .stat .ic{position:absolute;right:14px;top:14px;font-size:20px;opacity:.5}
-    .stat .n{font-size:30px;font-weight:800;letter-spacing:-1px}
-    .stat .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;font-weight:600}
-    .stat .d{font-size:12px;margin-top:8px;color:var(--ok);font-weight:600}
-    .stat .n.on{color:#4ade80}
-    .two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-    @media(max-width:820px){.two{grid-template-columns:1fr}}
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px; margin-top: 18px; }
+    .card h3 { font-size: 16px; margin-bottom: 4px; }
+    .card .ch { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 880px) { .two { grid-template-columns: 1fr; } }
+    .hint { font-size: 12px; color: var(--faint); margin-top: 8px; }
 
-    /* ---------- charts ---------- */
-    .chart{position:relative;height:170px;padding:18px 4px 26px;display:flex;align-items:flex-end;gap:10px}
-    .gridlines{position:absolute;inset:18px 4px 26px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
-    .gridlines div{border-top:1px dashed rgba(255,255,255,.07);height:0}
-    .bar{flex:1;border-radius:9px 9px 5px 5px;min-height:5px;position:relative;background:linear-gradient(180deg,var(--brand2),var(--brand));transition:height .5s cubic-bezier(.2,.7,.2,1);cursor:default}
-    .bar.alt{background:linear-gradient(180deg,#9a8bff,var(--accent))}
-    .bar:hover{filter:brightness(1.15)}
-    .bar .v{position:absolute;top:-20px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--text);font-weight:700;opacity:0;transition:.2s}
-    .bar:hover .v,.bar.show .v{opacity:1}
-    .bar .x{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--muted)}
+    /* stats */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 1px;
+      background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-top: 18px; }
+    .stat { background: var(--surface); padding: 18px; position: relative; transition: background .18s; }
+    .stat:hover { background: var(--surface-2); }
+    .stat .ic { position: absolute; right: 14px; top: 14px; color: var(--faint); }
+    .stat .ic svg { width: 17px; height: 17px; }
+    .stat .n { font-family: var(--fm); font-size: 27px; font-weight: 700; letter-spacing: -.02em; }
+    .stat .n.on { color: var(--ok); }
+    .stat .l { font-size: 11.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; margin-top: 3px; font-weight: 600; }
+    .stat .d { font-family: var(--fm); font-size: 11.5px; margin-top: 7px; color: var(--ok); }
 
-    /* ---------- tables ---------- */
-    .toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:6px}
-    .toolbar>div{flex:1;min-width:160px}
-    table{width:100%;border-collapse:collapse;font-size:14px}
-    th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-    th{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
-    tbody tr{transition:background .15s}
-    tbody tr.click{cursor:pointer}
-    tbody tr:hover td{background:rgba(255,255,255,.035)}
-    .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
-    .pill.admin{background:rgba(108,92,255,.25);color:#cfc9ff}
-    .pill.on{background:rgba(34,197,94,.2);color:#86efac}
-    .pill.off{background:rgba(144,164,190,.14);color:var(--muted)}
-    .pill.ban{background:rgba(240,80,110,.22);color:#ffb3c0}
-    .rowact{display:flex;gap:6px;justify-content:flex-end}
-    .empty{color:var(--muted);font-size:13.5px;margin-top:14px}
-    .scroll{overflow-x:auto}
+    /* charts */
+    .chart { position: relative; height: 180px; padding: 16px 2px 26px; display: flex; align-items: flex-end; gap: 6px; }
+    .gridlines { position: absolute; inset: 16px 2px 26px; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+    .gridlines div { border-top: 1px dashed var(--line); }
+    .bar { flex: 1; min-height: 4px; border-radius: 5px 5px 3px 3px; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 55%, transparent));
+      position: relative; transition: height .5s cubic-bezier(.2,.7,.2,1); }
+    .bar.alt { background: linear-gradient(180deg, var(--mint), color-mix(in srgb, var(--mint) 55%, transparent)); }
+    .bar .v { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font-family: var(--fm); font-size: 10.5px; color: var(--text); opacity: 0; transition: .15s; }
+    .bar:hover .v { opacity: 1; }
+    .bar .x { position: absolute; bottom: -21px; left: 50%; transform: translateX(-50%); font-family: var(--fm); font-size: 10px; color: var(--faint); }
+    .seg { display: inline-flex; gap: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 11px; padding: 4px; }
+    .seg button { cursor: pointer; border: none; background: transparent; color: var(--muted); font-weight: 600; padding: 7px 14px; border-radius: 8px; font-size: 13.5px; transition: .14s; }
+    .seg button.active { background: var(--accent); color: #fff; }
 
-    /* ---------- modal ---------- */
-    .overlay{position:fixed;inset:0;background:rgba(3,6,12,.66);backdrop-filter:blur(4px);display:grid;place-items:center;z-index:60;padding:18px;animation:fade .2s}
-    @keyframes fade{from{opacity:0}to{opacity:1}}
-    .modal{background:#0c1622;border:1px solid var(--line);border-radius:22px;padding:24px;max-width:520px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 40px 90px rgba(0,0,0,.6)}
-    .modal .mh{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
-    .modal .mh h3{margin:0;font-size:20px}
-    .kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
-    .kv span{color:var(--muted)}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    /* tables */
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .search { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 9px; padding: 0 13px; height: 42px;
+      border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
+    .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .search svg { width: 16px; height: 16px; color: var(--faint); }
+    .search input { border: none; background: none; padding: 0; }
+    .search input:focus { box-shadow: none; }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chips button { cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); padding: 8px 13px;
+      border-radius: 999px; border: 1px solid var(--line); background: var(--surface); transition: .14s; }
+    .chips button:hover { color: var(--text); border-color: var(--line-strong); }
+    .chips button.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th { color: var(--faint); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+    th.sortable { cursor: pointer; user-select: none; }
+    th.sortable:hover { color: var(--text); }
+    th .arr { color: var(--accent); }
+    tbody tr.click { cursor: pointer; }
+    tbody tr:hover td { background: var(--raise); }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 7px; font-family: var(--fm);
+      font-size: 11px; font-weight: 600; letter-spacing: .03em; }
+    .pill.admin { background: var(--accent-soft); color: var(--accent); }
+    .pill.on { background: rgba(61,220,132,.14); color: var(--ok); }
+    .pill.off { background: var(--raise); color: var(--faint); }
+    .pill.ban { background: rgba(255,93,115,.14); color: var(--danger); }
+    .pill.prem { background: rgba(245,166,35,.14); color: var(--warn); }
+    .pill.live { background: rgba(61,220,132,.14); color: var(--ok); }
+    .pill.draft { background: rgba(245,166,35,.14); color: var(--warn); }
+    .pill.pin { background: var(--accent-soft); color: var(--accent); }
+    .pill.feature { background: rgba(61,220,132,.12); color: var(--ok); }
+    .pill.improvement { background: var(--accent-soft); color: var(--accent); }
+    .pill.fix { background: rgba(245,166,35,.12); color: var(--warn); }
+    .pill.security { background: rgba(255,93,115,.12); color: var(--danger); }
+    .rowact { display: flex; gap: 6px; justify-content: flex-end; }
+    .empty { color: var(--muted); font-size: 13.5px; padding: 18px 4px; }
+    .bulkbar { display: none; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--accent);
+      background: var(--accent-soft); border-radius: 12px; margin-bottom: 12px; }
+    .bulkbar.show { display: flex; }
+    .bulkbar b { font-family: var(--fm); }
 
-    .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);opacity:0;background:#0f1d2c;border:1px solid var(--line);padding:13px 20px;border-radius:13px;font-size:14px;transition:.25s;pointer-events:none;z-index:80}
-    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-    .hidden{display:none}
-    .row-inline{display:flex;gap:10px;flex-wrap:wrap}
-    .row-inline>*{flex:1;min-width:150px}
-    .hint{font-size:12px;color:var(--muted);margin-top:6px}
-    .seg{display:inline-flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:5px;margin:14px 0 2px}
-    .seg button{cursor:pointer;border:none;background:transparent;color:var(--muted);font-weight:700;padding:9px 18px;border-radius:10px;font-size:14px;transition:.15s}
-    .seg button.active{background:linear-gradient(135deg,var(--brand),var(--accent));color:#fff;box-shadow:0 6px 18px rgba(10,132,255,.3)}
-    .pill.draft{background:rgba(245,158,11,.18);color:#fcd9a0}
-    .pill.live{background:rgba(34,197,94,.2);color:#86efac}
-    .pill.pin{background:rgba(108,92,255,.22);color:#cfc9ff}
-    .pill.feature{background:rgba(34,197,94,.16);color:#86efac}
-    .pill.improvement{background:rgba(52,183,241,.16);color:#9bdcff}
-    .pill.fix{background:rgba(245,158,11,.16);color:#fcd9a0}
-    .pill.security{background:rgba(240,80,110,.18);color:#ffb3c0}
+    /* preview pane */
+    .prose { font-size: 14.5px; line-height: 1.7; color: var(--text); }
+    .prose h3 { font-family: var(--fd); font-size: 16px; margin: 14px 0 6px; }
+    .prose p { margin: 0 0 10px; } .prose ul { padding-left: 18px; margin: 0 0 10px; }
+    .prose code { font-family: var(--fm); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+
+    /* modal */
+    .overlay { position: fixed; inset: 0; background: rgba(3,6,12,.7); backdrop-filter: blur(4px); display: grid;
+      place-items: center; z-index: 70; padding: 18px; animation: fade .18s; }
+    @keyframes fade { from { opacity: 0; } }
+    .modal { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 20px; padding: 24px;
+      max-width: 540px; width: 100%; max-height: 90vh; overflow: auto; box-shadow: var(--shadow); }
+    .modal.wide { max-width: 700px; }
+    .modal .mh { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .modal .mh h3 { font-size: 20px; }
+    .kv { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+    .kv span { color: var(--muted); } .kv b { font-family: var(--fm); font-weight: 500; }
+    .msgline { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+    .msgline .who { font-weight: 600; min-width: 110px; }
+    .msgline .when { font-family: var(--fm); font-size: 11px; color: var(--faint); margin-left: auto; white-space: nowrap; }
+
+    /* command palette */
+    .cmdpal { position: fixed; inset: 0; background: rgba(3,6,12,.6); backdrop-filter: blur(4px); z-index: 90;
+      display: flex; align-items: flex-start; justify-content: center; padding: 12vh 18px 18px; animation: fade .15s; }
+    .cmdbox { width: 100%; max-width: 560px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px;
+      box-shadow: var(--shadow); overflow: hidden; }
+    .cmdbox input { border: none; border-bottom: 1px solid var(--line); border-radius: 0; padding: 16px 18px; font-size: 16px; background: transparent; }
+    .cmdbox input:focus { box-shadow: none; }
+    .cmdlist { max-height: 56vh; overflow: auto; padding: 8px; }
+    .cmdrow { display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: 10px; cursor: pointer; font-size: 14.5px; }
+    .cmdrow.sel, .cmdrow:hover { background: var(--accent-soft); }
+    .cmdrow svg { width: 17px; height: 17px; color: var(--accent); }
+    .cmdrow .tag { margin-left: auto; font-family: var(--fm); font-size: 11px; color: var(--faint); }
+
+    .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(16px); opacity: 0;
+      background: var(--surface); border: 1px solid var(--line-strong); padding: 12px 18px; border-radius: 12px;
+      font-size: 14px; transition: .22s; pointer-events: none; z-index: 100; box-shadow: var(--shadow); }
+    .toast.show { opacity: 1; transform: translateX(-50%); }
+    .hidden { display: none !important; }
+    .ccount { font-family: var(--fm); font-size: 11px; color: var(--faint); float: right; }
   </style>
 </head>
 <body>
+  <div class="atmos"></div>
+
   <!-- LOGIN -->
   <div id="login" class="login-wrap hidden">
     <div class="login-card">
-      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".96"/><circle cx="9" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="13" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="17" cy="10.5" r="1.5" fill="#0a84ff"/></svg></div>
+      <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="#fff" opacity=".96"/><circle cx="9" cy="10.5" r="1.4" fill="#1f6bff"/><circle cx="13" cy="10.5" r="1.4" fill="#1f6bff"/><circle cx="17" cy="10.5" r="1.4" fill="#1f6bff"/></svg></div>
       <h1>Ping · Admin</h1>
       <p class="muted">Melde dich mit dem Admin-Token an.</p>
       <label>Admin-Token</label>
       <input id="token" type="password" placeholder="••••••••" autocomplete="off" />
-      <div style="margin-top:16px"><button class="btn" id="loginBtn" style="width:100%">Entsperren</button></div>
-      <p id="loginErr" class="muted" style="color:var(--danger);text-align:center"></p>
+      <div style="margin-top:16px"><button class="btn" id="loginBtn" style="width:100%;justify-content:center">Entsperren</button></div>
+      <p id="loginErr" class="muted" style="color:var(--danger)"></p>
     </div>
   </div>
 
   <!-- DASHBOARD -->
   <div id="dash" class="shell hidden">
     <aside class="side">
-      <div class="brand">
-        <div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="white" opacity=".96"/><circle cx="9" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="13" cy="10.5" r="1.5" fill="#0a84ff"/><circle cx="17" cy="10.5" r="1.5" fill="#0a84ff"/></svg></div>
-        <b>Ping Admin</b>
-      </div>
-      <div class="nav">
-        <div class="navitem active" data-tab="overview"><span class="i">📊</span><span class="lbl">Übersicht</span></div>
-        <div class="navitem" data-tab="users"><span class="i">👤</span><span class="lbl">Nutzer</span></div>
-        <div class="navitem" data-tab="broadcast"><span class="i">📣</span><span class="lbl">Durchsagen</span></div>
-        <div class="navitem" data-tab="content"><span class="i">📰</span><span class="lbl">Inhalte</span></div>
-        <div class="navitem" data-tab="config"><span class="i">⚙️</span><span class="lbl">Konfiguration</span></div>
-        <div class="navitem" data-tab="system"><span class="i">🖥️</span><span class="lbl">System</span></div>
-      </div>
-      <div class="foot"><button class="btn ghost" id="logoutBtn">⎋ Abmelden</button></div>
+      <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 1-2Z" fill="#fff" opacity=".96"/><circle cx="9" cy="10.5" r="1.4" fill="#1f6bff"/><circle cx="13" cy="10.5" r="1.4" fill="#1f6bff"/><circle cx="17" cy="10.5" r="1.4" fill="#1f6bff"/></svg></div><span>Ping Admin</span></div>
+      <div class="nav" id="nav"></div>
+      <div class="spacer"></div>
+      <div class="cmdk" id="cmdkHint"><span>Schnellbefehle</span><kbd>⌘K</kbd></div>
+      <div class="foot"><button class="btn ghost" id="logoutBtn" style="width:100%;justify-content:flex-start">Abmelden</button></div>
     </aside>
 
     <main class="main">
       <!-- OVERVIEW -->
       <section data-pane="overview">
-        <div class="topbar"><div><h2>Übersicht</h2><div class="muted">Live-Statistik &amp; Aktivität</div></div>
+        <div class="topbar"><div><h2>Übersicht</h2><div class="sub">Live-Statistik & Aktivität</div></div>
           <div class="topbar-actions">
+            <div class="seg" id="rangeSeg"><button data-d="7" class="active">7T</button><button data-d="14">14T</button><button data-d="30">30T</button></div>
             <label class="switch"><input type="checkbox" id="autoRefresh"> Auto</label>
-            <button class="btn sec sm" data-reload="overview">↻ Aktualisieren</button>
+            <button class="ico" data-reload="overview" title="Aktualisieren"></button>
           </div></div>
         <div class="stats" id="stats"></div>
         <div class="card two">
-          <div><h3>Neue Nutzer · 7 Tage</h3><div class="chart" id="chartUsers"></div></div>
-          <div><h3>Nachrichten · 7 Tage</h3><div class="chart" id="chartMsgs"></div></div>
+          <div><h3>Neue Nutzer</h3><div class="chart" id="chartUsers"></div></div>
+          <div><h3>Nachrichten</h3><div class="chart" id="chartMsgs"></div></div>
         </div>
       </section>
 
       <!-- USERS -->
       <section data-pane="users" class="hidden">
-        <div class="topbar"><div><h2>Nutzer</h2><div class="muted">Konten verwalten, sperren, anschreiben — Änderungen wirken sofort live</div></div>
-          <div class="topbar-actions"><a class="btn sec sm" id="csvBtn">⬇ CSV</a><button class="btn sec sm" data-reload="users">↻</button></div></div>
+        <div class="topbar"><div><h2>Nutzer</h2><div class="sub">Konten verwalten — Änderungen wirken sofort live</div></div>
+          <div class="topbar-actions"><button class="btn sec sm" id="csvBtn">CSV</button><button class="ico" data-reload="users" title="Aktualisieren"></button></div></div>
         <div class="card">
           <h3>Nutzer anlegen</h3>
           <div class="grid2">
@@ -206,48 +299,75 @@
             <div><label>E-Mail</label><input id="c_email" placeholder="user@example.invalid" /></div>
             <div><label>Passwort</label><input id="c_pw" type="text" placeholder="mind. 6 Zeichen" /></div>
           </div>
-          <div style="margin-top:14px;display:flex;gap:14px;align-items:center">
-            <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="c_admin" type="checkbox" style="width:auto" /> Als Admin</label>
+          <div style="margin-top:14px;display:flex;gap:16px;align-items:center">
+            <label class="switch" style="color:var(--text)"><input id="c_admin" type="checkbox"> Als Admin</label>
             <button class="btn" id="createBtn">Anlegen</button>
           </div>
         </div>
         <div class="card">
-          <div class="toolbar"><div><label>Suche (Name, E-Mail, Nummer)</label><input id="q" placeholder="suchen …" /></div></div>
-          <div class="scroll"><table><thead><tr><th>Name</th><th>Nummer</th><th>E-Mail</th><th>Status</th><th>Erstellt</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
-          <p id="empty" class="empty hidden">Keine Nutzer gefunden.</p>
+          <div class="toolbar">
+            <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="q" placeholder="Name, E-Mail oder Nummer …" /></label>
+            <div class="chips" id="userFilters">
+              <button class="active" data-f="">Alle</button><button data-f="online">Online</button>
+              <button data-f="admin">Admins</button><button data-f="disabled">Gesperrt</button><button data-f="premium">Premium</button>
+            </div>
+          </div>
+          <div class="bulkbar" id="bulkbar"><b id="bulkCount">0</b> ausgewählt
+            <span style="flex:1"></span>
+            <button class="btn sec sm" data-bulk="enable">Entsperren</button>
+            <button class="btn sec sm" data-bulk="disable">Sperren</button>
+            <button class="btn danger sm" data-bulk="delete">Löschen</button>
+            <button class="btn ghost sm" data-bulk="clear">✕</button></div>
+          <div class="scroll"><table>
+            <thead><tr>
+              <th style="width:28px"><input type="checkbox" id="selAll"></th>
+              <th class="sortable" data-sort="displayName">Name</th><th>Nummer</th><th>E-Mail</th><th>Status</th>
+              <th class="sortable" data-sort="lastSeen">Zuletzt</th><th class="sortable" data-sort="createdAt">Erstellt</th><th></th>
+            </tr></thead><tbody id="rows"></tbody></table></div>
+          <p id="uCount" class="empty"></p>
+        </div>
+      </section>
+
+      <!-- MODERATION -->
+      <section data-pane="moderation" class="hidden">
+        <div class="topbar"><div><h2>Moderation</h2><div class="sub">Chats einsehen und entfernen</div></div>
+          <button class="ico" data-reload="moderation" title="Aktualisieren"></button></div>
+        <div class="card">
+          <div class="toolbar"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="chatQ" placeholder="Chats durchsuchen …" /></label></div>
+          <div class="scroll"><table><thead><tr><th>Chat</th><th>Typ</th><th>Mitglieder</th><th>Nachrichten</th><th>Letzte Aktivität</th><th></th></tr></thead><tbody id="chatRows"></tbody></table></div>
+          <p id="chatEmpty" class="empty hidden">Keine Chats.</p>
         </div>
       </section>
 
       <!-- BROADCAST -->
       <section data-pane="broadcast" class="hidden">
-        <div class="topbar"><div><h2>Durchsagen</h2><div class="muted">An alle senden – live &amp; als Push, auch wenn die App zu ist</div></div>
-          <button class="btn sec sm" data-reload="broadcast">↻</button></div>
-        <div class="card">
-          <h3>📣 Neue Durchsage</h3>
-          <div class="grid2">
-            <div><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
-            <div><label>Beim Antippen öffnen</label><select id="b_route"></select></div>
+        <div class="topbar"><div><h2>Durchsagen</h2><div class="sub">An alle senden — live & als Push, auch wenn die App zu ist</div></div>
+          <button class="ico" data-reload="broadcast" title="Aktualisieren"></button></div>
+        <div class="two">
+          <div class="card" style="margin-top:0">
+            <h3>Push-Durchsage</h3>
+            <div class="grid2"><div><label>Titel (optional)</label><input id="b_title" placeholder="Ping" /></div>
+              <div><label>Beim Antippen öffnen</label><select id="b_route"></select></div></div>
+            <label>Nachricht <span class="ccount" id="b_count">0</span></label>
+            <textarea id="b_body" maxlength="2000" placeholder="z. B. Neue Datenschutz-Einstellungen verfügbar."></textarea>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="broadcastBtn">An alle senden</button></div>
           </div>
-          <label>Nachricht</label>
-          <textarea id="b_body" placeholder="z. B. Neue Datenschutz-Einstellungen verfügbar – schau sie dir an."></textarea>
-          <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="broadcastBtn">An alle senden</button></div>
-          <p class="hint">Wähle eine Zielseite, damit Nutzer beim Antippen direkt z. B. in den Datenschutz-Einstellungen landen.</p>
+          <div class="card" style="margin-top:0">
+            <h3>Private Nachricht an alle</h3>
+            <p class="hint" style="margin-top:0;margin-bottom:8px">Landet im „Ping Team“-Chat jedes Nutzers — ohne Antwortmöglichkeit.</p>
+            <label>Nachricht <span class="ccount" id="dm_count">0</span></label>
+            <textarea id="dm_body" maxlength="2000" placeholder="z. B. Danke, dass du Ping nutzt!"></textarea>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="dmAllBtn">Privat an alle</button></div>
+          </div>
         </div>
         <div class="card">
-          <h3>✉️ Private Nachricht an alle</h3>
-          <div class="muted" style="margin-bottom:10px">Jeder Nutzer bekommt sie in seinem „Ping Team"-Chat – wie WhatsApp, ohne Antwortmöglichkeit.</div>
-          <textarea id="dm_body" placeholder="z. B. Danke, dass du Ping nutzt! Schreib uns dein Feedback."></textarea>
-          <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="dmAllBtn">Privat an alle senden</button></div>
-        </div>
-        <div class="card">
-          <h3>🟢 Status für alle</h3>
-          <div class="muted" style="margin-bottom:10px">Erscheint 24 Stunden lang im Status-Tab aller Nutzer – als Text, Bild oder Video.</div>
+          <h3>Status für alle</h3>
+          <p class="hint" style="margin-top:0;margin-bottom:10px">Erscheint 24 Stunden lang im Status-Tab aller Nutzer.</p>
           <div class="grid2">
-            <div style="grid-column:1 / -1"><label>Text / Beschriftung</label><textarea id="st_body" placeholder="z. B. Wir haben gerade ein Update veröffentlicht 🎉"></textarea></div>
+            <div style="grid-column:1/-1"><label>Text / Beschriftung</label><textarea id="st_body" placeholder="z. B. Wir haben gerade ein Update veröffentlicht."></textarea></div>
             <div><label>Bild oder Video (optional)</label><input id="st_file" type="file" accept="image/*,video/*" /></div>
-            <div><label>Hintergrundfarbe (nur Text)</label><input id="st_color" type="color" value="#5C6BC0" style="height:42px;padding:4px" /></div>
+            <div><label>Hintergrundfarbe (nur Text)</label><input id="st_color" type="color" value="#4d9bff" style="height:44px;padding:4px" /></div>
           </div>
-          <p class="hint">Mit Datei wird ein Bild-/Video-Status gepostet; ohne Datei ein farbiger Text-Status.</p>
           <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="statusBtn">Status posten</button></div>
         </div>
         <div class="card">
@@ -257,46 +377,39 @@
         </div>
       </section>
 
-      <!-- CONTENT (newsroom + changelog) -->
+      <!-- CONTENT -->
       <section data-pane="content" class="hidden">
-        <div class="topbar"><div><h2>Inhalte</h2><div class="muted">Newsroom-Beiträge &amp; Changelog-Einträge für die Website verwalten</div></div>
-          <div class="topbar-actions">
-            <a class="btn sec sm" href="/news" target="_blank">↗ Newsroom</a>
-            <a class="btn sec sm" href="/changelog" target="_blank">↗ Changelog</a>
-            <button class="btn sec sm" data-reload="content">↻</button>
-          </div></div>
-
-        <div class="seg" id="kindSeg">
-          <button data-k="news" class="active">📰 Newsroom</button>
-          <button data-k="changelog">🧾 Changelog</button>
-        </div>
-
-        <div class="card">
-          <h3 id="editorTitle">Neuer Beitrag</h3>
-          <input type="hidden" id="p_id" />
-          <div class="grid2">
-            <div style="grid-column:1 / -1"><label>Titel</label><input id="p_title" placeholder="z. B. Ping 2.6 ist da" /></div>
-            <div data-news><label>Kategorie</label><input id="p_category" placeholder="Produkt · Unternehmen · Sicherheit" /></div>
-            <div data-log class="hidden"><label>Version</label><input id="p_version" placeholder="2.6.0" /></div>
-            <div data-log class="hidden"><label>Art der Änderung</label>
-              <select id="p_tag"><option value="feature">Neu (Feature)</option><option value="improvement">Verbessert</option><option value="fix">Behoben</option><option value="security">Sicherheit</option></select></div>
-            <div><label>Autor</label><input id="p_author" placeholder="Ping Team" /></div>
-            <div><label>Slug (optional)</label><input id="p_slug" placeholder="wird aus dem Titel erzeugt" /></div>
-          </div>
-          <label>Kurzbeschreibung</label>
-          <textarea id="p_summary" placeholder="Ein, zwei Sätze – erscheint in der Vorschau."></textarea>
-          <label>Text <span class="muted" style="font-weight:400">(Markdown-leicht: ## Überschrift, - Liste, **fett**)</span></label>
-          <textarea id="p_body" style="min-height:150px" placeholder="Der vollständige Beitragstext …"></textarea>
-          <div class="grid2" style="margin-top:4px">
-            <div data-news><label>Titelbild (optional)</label><input id="p_cover_file" type="file" accept="image/*" /><div class="hint" id="coverHint"></div></div>
-            <div style="display:flex;gap:18px;align-items:end;flex-wrap:wrap">
-              <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="p_pinned" type="checkbox" style="width:auto" /> Angepinnt</label>
-              <label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input id="p_published" type="checkbox" style="width:auto" checked /> Veröffentlicht</label>
+        <div class="topbar"><div><h2>Inhalte</h2><div class="sub">Newsroom & Changelog für die Website verwalten</div></div>
+          <div class="topbar-actions"><a class="btn sec sm" href="/news" target="_blank">Newsroom ↗</a><a class="btn sec sm" href="/changelog" target="_blank">Changelog ↗</a><button class="ico" data-reload="content" title="Aktualisieren"></button></div></div>
+        <div class="seg" id="kindSeg" style="margin-top:14px"><button data-k="news" class="active">Newsroom</button><button data-k="changelog">Changelog</button></div>
+        <div class="two">
+          <div class="card">
+            <h3 id="editorTitle">Neuer Beitrag</h3>
+            <input type="hidden" id="p_id" />
+            <div class="grid2">
+              <div style="grid-column:1/-1"><label>Titel</label><input id="p_title" placeholder="z. B. Ping 2.8 ist da" /></div>
+              <div data-news><label>Kategorie</label><input id="p_category" placeholder="Produkt · Unternehmen" /></div>
+              <div data-log class="hidden"><label>Version</label><input id="p_version" placeholder="2.8.0" /></div>
+              <div data-log class="hidden"><label>Art</label><select id="p_tag"><option value="feature">Neu</option><option value="improvement">Verbessert</option><option value="fix">Behoben</option><option value="security">Sicherheit</option></select></div>
+              <div><label>Autor</label><input id="p_author" placeholder="Ping Team" /></div>
+              <div><label>Slug (optional)</label><input id="p_slug" placeholder="aus Titel erzeugt" /></div>
             </div>
+            <label>Kurzbeschreibung</label><textarea id="p_summary" placeholder="Ein, zwei Sätze."></textarea>
+            <label>Text <span class="muted" style="font-weight:400">(## Überschrift · - Liste · **fett** · `code`)</span></label>
+            <textarea id="p_body" style="min-height:160px" placeholder="Beitragstext …"></textarea>
+            <div class="grid2" style="margin-top:6px">
+              <div data-news><label>Titelbild (optional)</label><input id="p_cover_file" type="file" accept="image/*" /><div class="hint" id="coverHint"></div></div>
+              <div style="display:flex;gap:18px;align-items:end;flex-wrap:wrap">
+                <label class="switch" style="color:var(--text)"><input id="p_pinned" type="checkbox"> Angepinnt</label>
+                <label class="switch" style="color:var(--text)"><input id="p_published" type="checkbox" checked> Veröffentlicht</label></div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:10px"><button class="btn" id="savePostBtn">Speichern</button><button class="btn ghost hidden" id="cancelEditBtn">Abbrechen</button></div>
           </div>
-          <div style="margin-top:14px;display:flex;gap:10px"><button class="btn" id="savePostBtn">Speichern</button><button class="btn ghost hidden" id="cancelEditBtn">Abbrechen</button></div>
+          <div class="card">
+            <div class="ch"><h3>Vorschau</h3><span class="pill improvement" id="prevKind">Newsroom</span></div>
+            <div id="preview" class="prose"><p class="muted">Beginne zu tippen — die Vorschau erscheint hier.</p></div>
+          </div>
         </div>
-
         <div class="card">
           <h3 id="listTitle">Newsroom-Beiträge</h3>
           <div class="scroll"><table><thead><tr><th>Titel</th><th>Meta</th><th>Status</th><th>Datum</th><th></th></tr></thead><tbody id="postRows"></tbody></table></div>
@@ -304,337 +417,409 @@
         </div>
       </section>
 
-      <!-- SYSTEM -->
-      <section data-pane="system" class="hidden">
-        <div class="topbar"><div><h2>System</h2><div class="muted">Serverzustand, App-Build &amp; Backups</div></div>
-          <button class="btn sec sm" data-reload="system">↻</button></div>
-        <div class="stats" id="sysGrid"></div>
-        <div class="card two">
-          <div>
-            <h3>📱 App-Download</h3>
-            <div id="dlInfo" class="muted">…</div>
-            <div style="margin-top:12px"><a class="btn sec sm" href="/download/info" target="_blank">Build-Info</a> <a class="btn sec sm" href="/" target="_blank">Landing-Page</a></div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">💾 Backups</h3><button class="btn sm" id="backupBtn">Jetzt sichern</button></div>
-            <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Datei</th><th>Größe</th><th>Erstellt</th><th></th></tr></thead><tbody id="backupRows"></tbody></table></div>
-            <p id="backupEmpty" class="empty hidden">Noch keine Backups.</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- CONFIG (remote config / feature flags) -->
+      <!-- CONFIG -->
       <section data-pane="config" class="hidden">
-        <div class="topbar"><div><h2>Konfiguration</h2><div class="muted">Feature-Flags, Limits &amp; Hinweis-Banner – wirkt sofort, ohne App-Update</div></div>
-          <button class="btn sec sm" data-reload="config">↻</button></div>
+        <div class="topbar"><div><h2>Konfiguration</h2><div class="sub">Feature-Flags, Limits & Banner — wirkt sofort, ohne App-Update</div></div>
+          <button class="ico" data-reload="config" title="Aktualisieren"></button></div>
         <div class="card">
-          <h3>🚩 Feature-Flags</h3>
-          <div class="muted" style="margin-bottom:10px">Schalter, die Funktionen in der App ein- oder ausblenden.</div>
+          <div class="ch"><h3>Feature-Flags</h3><button class="btn sec sm" id="addFlagBtn">+ Flag</button></div>
           <div id="cfgFlags" class="grid2"></div>
         </div>
         <div class="card">
-          <h3>📢 Hinweis-Banner</h3>
-          <div class="muted" style="margin-bottom:10px">Erscheint app-weit ganz oben. Text leeren = kein Banner.</div>
+          <h3>Hinweis-Banner</h3>
+          <p class="hint" style="margin-top:0;margin-bottom:10px">Erscheint app-weit ganz oben. Text leeren = kein Banner.</p>
           <div class="grid2">
-            <div style="grid-column:1 / -1"><label>Text</label><input id="cfg_notice_text" maxlength="300" placeholder="z. B. Geplante Wartung heute 22–23 Uhr" /></div>
+            <div style="grid-column:1/-1"><label>Text</label><input id="cfg_notice_text" maxlength="300" placeholder="z. B. Geplante Wartung heute 22–23 Uhr" /></div>
             <div><label>Stufe</label><select id="cfg_notice_level"><option value="info">Info</option><option value="warning">Warnung</option><option value="critical">Kritisch</option></select></div>
+            <div><label>Beim Antippen öffnen</label><select id="cfg_notice_route"></select></div>
           </div>
         </div>
         <div class="card">
-          <h3>⚙️ Limits &amp; Mindest-Build</h3>
+          <h3>Limits & Werte</h3>
           <div class="grid2">
-            <div><label>Max. Status-Video (Sekunden)</label><input id="cfg_max_status" type="number" min="1" max="300" /></div>
+            <div><label>Max. Status-Video (Sek.)</label><input id="cfg_max_status" type="number" min="1" max="300" /></div>
             <div><label>Mindest-Build (versionCode)</label><input id="cfg_min_build" type="number" min="0" /></div>
+            <div style="grid-column:1/-1"><label>Einladungs-URL (inviteUrl)</label><input id="cfg_invite" placeholder="https://example.invalid/join/…" /></div>
           </div>
-          <p class="hint">Apps mit kleinerem versionCode bekommen einen blockierenden „Update erforderlich"-Screen. 0 = aus.</p>
+          <p class="hint">Apps mit kleinerem versionCode bekommen einen blockierenden „Update erforderlich“-Screen. 0 = aus.</p>
         </div>
-        <div style="display:flex;gap:12px;align-items:center"><button class="btn" id="cfgSaveBtn">Speichern</button><span class="muted" id="cfgUpdated"></span></div>
+        <div style="display:flex;gap:12px;align-items:center;margin-top:16px"><button class="btn" id="cfgSaveBtn">Speichern</button><span class="muted mono" id="cfgUpdated" style="font-size:12.5px"></span></div>
+      </section>
+
+      <!-- AUDIT -->
+      <section data-pane="audit" class="hidden">
+        <div class="topbar"><div><h2>Audit-Log</h2><div class="sub">Nachvollziehbare Historie aller Admin-Aktionen</div></div>
+          <button class="ico" data-reload="audit" title="Aktualisieren"></button></div>
+        <div class="card">
+          <div class="toolbar"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="auditQ" placeholder="Aktion, Ziel oder Detail …" /></label></div>
+          <div class="scroll"><table><thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Ziel</th><th>Detail</th><th>Wer</th><th>IP</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+          <p id="auditEmpty" class="empty hidden">Noch keine Einträge.</p>
+        </div>
+      </section>
+
+      <!-- SYSTEM -->
+      <section data-pane="system" class="hidden">
+        <div class="topbar"><div><h2>System</h2><div class="sub">Serverzustand, App-Build & Backups</div></div>
+          <button class="ico" data-reload="system" title="Aktualisieren"></button></div>
+        <div class="stats" id="sysGrid"></div>
+        <div class="card two">
+          <div><h3>App-Download</h3><div id="dlInfo" class="muted" style="margin-top:8px">…</div>
+            <div style="margin-top:14px;display:flex;gap:8px"><a class="btn sec sm" href="/download/info" target="_blank">Build-Info</a><a class="btn sec sm" href="/" target="_blank">Landing-Page</a></div></div>
+          <div><div class="ch"><h3 style="margin:0">Backups</h3><button class="btn sm" id="backupBtn">Jetzt sichern</button></div>
+            <div class="scroll"><table><thead><tr><th>Datei</th><th>Größe</th><th>Erstellt</th><th></th></tr></thead><tbody id="backupRows"></tbody></table></div>
+            <p id="backupEmpty" class="empty hidden">Noch keine Backups.</p></div>
+        </div>
       </section>
     </main>
   </div>
 
   <div id="modalRoot"></div>
+  <div id="cmdRoot"></div>
   <div id="toast" class="toast"></div>
 
   <script>
-    const $=(id)=>document.getElementById(id);
-    let token=sessionStorage.getItem('ping_admin_token')||'';
-    let autoTimer=null;
-    // In-app destinations a notification can deep-link to (must match the
-    // server's appRouteSchema and the app's AppRoutes).
-    const ROUTES=[['','Posteingang (Standard)'],['settings','Einstellungen'],['privacy','Datenschutz'],['notifications','Benachrichtigungen'],['design','Design & Farben'],['security','Sicherung & Login'],['backup','Backup'],['saved','Gespeichert'],['update','App-Update'],['profile','Profil']];
-    function routeOptions(){return ROUTES.map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('');}
+    const $ = (id) => document.getElementById(id);
+    let token = sessionStorage.getItem('ping_admin_token') || '';
+    let autoTimer = null, rangeDays = 7;
 
-    function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
-    function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-    function fmtDate(ms){if(!ms)return'–';try{return new Date(ms).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'});}catch{return'–';}}
-    function fmtDateTime(ms){if(!ms)return'–';try{return new Date(ms).toLocaleString('de-DE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return'–';}}
-    function human(b){if(b==null)return'—';const u=['B','KB','MB','GB'];let i=0,n=b;while(n>=1024&&i<u.length-1){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+' '+u[i];}
-    function fmtUptime(s){if(!s)return'–';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+'d ':'')+(h?h+'h ':'')+m+'m';}
-    function dayLabel(ms){try{return new Date(ms).toLocaleDateString('de-DE',{weekday:'short'});}catch{return'';}}
+    // ---- icons ----
+    const IC = {
+      overview: 'M3 13h8V3H3v10ZM13 21h8V3h-8v18ZM3 21h8v-6H3v6Z',
+      users: 'M16 19a4 4 0 0 0-8 0M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+      moderation: 'M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z',
+      broadcast: 'M3 11v2l14 5V6L3 11ZM17 9a3 3 0 0 1 0 6',
+      content: 'M4 5h16M4 5v14M4 19h16M20 5v14M8 9h8M8 13h6',
+      config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L16 3h-4l-.8 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1L12 21h4',
+      audit: 'M9 5h6M9 5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12l1.5 1.5L13 11M9 16h4',
+      system: 'M5 4h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM8 20h8M12 15v5',
+      refresh: 'M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5',
+      sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
+      moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
+      arrowUp: 'M12 19V5M5 12l7-7 7 7',
+    };
+    const svg = (d, w) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w||1.7}" stroke-linecap="round" stroke-linejoin="round">${d.split('M').filter(Boolean).map((p)=>`<path d="M${p.trim()}"/>`).join('')}</svg>`;
 
-    async function api(path,opts={}){
+    const TABS = [
+      ['overview', 'Übersicht'], ['users', 'Nutzer'], ['moderation', 'Moderation'], ['broadcast', 'Durchsagen'],
+      ['content', 'Inhalte'], ['config', 'Konfiguration'], ['audit', 'Audit-Log'], ['system', 'System'],
+    ];
+    const ROUTES = [['','Posteingang (Standard)'],['settings','Einstellungen'],['privacy','Datenschutz'],['notifications','Benachrichtigungen'],['design','Design & Farben'],['security','Sicherung & Login'],['backup','Backup'],['saved','Gespeichert'],['update','App-Update'],['profile','Profil']];
+    const routeOptions = () => ROUTES.map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
+
+    // ---- helpers ----
+    function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(window._tt); window._tt=setTimeout(()=>t.classList.remove('show'),2600); }
+    function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function fmtDate(ms){ if(!ms)return'–'; try{return new Date(ms).toLocaleDateString('de-DE',{day:'2-digit',month:'short',year:'numeric'});}catch{return'–';} }
+    function fmtDateTime(ms){ if(!ms)return'–'; try{return new Date(ms).toLocaleString('de-DE',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return'–';} }
+    function relTime(ms){ if(!ms)return'nie'; const s=Math.round((Date.now()-ms)/1000); if(s<60)return'gerade'; const m=Math.round(s/60); if(m<60)return'vor '+m+'m'; const h=Math.round(m/60); if(h<24)return'vor '+h+'h'; const d=Math.round(h/24); return d<30?('vor '+d+'d'):fmtDate(ms); }
+    function human(b){ if(b==null)return'—'; const u=['B','KB','MB','GB']; let i=0,n=b; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i>0?1:0)+' '+u[i]; }
+    function fmtUptime(s){ if(!s)return'–'; const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return(d?d+'d ':'')+(h?h+'h ':'')+m+'m'; }
+    function dayLabel(ms){ try{return new Date(ms).toLocaleDateString('de-DE',{weekday:'short'});}catch{return'';} }
+    function richText(src){
+      const inline=(s)=>esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`([^`]+)`/g,'<code>$1</code>');
+      const lines=String(src||'').split(/\r?\n/); let out='',list=false,para=[];
+      const fp=()=>{if(para.length){out+='<p>'+para.map(inline).join('<br>')+'</p>';para=[];}};
+      const fl=()=>{if(list){out+='</ul>';list=false;}};
+      for(const raw of lines){const line=raw.trim(); if(!line){fp();fl();continue;}
+        if(/^##\s+/.test(line)){fp();fl();out+='<h3>'+inline(line.replace(/^##\s+/,''))+'</h3>';}
+        else if(/^[-*•]\s+/.test(line)){fp();if(!list){out+='<ul>';list=true;}out+='<li>'+inline(line.replace(/^[-*•]\s+/,''))+'</li>';}
+        else{fl();para.push(line);}}
+      fp();fl(); return out||'<p class="muted">Beginne zu tippen — die Vorschau erscheint hier.</p>';
+    }
+
+    async function api(path, opts={}){
       const res=await fetch('/api'+path,{...opts,headers:{'Content-Type':'application/json','X-Admin-Token':token,...(opts.headers||{})}});
       if(res.status===401){logout();throw new Error('Falsches Token.');}
       const body=res.status===204?null:await res.json().catch(()=>null);
       if(!res.ok)throw new Error((body&&body.error)||('Fehler '+res.status));
       return body;
     }
-    function showLogin(){$('login').classList.remove('hidden');$('dash').classList.add('hidden');stopAuto();}
-    function showDash(){$('login').classList.add('hidden');$('dash').classList.remove('hidden');}
-    function logout(){token='';sessionStorage.removeItem('ping_admin_token');showLogin();}
-    async function login(){const v=$('token').value.trim();if(!v)return;token=v;
-      try{await loadOverview();sessionStorage.setItem('ping_admin_token',token);showDash();switchTab('overview');}
-      catch(e){token='';$('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.';}}
 
-    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,system:loadSystem};
+    // ---- theme ----
+    function effTheme(){ const m=localStorage.getItem('ping_admin_theme'); if(m==='light'||m==='dark')return m; return matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'; }
+    function applyTheme(){ const e=effTheme(); document.documentElement.setAttribute('data-theme',e); const b=$('themeBtn'); if(b)b.innerHTML=svg(e==='light'?IC.moon:IC.sun); }
+    function toggleTheme(){ localStorage.setItem('ping_admin_theme', effTheme()==='light'?'dark':'light'); applyTheme(); }
+
+    // ---- auth ----
+    function showLogin(){ $('login').classList.remove('hidden'); $('dash').classList.add('hidden'); stopAuto(); }
+    function showDash(){ $('login').classList.add('hidden'); $('dash').classList.remove('hidden'); }
+    function logout(){ token=''; sessionStorage.removeItem('ping_admin_token'); showLogin(); }
+    async function login(){ const v=$('token').value.trim(); if(!v)return; token=v;
+      try{ await loadOverview(); sessionStorage.setItem('ping_admin_token',token); showDash(); switchTab('overview'); }
+      catch(e){ token=''; $('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.'; } }
+
+    // ---- tabs ----
+    const LOADERS={overview:loadOverview,users:loadUsers,moderation:loadChats,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,audit:loadAudit,system:loadSystem};
     let activeTab='overview';
-    function switchTab(name){
-      activeTab=name;
+    function switchTab(name){ activeTab=name;
       document.querySelectorAll('.navitem').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
       document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));
-      (LOADERS[name]||(()=>{}))().catch(e=>toast(e.message));
-    }
-    document.querySelectorAll('.navitem').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
-    document.querySelectorAll('[data-reload]').forEach(b=>b.onclick=()=>(LOADERS[b.dataset.reload])().catch(e=>toast(e.message)));
+      (LOADERS[name]||(()=>Promise.resolve()))().catch(e=>toast(e.message)); }
+    function buildNav(){ $('nav').innerHTML=TABS.map(([k,l])=>`<div class="navitem${k==='overview'?' active':''}" data-tab="${k}">${svg(IC[k])}<span>${l}</span></div>`).join('');
+      document.querySelectorAll('.navitem').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab)); }
 
-    // ---- auto refresh (overview) ----
-    function startAuto(){stopAuto();autoTimer=setInterval(()=>{if(activeTab==='overview')loadOverview().catch(()=>{});},10000);}
-    function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
-    $('autoRefresh').onchange=(e)=>{e.target.checked?startAuto():stopAuto();};
+    function startAuto(){ stopAuto(); autoTimer=setInterval(()=>{if(activeTab==='overview')loadOverview().catch(()=>{});},10000); }
+    function stopAuto(){ if(autoTimer){clearInterval(autoTimer);autoTimer=null;} }
 
     // ---- overview ----
-    function stat(n,l,icon,cls,d){return '<div class="stat"><div class="ic">'+(icon||'')+'</div><div class="n '+(cls||'')+'">'+n+'</div><div class="l">'+l+'</div>'+(d?'<div class="d">'+d+'</div>':'')+'</div>';}
-    function chart(el,data,alt){
-      const max=Math.max(1,...data.map(d=>d.n));
+    function stat(n,l,icon,cls,d){ return `<div class="stat"><div class="ic">${icon?svg(icon):''}</div><div class="n ${cls||''}">${n}</div><div class="l">${l}</div>${d?`<div class="d">${d}</div>`:''}</div>`; }
+    function chart(el,data,alt){ const max=Math.max(1,...data.map(d=>d.n));
       el.innerHTML='<div class="gridlines"><div></div><div></div><div></div><div></div></div>'+
-        data.map(d=>{const h=Math.round(d.n/max*100);return '<div class="bar'+(alt?' alt':'')+'" style="height:'+Math.max(5,h)+'%"><span class="v">'+d.n+'</span><span class="x">'+dayLabel(d.day)+'</span></div>';}).join('');
-    }
-    async function loadOverview(){
-      const o=await api('/admin/overview');const s=o.stats;
+        data.map(d=>{const h=Math.round(d.n/max*100); return `<div class="bar${alt?' alt':''}" style="height:${Math.max(4,h)}%"><span class="v">${d.n}</span><span class="x">${dayLabel(d.day)}</span></div>`;}).join(''); }
+    async function loadOverview(){ const o=await api('/admin/overview?days='+rangeDays); const s=o.stats; const win=rangeDays===30?'30T':rangeDays===14?'14T':'7T';
       $('stats').innerHTML=
-        stat(s.users,'Nutzer','👤',null,s.newUsers7d?('+'+s.newUsers7d+' / 7T'):'')+
-        stat(s.online,'Online','🟢','on')+
-        stat(s.messages,'Nachrichten','💬',null,s.messages24h?('+'+s.messages24h+' / 24h'):'')+
-        stat(s.chats,'Chats','🗂️')+
-        stat(s.groups,'Gruppen','👥')+
-        stat(s.statuses,'Status aktiv','📸')+
-        stat(s.admins,'Admins','🛡️')+
-        stat(s.pushTokens,'Push-Geräte','🔔')+
-        stat(s.blocks,'Blockierungen','🚫')+
-        stat(human(s.uploadBytes),'Medien ('+s.uploads+')','🖼️')+
-        stat(s.news??0,'Newsroom','📰')+
-        stat(s.changelog??0,'Changelog','🧾');
-      chart($('chartUsers'),o.charts.usersPerDay,false);
-      chart($('chartMsgs'),o.charts.messagesPerDay,true);
-    }
+        stat(s.users,'Nutzer',IC.users,null,s['newUsers'+rangeDays+'d']!=null?('+'+s['newUsers'+rangeDays+'d']+' / '+win):(s.newUsers7d?'+'+s.newUsers7d+' / 7T':''))+
+        stat(s.online,'Online',IC.system,'on')+
+        stat(s.messages,'Nachrichten',IC.moderation,null,s.messages24h?('+'+s.messages24h+' / 24h'):'')+
+        stat(s.chats,'Chats',IC.content)+stat(s.groups,'Gruppen',IC.users)+stat(s.statuses,'Status aktiv',IC.broadcast)+
+        stat(s.admins,'Admins',IC.config)+stat(s.pushTokens,'Push-Geräte',IC.broadcast)+stat(s.blocks,'Blockierungen',IC.moderation)+
+        stat(human(s.uploadBytes),'Medien ('+s.uploads+')',IC.content)+stat(s.news??0,'Newsroom',IC.content)+stat(s.changelog??0,'Changelog',IC.audit);
+      chart($('chartUsers'),o.charts.usersPerDay,false); chart($('chartMsgs'),o.charts.messagesPerDay,true); }
 
     // ---- users ----
-    async function loadUsers(){
-      const q=encodeURIComponent($('q').value.trim());
-      const {users}=await api('/admin/users?q='+q);
-      const rows=$('rows');rows.innerHTML='';$('empty').classList.toggle('hidden',users.length>0);
-      for(const u of users){
-        const tr=document.createElement('tr');tr.className='click';
+    let userCache=[], userFilter='', userSort={key:'createdAt',dir:-1}, selected=new Set();
+    function applyUserView(){
+      let list=userCache.slice();
+      if(userFilter==='online')list=list.filter(u=>u.online);
+      else if(userFilter==='admin')list=list.filter(u=>u.isAdmin);
+      else if(userFilter==='disabled')list=list.filter(u=>u.disabled);
+      else if(userFilter==='premium')list=list.filter(u=>u.premium);
+      const {key,dir}=userSort;
+      list.sort((a,b)=>{ let x=a[key],y=b[key]; if(key==='displayName'){x=(x||'').toLowerCase();y=(y||'').toLowerCase(); return x<y?-dir:x>y?dir:0;} return ((x||0)-(y||0))*dir; });
+      const rows=$('rows'); rows.innerHTML='';
+      for(const u of list){
+        const tr=document.createElement('tr'); tr.className='click';
         const status=(u.online?'<span class="pill on">online</span>':'<span class="pill off">offline</span>')+
-          (u.isAdmin?' <span class="pill admin">Admin</span>':'')+(u.disabled?' <span class="pill ban">gesperrt</span>':'');
-        tr.innerHTML='<td><b>'+esc(u.displayName)+'</b></td><td>'+esc(u.phone)+'</td><td>'+esc(u.email)+'</td><td>'+status+'</td><td>'+fmtDate(u.createdAt)+'</td>'+
-          '<td><div class="rowact"><button class="btn sec sm" data-ban>'+(u.disabled?'Entsperren':'Sperren')+'</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
-        tr.querySelector('[data-ban]').onclick=(e)=>{e.stopPropagation();setBan(u,!u.disabled);};
-        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delUser(u);};
-        tr.onclick=()=>openUser(u.id);
-        rows.appendChild(tr);
+          (u.isAdmin?' <span class="pill admin">Admin</span>':'')+(u.premium?' <span class="pill prem">Premium</span>':'')+(u.disabled?' <span class="pill ban">gesperrt</span>':'');
+        tr.innerHTML=`<td><input type="checkbox" data-uid="${u.id}" ${selected.has(u.id)?'checked':''}></td>`+
+          `<td><b>${esc(u.displayName)}</b></td><td class="mono">${esc(u.phone)}</td><td>${esc(u.email)}</td><td>${status}</td>`+
+          `<td class="mono" style="font-size:12px">${relTime(u.lastSeen)}</td><td class="mono" style="font-size:12px">${fmtDate(u.createdAt)}</td>`+
+          `<td><div class="rowact"><button class="btn sec sm" data-ban>${u.disabled?'Entsperren':'Sperren'}</button><button class="btn danger sm" data-del>Löschen</button></div></td>`;
+        tr.querySelector('[data-uid]').onclick=(e)=>{e.stopPropagation(); toggleSel(u.id,e.target.checked);};
+        tr.querySelector('[data-ban]').onclick=(e)=>{e.stopPropagation(); setBan(u,!u.disabled);};
+        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation(); delUser(u);};
+        tr.onclick=()=>openUser(u.id); rows.appendChild(tr);
       }
+      $('uCount').textContent=list.length?(list.length+' von '+userCache.length+' Konten'):'Keine Nutzer gefunden.';
+      updateBulk();
     }
-    async function createUser(){
-      const body={displayName:$('c_name').value.trim(),phone:$('c_phone').value.trim(),email:$('c_email').value.trim(),password:$('c_pw').value,isAdmin:$('c_admin').checked};
-      try{await api('/admin/users',{method:'POST',body:JSON.stringify(body)});$('c_name').value=$('c_phone').value=$('c_email').value=$('c_pw').value='';$('c_admin').checked=false;toast('Nutzer angelegt.');loadUsers();}catch(e){toast(e.message);}
+    function toggleSel(id,on){ on?selected.add(id):selected.delete(id); updateBulk(); }
+    function updateBulk(){ $('bulkCount').textContent=selected.size; $('bulkbar').classList.toggle('show',selected.size>0);
+      const all=$('selAll'); if(all)all.checked=userCache.length>0 && userCache.every(u=>selected.has(u.id)); }
+    async function loadUsers(){ const q=encodeURIComponent($('q').value.trim()); const {users}=await api('/admin/users?q='+q);
+      userCache=users; for(const id of [...selected]) if(!users.find(u=>u.id===id))selected.delete(id); applyUserView(); }
+    async function createUser(){ const body={displayName:$('c_name').value.trim(),phone:$('c_phone').value.trim(),email:$('c_email').value.trim(),password:$('c_pw').value,isAdmin:$('c_admin').checked};
+      try{await api('/admin/users',{method:'POST',body:JSON.stringify(body)}); $('c_name').value=$('c_phone').value=$('c_email').value=$('c_pw').value=''; $('c_admin').checked=false; toast('Nutzer angelegt.'); loadUsers();}catch(e){toast(e.message);} }
+    async function setBan(u,disabled){ try{await api('/admin/users/'+u.id,{method:'PATCH',body:JSON.stringify({disabled})}); toast(disabled?'Gesperrt — Sitzungen beendet.':'Entsperrt.'); loadUsers();}catch(e){toast(e.message);} }
+    async function delUser(u){ if(!confirm('„'+u.displayName+'“ wirklich löschen?'))return; try{await api('/admin/users/'+u.id,{method:'DELETE'}); toast('Nutzer gelöscht.'); loadUsers();}catch(e){toast(e.message);} }
+    async function bulkAction(kind){
+      const ids=[...selected]; if(!ids.length)return;
+      if(kind==='delete'&&!confirm(ids.length+' Konten wirklich löschen?'))return;
+      let ok=0;
+      for(const id of ids){ try{
+        if(kind==='delete')await api('/admin/users/'+id,{method:'DELETE'});
+        else await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({disabled:kind==='disable'})});
+        ok++;}catch{} }
+      selected.clear(); toast(ok+' von '+ids.length+' verarbeitet.'); loadUsers();
     }
-    async function setBan(u,disabled){try{await api('/admin/users/'+u.id,{method:'PATCH',body:JSON.stringify({disabled})});toast(disabled?'Konto gesperrt — Sitzungen beendet.':'Konto entsperrt.');loadUsers();}catch(e){toast(e.message);}}
-    async function delUser(u){if(!confirm('„'+u.displayName+'“ wirklich löschen?'))return;try{await api('/admin/users/'+u.id,{method:'DELETE'});toast('Nutzer gelöscht.');loadUsers();}catch(e){toast(e.message);}}
-
     async function openUser(id){
-      let data;try{data=await api('/admin/users/'+id);}catch(e){return toast(e.message);}
-      const u=data.user,a=data.activity||{};closeModal();
-      const m=document.createElement('div');m.className='overlay';m.onclick=(e)=>{if(e.target===m)closeModal();};
-      m.innerHTML='<div class="modal"><div class="mh"><h3>'+esc(u.displayName)+'</h3><button class="btn ghost" data-x>✕</button></div>'+
-        '<div class="kv"><span>Status</span><b>'+(u.online?'online':'offline')+(u.disabled?' · gesperrt':'')+(u.isAdmin?' · Admin':'')+'</b></div>'+
-        '<div class="kv"><span>Nachrichten</span><b>'+(a.messages??'–')+'</b></div>'+
-        '<div class="kv"><span>Chats</span><b>'+(a.chats??'–')+'</b></div>'+
-        '<div class="kv"><span>Zuletzt gesehen</span><b>'+fmtDateTime(u.lastSeen)+'</b></div>'+
-        '<div class="kv"><span>Erstellt</span><b>'+fmtDate(u.createdAt)+'</b></div>'+
-        '<label>Name</label><input id="m_name" value="'+esc(u.displayName)+'" />'+
-        '<label>E-Mail</label><input id="m_email" value="'+esc(u.email)+'" />'+
-        '<label>Über mich</label><input id="m_about" value="'+esc(u.about||'')+'" />'+
-        '<label>Neues Passwort (optional)</label><input id="m_pw" type="text" placeholder="leer = unverändert" />'+
-        '<div class="grid2" style="margin-top:14px"><button class="btn" data-save>Speichern</button><button class="btn sec" data-admin>'+(u.isAdmin?'Admin entziehen':'Zum Admin machen')+'</button></div>'+
-        '<label style="margin-top:16px">Direkte Nachricht senden</label><textarea id="m_msg" placeholder="Nachricht an '+esc(u.displayName.split(" ")[0])+' …"></textarea>'+
-        '<div class="grid2" style="margin-top:8px"><div><label style="margin-top:0">Beim Antippen öffnen</label><select id="m_route">'+routeOptions()+'</select></div><div style="display:flex;align-items:end"><button class="btn sec" data-msg style="width:100%">Als Banner</button></div></div>'+
-        '<div style="margin-top:8px"><button class="btn" data-dm style="width:100%">💬 Als „Ping Team"-Chat senden</button></div>'+
-        '<p class="hint">Banner = kurzes Pop-up. Chat = bleibende Nachricht im „Ping Team"-Chat des Nutzers (keine Antwort möglich).</p>'+
-        '<div style="margin-top:16px;display:flex;gap:10px"><button class="btn '+(u.disabled?'sec':'danger')+'" data-ban style="flex:1">'+(u.disabled?'Entsperren':'Sperren')+'</button><button class="btn danger" data-del style="flex:1">Löschen</button></div>'+
-        '</div>';
+      let data; try{data=await api('/admin/users/'+id);}catch(e){return toast(e.message);}
+      const u=data.user,a=data.activity||{}; closeModal();
+      const m=document.createElement('div'); m.className='overlay'; m.onclick=(e)=>{if(e.target===m)closeModal();};
+      m.innerHTML=`<div class="modal"><div class="mh"><h3>${esc(u.displayName)}</h3><button class="ico" data-x>✕</button></div>`+
+        `<div class="kv"><span>Status</span><b>${u.online?'online':'offline'}${u.disabled?' · gesperrt':''}${u.isAdmin?' · Admin':''}${u.premium?' · Premium':''}</b></div>`+
+        `<div class="kv"><span>Nachrichten</span><b>${a.messages??'–'}</b></div><div class="kv"><span>Chats</span><b>${a.chats??'–'}</b></div>`+
+        `<div class="kv"><span>Zuletzt gesehen</span><b>${fmtDateTime(u.lastSeen)}</b></div><div class="kv"><span>Erstellt</span><b>${fmtDate(u.createdAt)}</b></div>`+
+        `<label>Name</label><input id="m_name" value="${esc(u.displayName)}" /><label>E-Mail</label><input id="m_email" value="${esc(u.email)}" />`+
+        `<label>Über mich</label><input id="m_about" value="${esc(u.about||'')}" /><label>Neues Passwort (optional)</label><input id="m_pw" type="text" placeholder="leer = unverändert" />`+
+        `<div class="grid2" style="margin-top:14px"><button class="btn" data-save>Speichern</button><button class="btn sec" data-admin>${u.isAdmin?'Admin entziehen':'Zum Admin'}</button></div>`+
+        `<div class="grid2" style="margin-top:10px"><button class="btn sec" data-prem>${u.premium?'Premium entziehen':'Premium geben'}</button><button class="btn ${u.disabled?'sec':'danger'}" data-ban>${u.disabled?'Entsperren':'Sperren'}</button></div>`+
+        `<label style="margin-top:16px">Direkte Nachricht</label><textarea id="m_msg" placeholder="Nachricht an ${esc((u.displayName||'').split(' ')[0])} …"></textarea>`+
+        `<div class="grid2" style="margin-top:8px"><div><label style="margin-top:0">Beim Antippen öffnen</label><select id="m_route">${routeOptions()}</select></div><div style="display:flex;align-items:end"><button class="btn sec" data-msg style="width:100%">Als Banner</button></div></div>`+
+        `<div style="margin-top:8px"><button class="btn" data-dm style="width:100%">Als „Ping Team“-Chat senden</button></div>`+
+        `<div style="margin-top:14px"><button class="btn danger" data-del style="width:100%">Konto löschen</button></div></div>`;
       m.querySelector('[data-x]').onclick=closeModal;
-      m.querySelector('[data-admin]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({isAdmin:!u.isAdmin})});toast('Gespeichert.');closeModal();loadUsers();}catch(e){toast(e.message);}};
-      m.querySelector('[data-ban]').onclick=async()=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify({disabled:!u.disabled})});toast(u.disabled?'Entsperrt.':'Gesperrt — Sitzungen beendet.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      const patch=async(b,msg)=>{try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify(b)});toast(msg);closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-admin]').onclick=()=>patch({isAdmin:!u.isAdmin},'Gespeichert.');
+      m.querySelector('[data-prem]').onclick=()=>patch({premium:!u.premium},'Gespeichert.');
+      m.querySelector('[data-ban]').onclick=()=>patch({disabled:!u.disabled},u.disabled?'Entsperrt.':'Gesperrt.');
       m.querySelector('[data-del]').onclick=async()=>{if(!confirm('Konto löschen?'))return;try{await api('/admin/users/'+id,{method:'DELETE'});toast('Gelöscht.');closeModal();loadUsers();}catch(e){toast(e.message);}};
+      m.querySelector('[data-save]').onclick=async()=>{const b={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)b.password=pw;patch(b,'Gespeichert — wirkt sofort.');};
       m.querySelector('[data-msg]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;const route=$('m_route').value;try{await api('/admin/users/'+id+'/message',{method:'POST',body:JSON.stringify(route?{body,route}:{body})});toast('Banner gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
       m.querySelector('[data-dm]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;try{await api('/admin/users/'+id+'/dm',{method:'POST',body:JSON.stringify({body})});toast('Als Chat gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
-      m.querySelector('[data-save]').onclick=async()=>{const body={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)body.password=pw;try{await api('/admin/users/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Gespeichert — wirkt sofort beim Nutzer.');closeModal();loadUsers();}catch(e){toast(e.message);}};
       $('modalRoot').appendChild(m);
     }
-    function closeModal(){$('modalRoot').innerHTML='';}
+    function closeModal(){ $('modalRoot').innerHTML=''; }
+
+    // ---- moderation ----
+    async function loadChats(){ const q=encodeURIComponent($('chatQ').value.trim()); const {chats}=await api('/admin/chats?q='+q);
+      const rows=$('chatRows'); rows.innerHTML=''; $('chatEmpty').classList.toggle('hidden',chats.length>0);
+      for(const c of chats){ const tr=document.createElement('tr'); tr.className='click';
+        tr.innerHTML=`<td><b>${esc(c.title)}</b></td><td><span class="pill ${c.type==='group'?'improvement':'off'}">${c.type==='group'?'Gruppe':'Direkt'}</span></td>`+
+          `<td class="mono">${c.members}</td><td class="mono">${c.messages}</td><td class="mono" style="font-size:12px">${relTime(c.lastActivity)}</td>`+
+          `<td><div class="rowact"><button class="btn danger sm" data-del>Löschen</button></div></td>`;
+        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delChat(c);};
+        tr.onclick=()=>openChat(c); rows.appendChild(tr); } }
+    async function openChat(c){ let data; try{data=await api('/admin/chats/'+c.id+'/messages');}catch(e){return toast(e.message);}
+      const msgs=data.messages||[]; closeModal();
+      const m=document.createElement('div'); m.className='overlay'; m.onclick=(e)=>{if(e.target===m)closeModal();};
+      m.innerHTML=`<div class="modal wide"><div class="mh"><h3>${esc(c.title)}</h3><button class="ico" data-x>✕</button></div>`+
+        `<div class="muted mono" style="font-size:12.5px;margin-bottom:8px">${c.type==='group'?'Gruppe':'Direkt'} · ${c.members} Mitglieder · ${c.messages} Nachrichten</div>`+
+        (msgs.length?msgs.map(x=>`<div class="msgline"><span class="who">${esc(x.sender)}</span><span>${esc(x.preview)}</span><span class="when">${fmtDateTime(x.createdAt)}</span></div>`).join(''):'<p class="empty">Keine Nachrichten.</p>')+
+        `<div style="margin-top:16px"><button class="btn danger" data-del style="width:100%">Chat löschen</button></div></div>`;
+      m.querySelector('[data-x]').onclick=closeModal;
+      m.querySelector('[data-del]').onclick=()=>{closeModal();delChat(c);};
+      $('modalRoot').appendChild(m); }
+    async function delChat(c){ if(!confirm('Chat „'+c.title+'“ unwiderruflich löschen?'))return; try{await api('/admin/chats/'+c.id,{method:'DELETE'});toast('Chat gelöscht.');loadChats();}catch(e){toast(e.message);} }
 
     // ---- broadcast ----
-    async function broadcast(){const body=$('b_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
-      const route=$('b_route').value;const payload={title:$('b_title').value.trim(),body};if(route)payload.route=route;
-      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify(payload)});$('b_body').value='';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);}}
-    async function loadBroadcasts(){const {broadcasts}=await api('/admin/broadcasts');const rows=$('bcRows');rows.innerHTML='';$('bcEmpty').classList.toggle('hidden',broadcasts.length>0);
-      for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML='<td>'+fmtDateTime(b.createdAt)+'</td><td>'+esc(b.title||'–')+'</td><td>'+esc(b.body)+'</td><td>'+b.delivered+'</td><td>'+b.pushed+'</td>';rows.appendChild(tr);}}
-    async function broadcastDm(){const body=$('dm_body').value.trim();if(!body)return toast('Bitte eine Nachricht eingeben.');
-      try{const r=await api('/admin/broadcast-dm',{method:'POST',body:JSON.stringify({body})});$('dm_body').value='';toast('Privat an '+r.delivered+' Nutzer gesendet.');loadBroadcasts();}catch(e){toast(e.message);}}
-    async function adminUpload(file){
-      const r=await fetch('/api/admin/upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Admin-Token':token,'X-Filename':encodeURIComponent(file.name||'datei')},body:file});
-      if(!r.ok){let m='Upload fehlgeschlagen.';try{m=(await r.json()).error||m;}catch{}throw new Error(m);}
-      return (await r.json()).upload;}
-    async function postStatus(){
-      const body=$('st_body').value.trim();
-      const fileEl=$('st_file');const file=fileEl.files&&fileEl.files[0];
-      if(!file&&!body)return toast('Bitte einen Text eingeben oder eine Datei wählen.');
-      const btn=$('statusBtn');btn.disabled=true;
-      try{
-        let payload;
-        if(file){
-          const up=await adminUpload(file);
-          const type=(up.kind==='video')?'video':'image';
-          payload={type,attachment:up,body};
-        }else{
-          payload={type:'text',body,bgColor:$('st_color').value};
-        }
-        await api('/admin/status',{method:'POST',body:JSON.stringify(payload)});
-        $('st_body').value='';fileEl.value='';toast('Status für alle gepostet.');
-      }catch(e){toast(e.message);}finally{btn.disabled=false;}}
+    async function broadcast(){ const body=$('b_body').value.trim(); if(!body)return toast('Bitte eine Nachricht eingeben.');
+      const route=$('b_route').value; const payload={title:$('b_title').value.trim(),body}; if(route)payload.route=route;
+      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify(payload)});$('b_body').value='';$('b_count').textContent='0';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);} }
+    async function loadBroadcasts(){ const {broadcasts}=await api('/admin/broadcasts'); const rows=$('bcRows'); rows.innerHTML=''; $('bcEmpty').classList.toggle('hidden',broadcasts.length>0);
+      for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML=`<td class="mono" style="font-size:12px">${fmtDateTime(b.createdAt)}</td><td>${esc(b.title||'–')}</td><td>${esc(b.body)}</td><td class="mono">${b.delivered}</td><td class="mono">${b.pushed}</td>`;rows.appendChild(tr);} }
+    async function broadcastDm(){ const body=$('dm_body').value.trim(); if(!body)return toast('Bitte eine Nachricht eingeben.');
+      try{const r=await api('/admin/broadcast-dm',{method:'POST',body:JSON.stringify({body})});$('dm_body').value='';$('dm_count').textContent='0';toast('Privat an '+r.delivered+' Nutzer gesendet.');loadBroadcasts();}catch(e){toast(e.message);} }
+    async function adminUpload(file){ const r=await fetch('/api/admin/upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Admin-Token':token,'X-Filename':encodeURIComponent(file.name||'datei')},body:file});
+      if(!r.ok){let m='Upload fehlgeschlagen.';try{m=(await r.json()).error||m;}catch{}throw new Error(m);} return (await r.json()).upload; }
+    async function postStatus(){ const body=$('st_body').value.trim(); const fileEl=$('st_file'); const file=fileEl.files&&fileEl.files[0];
+      if(!file&&!body)return toast('Bitte Text eingeben oder Datei wählen.'); const btn=$('statusBtn'); btn.disabled=true;
+      try{ let payload; if(file){const up=await adminUpload(file);payload={type:(up.kind==='video')?'video':'image',attachment:up,body};}else{payload={type:'text',body,bgColor:$('st_color').value};}
+        await api('/admin/status',{method:'POST',body:JSON.stringify(payload)}); $('st_body').value='';fileEl.value='';toast('Status für alle gepostet.');
+      }catch(e){toast(e.message);}finally{btn.disabled=false;} }
 
-    // ---- content (newsroom + changelog) ----
-    let contentKind='news';
-    let pendingCover='';   // /api/uploads/<id> URL once a cover file is uploaded
-    function applyKindUI(){
-      document.querySelectorAll('#kindSeg button').forEach(b=>b.classList.toggle('active',b.dataset.k===contentKind));
-      const isNews=contentKind==='news';
-      document.querySelectorAll('[data-news]').forEach(e=>e.classList.toggle('hidden',!isNews));
+    // ---- content ----
+    let contentKind='news', pendingCover='';
+    function applyKindUI(){ document.querySelectorAll('#kindSeg button').forEach(b=>b.classList.toggle('active',b.dataset.k===contentKind));
+      const isNews=contentKind==='news'; document.querySelectorAll('[data-news]').forEach(e=>e.classList.toggle('hidden',!isNews));
       document.querySelectorAll('[data-log]').forEach(e=>e.classList.toggle('hidden',isNews));
-      $('listTitle').textContent=isNews?'Newsroom-Beiträge':'Changelog-Einträge';
-    }
-    document.querySelectorAll('#kindSeg button').forEach(b=>b.onclick=()=>{contentKind=b.dataset.k;applyKindUI();resetEditor();loadContent().catch(e=>toast(e.message));});
-
-    function resetEditor(){
-      $('p_id').value='';pendingCover='';
-      ['p_title','p_category','p_version','p_author','p_slug','p_summary','p_body'].forEach(id=>$(id).value='');
-      $('p_tag').value='feature';$('p_pinned').checked=false;$('p_published').checked=true;
-      const cf=$('p_cover_file');if(cf)cf.value='';$('coverHint').textContent='';
-      $('editorTitle').textContent='Neuer Beitrag';$('savePostBtn').textContent='Speichern';$('cancelEditBtn').classList.add('hidden');
-    }
-    async function loadContent(){
-      applyKindUI();
-      const {posts}=await api('/admin/posts?kind='+contentKind);
-      const rows=$('postRows');rows.innerHTML='';$('postEmpty').classList.toggle('hidden',posts.length>0);
-      for(const p of posts){
-        const tr=document.createElement('tr');tr.className='click';
-        const meta=contentKind==='news'
-          ? (p.category?esc(p.category):'–')
-          : ((p.version?('v'+esc(p.version)+' '):'')+(p.tag?'<span class="pill '+esc(p.tag)+'">'+esc(p.tag)+'</span>':''));
+      $('listTitle').textContent=isNews?'Newsroom-Beiträge':'Changelog-Einträge'; $('prevKind').textContent=isNews?'Newsroom':'Changelog'; updatePreview(); }
+    function updatePreview(){ const t=$('p_title').value.trim(),s=$('p_summary').value.trim(),b=$('p_body').value;
+      let head=''; if(contentKind==='changelog'){const v=$('p_version').value.trim();head=v?`<div class="mono accent" style="color:var(--accent);font-weight:700">v${esc(v)}</div>`:'';}
+      else{const c=$('p_category').value.trim();head=c?`<span class="pill news improvement">${esc(c)}</span>`:'';}
+      $('preview').innerHTML=(head?head+'<div style="height:8px"></div>':'')+(t?`<h3 style="font-size:20px">${esc(t)}</h3>`:'')+(s?`<p class="muted">${esc(s)}</p>`:'')+richText(b); }
+    function resetEditor(){ $('p_id').value='';pendingCover='';['p_title','p_category','p_version','p_author','p_slug','p_summary','p_body'].forEach(id=>$(id).value='');
+      $('p_tag').value='feature';$('p_pinned').checked=false;$('p_published').checked=true; const cf=$('p_cover_file');if(cf)cf.value='';$('coverHint').textContent='';
+      $('editorTitle').textContent='Neuer Beitrag';$('savePostBtn').textContent='Speichern';$('cancelEditBtn').classList.add('hidden');updatePreview(); }
+    async function loadContent(){ applyKindUI(); const {posts}=await api('/admin/posts?kind='+contentKind);
+      const rows=$('postRows'); rows.innerHTML=''; $('postEmpty').classList.toggle('hidden',posts.length>0);
+      for(const p of posts){ const tr=document.createElement('tr'); tr.className='click';
+        const meta=contentKind==='news'?(p.category?esc(p.category):'–'):((p.version?'v'+esc(p.version)+' ':'')+(p.tag?`<span class="pill ${esc(p.tag)}">${esc(p.tag)}</span>`:''));
         const status=(p.published?'<span class="pill live">live</span>':'<span class="pill draft">Entwurf</span>')+(p.pinned?' <span class="pill pin">angepinnt</span>':'');
-        tr.innerHTML='<td><b>'+esc(p.title)+'</b><div class="muted" style="font-size:12px">'+esc(p.summary||'')+'</div></td>'+
-          '<td>'+meta+'</td><td>'+status+'</td><td>'+fmtDate(p.publishedAt||p.createdAt)+'</td>'+
-          '<td><div class="rowact"><button class="btn sec sm" data-pub>'+(p.published?'Verbergen':'Live')+'</button><button class="btn danger sm" data-del>Löschen</button></div></td>';
-        tr.querySelector('[data-pub]').onclick=(e)=>{e.stopPropagation();togglePub(p);};
-        tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delPost(p);};
-        tr.onclick=()=>editPost(p);
-        rows.appendChild(tr);
-      }
-    }
-    function editPost(p){
-      contentKind=p.kind;applyKindUI();
-      $('p_id').value=p.id;$('p_title').value=p.title||'';$('p_category').value=p.category||'';
-      $('p_version').value=p.version||'';$('p_tag').value=p.tag||'feature';$('p_author').value=p.author||'';
-      $('p_slug').value=p.slug||'';$('p_summary').value=p.summary||'';$('p_body').value=p.body||'';
-      $('p_pinned').checked=!!p.pinned;$('p_published').checked=!!p.published;
-      pendingCover=p.cover||'';$('coverHint').textContent=p.cover?'Aktuelles Bild gesetzt.':'';
-      $('editorTitle').textContent='Beitrag bearbeiten';$('savePostBtn').textContent='Aktualisieren';$('cancelEditBtn').classList.remove('hidden');
-      document.querySelector('[data-pane="content"] .card').scrollIntoView({behavior:'smooth',block:'start'});
-    }
-    async function savePost(){
-      const id=$('p_id').value;
-      const title=$('p_title').value.trim();
-      if(!title)return toast('Bitte gib einen Titel ein.');
-      // Upload a freshly chosen cover image first (news only).
-      const cf=$('p_cover_file');const file=cf&&cf.files&&cf.files[0];
-      if(file&&contentKind==='news'){
-        try{$('coverHint').textContent='Bild wird hochgeladen …';const up=await adminUpload(file);pendingCover=up.url;$('coverHint').textContent='Bild hochgeladen.';}
-        catch(e){return toast(e.message);}
-      }
-      const body={kind:contentKind,title,summary:$('p_summary').value.trim(),body:$('p_body').value,
-        author:$('p_author').value.trim()||undefined,slug:$('p_slug').value.trim()||undefined,
-        pinned:$('p_pinned').checked,published:$('p_published').checked,cover:pendingCover||''};
-      if(contentKind==='news'){body.category=$('p_category').value.trim();}
-      else{body.version=$('p_version').value.trim();body.tag=$('p_tag').value;}
-      try{
-        if(id){await api('/admin/posts/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Beitrag aktualisiert.');}
-        else{await api('/admin/posts',{method:'POST',body:JSON.stringify(body)});toast('Beitrag erstellt.');}
-        resetEditor();loadContent();
-      }catch(e){toast(e.message);}
-    }
-    async function togglePub(p){try{await api('/admin/posts/'+p.id,{method:'PATCH',body:JSON.stringify({published:!p.published})});toast(p.published?'Verborgen.':'Veröffentlicht.');loadContent();}catch(e){toast(e.message);}}
-    async function delPost(p){if(!confirm('„'+p.title+'“ wirklich löschen?'))return;try{await api('/admin/posts/'+p.id,{method:'DELETE'});toast('Gelöscht.');loadContent();}catch(e){toast(e.message);}}
+        tr.innerHTML=`<td><b>${esc(p.title)}</b><div class="muted" style="font-size:12px">${esc(p.summary||'')}</div></td><td>${meta}</td><td>${status}</td><td class="mono" style="font-size:12px">${fmtDate(p.publishedAt||p.createdAt)}</td>`+
+          `<td><div class="rowact"><button class="btn sec sm" data-pub>${p.published?'Verbergen':'Live'}</button><button class="btn danger sm" data-del>Löschen</button></div></td>`;
+        tr.querySelector('[data-pub]').onclick=(e)=>{e.stopPropagation();togglePub(p);}; tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delPost(p);};
+        tr.onclick=()=>editPost(p); rows.appendChild(tr); } }
+    function editPost(p){ contentKind=p.kind;applyKindUI(); $('p_id').value=p.id;$('p_title').value=p.title||'';$('p_category').value=p.category||'';
+      $('p_version').value=p.version||'';$('p_tag').value=p.tag||'feature';$('p_author').value=p.author||'';$('p_slug').value=p.slug||'';$('p_summary').value=p.summary||'';$('p_body').value=p.body||'';
+      $('p_pinned').checked=!!p.pinned;$('p_published').checked=!!p.published;pendingCover=p.cover||'';$('coverHint').textContent=p.cover?'Aktuelles Bild gesetzt.':'';
+      $('editorTitle').textContent='Beitrag bearbeiten';$('savePostBtn').textContent='Aktualisieren';$('cancelEditBtn').classList.remove('hidden');updatePreview();
+      document.querySelector('[data-pane="content"] .card').scrollIntoView({behavior:'smooth',block:'start'}); }
+    async function savePost(){ const id=$('p_id').value; const title=$('p_title').value.trim(); if(!title)return toast('Bitte gib einen Titel ein.');
+      const cf=$('p_cover_file'); const file=cf&&cf.files&&cf.files[0];
+      if(file&&contentKind==='news'){ try{$('coverHint').textContent='Bild wird hochgeladen …';const up=await adminUpload(file);pendingCover=up.url;$('coverHint').textContent='Bild hochgeladen.';}catch(e){return toast(e.message);} }
+      const body={kind:contentKind,title,summary:$('p_summary').value.trim(),body:$('p_body').value,author:$('p_author').value.trim()||undefined,slug:$('p_slug').value.trim()||undefined,pinned:$('p_pinned').checked,published:$('p_published').checked,cover:pendingCover||''};
+      if(contentKind==='news')body.category=$('p_category').value.trim(); else{body.version=$('p_version').value.trim();body.tag=$('p_tag').value;}
+      try{ if(id){await api('/admin/posts/'+id,{method:'PATCH',body:JSON.stringify(body)});toast('Beitrag aktualisiert.');}else{await api('/admin/posts',{method:'POST',body:JSON.stringify(body)});toast('Beitrag erstellt.');} resetEditor();loadContent(); }catch(e){toast(e.message);} }
+    async function togglePub(p){ try{await api('/admin/posts/'+p.id,{method:'PATCH',body:JSON.stringify({published:!p.published})});toast(p.published?'Verborgen.':'Veröffentlicht.');loadContent();}catch(e){toast(e.message);} }
+    async function delPost(p){ if(!confirm('„'+p.title+'“ wirklich löschen?'))return; try{await api('/admin/posts/'+p.id,{method:'DELETE'});toast('Gelöscht.');loadContent();}catch(e){toast(e.message);} }
+
+    // ---- config ----
+    let cfgFlagsState={};
+    function renderFlags(){ const keys=Object.keys(cfgFlagsState).sort();
+      $('cfgFlags').innerHTML=keys.map(k=>`<label class="switch" style="color:var(--text)"><input type="checkbox" data-flag="${esc(k)}" ${cfgFlagsState[k]?'checked':''}> ${esc(k)}</label>`).join('')||'<span class="muted">Keine Flags.</span>';
+      document.querySelectorAll('[data-flag]').forEach(el=>el.onchange=()=>{cfgFlagsState[el.dataset.flag]=el.checked;}); }
+    async function loadConfig(){ const c=await api('/admin/config'); cfgFlagsState={...(c.flags||{})}; renderFlags();
+      $('cfg_notice_text').value=c.notice?c.notice.text:''; $('cfg_notice_level').value=c.notice?c.notice.level:'info';
+      $('cfg_notice_route').innerHTML=routeOptions(); $('cfg_notice_route').value=(c.notice&&c.notice.route)||'';
+      $('cfg_max_status').value=(c.values&&c.values.maxStatusSeconds)||30; $('cfg_invite').value=(c.values&&c.values.inviteUrl)||'';
+      $('cfg_min_build').value=c.minSupportedBuild||0; $('cfgUpdated').textContent=c.updatedAt?('Zuletzt geändert: '+fmtDateTime(c.updatedAt)):''; }
+    async function saveConfig(){ const text=$('cfg_notice_text').value.trim(); const route=$('cfg_notice_route').value;
+      const notice=text?{text,level:$('cfg_notice_level').value,...(route?{route}:{})}:null;
+      const body={flags:cfgFlagsState,values:{maxStatusSeconds:Math.max(1,Number($('cfg_max_status').value)||30),inviteUrl:$('cfg_invite').value.trim()},notice,minSupportedBuild:Math.max(0,Number($('cfg_min_build').value)||0)};
+      try{await api('/admin/config',{method:'PUT',body:JSON.stringify(body)});toast('Konfiguration gespeichert.');loadConfig();}catch(e){toast(e.message);} }
+    function addFlag(){ const name=(prompt('Name des neuen Feature-Flags (z. B. communities):')||'').trim(); if(!name)return;
+      if(!/^[a-zA-Z][a-zA-Z0-9_]{0,40}$/.test(name))return toast('Ungültiger Flag-Name.'); cfgFlagsState[name]=false; renderFlags(); }
+
+    // ---- audit ----
+    async function loadAudit(){ const q=encodeURIComponent($('auditQ').value.trim()); const {entries}=await api('/admin/audit?q='+q+'&limit=200');
+      const rows=$('auditRows'); rows.innerHTML=''; $('auditEmpty').classList.toggle('hidden',entries.length>0);
+      for(const e of entries){ const tr=document.createElement('tr');
+        tr.innerHTML=`<td class="mono" style="font-size:12px;white-space:nowrap">${fmtDateTime(e.createdAt)}</td><td><span class="pill improvement">${esc(e.action)}</span></td><td>${esc(e.target||'–')}</td><td class="muted">${esc(e.detail||'')}</td><td>${esc(e.actor)}</td><td class="mono" style="font-size:11px;color:var(--faint)">${esc(e.ip||'')}</td>`;
+        rows.appendChild(tr); } }
 
     // ---- system ----
-    async function loadSystem(){
-      const o=await api('/admin/system');const s=o.system;
+    async function loadSystem(){ const o=await api('/admin/system'); const s=o.system;
       $('sysGrid').innerHTML=
-        stat('v'+s.version,'App-Version','📱')+stat(s.node,'Node','⬡')+stat(fmtUptime(s.uptimeSec),'Uptime','⏱️')+
-        stat(s.rssMb+' MB','Speicher (RSS)','📈')+stat(s.heapMb+' MB','Heap','🧠')+
-        stat(s.freeMemMb+'/'+s.totalMemMb,'RAM frei/ges. (MB)','💾')+
-        stat((s.loadAvg&&s.loadAvg[0]!=null?s.loadAvg[0]:'–'),'Last 1m','⚙️')+
-        stat(s.smsProvider,'SMS-Anbieter','✉️')+stat(s.pushEnabled?'aktiv':'aus','Push (FCM)','🔔',s.pushEnabled?'on':'')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht','🔐')+stat(o.backups,'Backups','🗄️');
-      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> ('+(d.build||d.version)+') · '+human(d.size)+'<br><span class="muted" style="font-size:12px">sha256 '+(d.sha256||'').slice(0,16)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
-      loadBackups();
-    }
-    async function loadBackups(){const {backups}=await api('/admin/backups');const rows=$('backupRows');rows.innerHTML='';$('backupEmpty').classList.toggle('hidden',backups.length>0);
-      for(const b of backups){const tr=document.createElement('tr');tr.innerHTML='<td>'+esc(b.name||'')+'</td><td>'+human(b.size)+'</td><td>'+fmtDateTime(b.createdAt)+'</td><td style="text-align:right"><button class="btn sec sm" onclick="downloadBackup(\''+esc(b.name||'')+'\')">⬇︎ Laden</button></td>';rows.appendChild(tr);}}
-    async function downloadBackup(name){try{const r=await fetch('/api/admin/backups/'+encodeURIComponent(name),{headers:{'X-Admin-Token':token}});if(!r.ok)throw 0;const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}catch{toast('Download fehlgeschlagen.');}}
-    async function makeBackup(){try{await api('/admin/backups',{method:'POST'});toast('Backup erstellt.');loadSystem();}catch(e){toast(e.message);}}
+        stat('v'+s.version,'App-Version',IC.system)+stat(s.node,'Node',IC.system)+stat(fmtUptime(s.uptimeSec),'Uptime',IC.refresh)+
+        stat(s.rssMb+' MB','Speicher (RSS)',IC.system)+stat(s.heapMb+' MB','Heap',IC.system)+stat(s.freeMemMb+'/'+s.totalMemMb,'RAM frei/ges. (MB)',IC.system)+
+        stat((s.loadAvg&&s.loadAvg[0]!=null?s.loadAvg[0]:'–'),'Last 1m',IC.config)+stat(s.smsProvider,'SMS-Anbieter',IC.broadcast)+
+        stat(s.pushEnabled?'aktiv':'aus','Push (FCM)',IC.broadcast,s.pushEnabled?'on':'')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht',IC.config)+stat(o.backups,'Backups',IC.audit);
+      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> ('+(d.build||d.version)+') · '+human(d.size)+'<br><span class="muted mono" style="font-size:12px">sha256 '+(d.sha256||'').slice(0,18)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
+      loadBackups(); }
+    async function loadBackups(){ const {backups}=await api('/admin/backups'); const rows=$('backupRows'); rows.innerHTML=''; $('backupEmpty').classList.toggle('hidden',backups.length>0);
+      for(const b of backups){const tr=document.createElement('tr');tr.innerHTML=`<td class="mono" style="font-size:12px">${esc(b.name||'')}</td><td class="mono">${human(b.size)}</td><td class="mono" style="font-size:12px">${fmtDateTime(b.createdAt)}</td><td style="text-align:right"><button class="btn sec sm" data-dl="${esc(b.name||'')}">Laden</button></td>`;
+        tr.querySelector('[data-dl]').onclick=()=>downloadBackup(b.name||''); rows.appendChild(tr);} }
+    async function downloadBackup(name){ try{const r=await fetch('/api/admin/backups/'+encodeURIComponent(name),{headers:{'X-Admin-Token':token}});if(!r.ok)throw 0;const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}catch{toast('Download fehlgeschlagen.');} }
+    async function makeBackup(){ try{await api('/admin/backups',{method:'POST'});toast('Backup erstellt.');loadSystem();}catch(e){toast(e.message);} }
 
-    // ---- config (remote config / feature flags) ----
-    async function loadConfig(){
-      const c=await api('/admin/config');
-      const keys=Object.keys(c.flags||{}).sort();
-      $('cfgFlags').innerHTML=keys.map(k=>'<label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-flag="'+esc(k)+'" style="width:auto"'+(c.flags[k]?' checked':'')+' /> '+esc(k)+'</label>').join('')||'<span class="muted">Keine Flags.</span>';
-      $('cfg_notice_text').value=c.notice?c.notice.text:'';
-      $('cfg_notice_level').value=c.notice?c.notice.level:'info';
-      $('cfg_max_status').value=(c.values&&c.values.maxStatusSeconds)||30;
-      $('cfg_min_build').value=c.minSupportedBuild||0;
-      $('cfgUpdated').textContent=c.updatedAt?('Zuletzt geändert: '+fmtDateTime(c.updatedAt)):'';
+    // ---- command palette ----
+    function openCmd(){
+      closeCmd();
+      const root=$('cmdRoot'); const el=document.createElement('div'); el.className='cmdpal'; el.onclick=(e)=>{if(e.target===el)closeCmd();};
+      el.innerHTML=`<div class="cmdbox"><input id="cmdInput" placeholder="Tab wechseln, Nutzer suchen, Aktion …" autocomplete="off"><div class="cmdlist" id="cmdList"></div></div>`;
+      root.appendChild(el);
+      const input=$('cmdInput'); let sel=0, items=[];
+      const base=[
+        ...TABS.map(([k,l])=>({label:l,tag:'Tab',icon:IC[k],run:()=>{switchTab(k);closeCmd();}})),
+        {label:'Theme wechseln',tag:'Aktion',icon:IC.sun,run:()=>{toggleTheme();closeCmd();}},
+        {label:'Backup jetzt erstellen',tag:'Aktion',icon:IC.audit,run:()=>{makeBackup();closeCmd();}},
+        {label:'Nutzer als CSV exportieren',tag:'Aktion',icon:IC.users,run:()=>{exportCsv();closeCmd();}},
+      ];
+      function draw(){ const list=$('cmdList'); list.innerHTML=items.map((it,i)=>`<div class="cmdrow${i===sel?' sel':''}" data-i="${i}">${it.icon?svg(it.icon):''}<span>${esc(it.label)}</span><span class="tag">${esc(it.tag)}</span></div>`).join('')||'<div class="cmdrow muted">Keine Treffer</div>';
+        list.querySelectorAll('[data-i]').forEach(r=>{r.onclick=()=>items[+r.dataset.i].run();}); }
+      async function refresh(){ const q=input.value.trim().toLowerCase(); items=base.filter(b=>b.label.toLowerCase().includes(q)); sel=0; draw();
+        if(q.length>=2){ try{const {users}=await api('/admin/users?q='+encodeURIComponent(q)); for(const u of users.slice(0,6)) items.push({label:u.displayName+' · '+u.phone,tag:'Nutzer',icon:IC.users,run:()=>{closeCmd();switchTab('users');openUser(u.id);}});}catch{} draw(); } }
+      let cmdT; input.addEventListener('input',()=>{clearTimeout(cmdT);cmdT=setTimeout(refresh,180);});
+      input.addEventListener('keydown',(e)=>{ if(e.key==='ArrowDown'){e.preventDefault();sel=Math.min(items.length-1,sel+1);draw();}
+        else if(e.key==='ArrowUp'){e.preventDefault();sel=Math.max(0,sel-1);draw();}
+        else if(e.key==='Enter'){e.preventDefault();if(items[sel])items[sel].run();} else if(e.key==='Escape')closeCmd(); });
+      refresh(); input.focus();
     }
-    async function saveConfig(){
-      const flags={};document.querySelectorAll('[data-flag]').forEach(el=>{flags[el.dataset.flag]=el.checked;});
-      const text=$('cfg_notice_text').value.trim();
-      const notice=text?{text,level:$('cfg_notice_level').value}:null;
-      const body={flags,values:{maxStatusSeconds:Math.max(1,Number($('cfg_max_status').value)||30)},notice,minSupportedBuild:Math.max(0,Number($('cfg_min_build').value)||0)};
-      try{await api('/admin/config',{method:'PUT',body:JSON.stringify(body)});toast('Konfiguration gespeichert.');loadConfig();}catch(e){toast(e.message);}
-    }
+    function closeCmd(){ $('cmdRoot').innerHTML=''; }
+    function exportCsv(){ fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}}).then(r=>r.blob()).then(blob=>{const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}).catch(()=>toast('Export fehlgeschlagen.')); }
 
     // ---- wire ----
+    buildNav();
+    document.querySelector('.side .foot').insertAdjacentHTML('afterbegin','<button class="ico" id="themeBtn" title="Design wechseln" style="margin-bottom:10px"></button>');
+    applyTheme();
     $('b_route').innerHTML=routeOptions();
-    $('loginBtn').onclick=login;$('token').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
-    $('logoutBtn').onclick=logout;$('broadcastBtn').onclick=broadcast;$('createBtn').onclick=createUser;$('backupBtn').onclick=makeBackup;
-    $('dmAllBtn').onclick=broadcastDm;$('statusBtn').onclick=postStatus;
-    $('savePostBtn').onclick=savePost;$('cancelEditBtn').onclick=resetEditor;
-    $('cfgSaveBtn').onclick=saveConfig;
-    $('csvBtn').onclick=async()=>{try{const r=await fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}});const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}catch{toast('Export fehlgeschlagen.');}};
+    $('themeBtn').onclick=toggleTheme;
+    $('loginBtn').onclick=login; $('token').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+    $('logoutBtn').onclick=logout; $('broadcastBtn').onclick=broadcast; $('createBtn').onclick=createUser; $('backupBtn').onclick=makeBackup;
+    $('dmAllBtn').onclick=broadcastDm; $('statusBtn').onclick=postStatus; $('savePostBtn').onclick=savePost; $('cancelEditBtn').onclick=resetEditor;
+    $('cfgSaveBtn').onclick=saveConfig; $('addFlagBtn').onclick=addFlag; $('csvBtn').onclick=exportCsv; $('autoRefresh').onchange=(e)=>e.target.checked?startAuto():stopAuto();
+    $('cmdkHint').onclick=openCmd;
+    document.querySelectorAll('[data-reload]').forEach(b=>{ b.innerHTML=svg(IC.refresh); b.onclick=()=>(LOADERS[b.dataset.reload])().catch(e=>toast(e.message)); });
+    document.querySelectorAll('#rangeSeg button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#rangeSeg button').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.d;loadOverview().catch(e=>toast(e.message));});
+    document.querySelectorAll('#kindSeg button').forEach(b=>b.onclick=()=>{contentKind=b.dataset.k;applyKindUI();resetEditor();loadContent().catch(e=>toast(e.message));});
+    document.querySelectorAll('#userFilters button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#userFilters button').forEach(x=>x.classList.remove('active'));b.classList.add('active');userFilter=b.dataset.f;applyUserView();});
+    document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>{ const k=th.dataset.sort; userSort.dir=userSort.key===k?-userSort.dir:(k==='displayName'?1:-1); userSort.key=k;
+      document.querySelectorAll('th.sortable .arr').forEach(a=>a.remove()); th.insertAdjacentHTML('beforeend',`<span class="arr"> ${userSort.dir>0?'↑':'↓'}</span>`); applyUserView(); });
+    $('selAll').onclick=(e)=>{ if(e.target.checked)userCache.forEach(u=>selected.add(u.id)); else selected.clear(); applyUserView(); };
+    document.querySelectorAll('[data-bulk]').forEach(b=>b.onclick=()=>{ const k=b.dataset.bulk; if(k==='clear'){selected.clear();applyUserView();}else bulkAction(k); });
+    ['p_title','p_summary','p_body','p_category','p_version'].forEach(id=>$(id).addEventListener('input',updatePreview));
+    $('b_body').addEventListener('input',e=>$('b_count').textContent=e.target.value.length);
+    $('dm_body').addEventListener('input',e=>$('dm_count').textContent=e.target.value.length);
     $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
-    document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+    $('chatQ').addEventListener('input',()=>{clearTimeout(window._tc);window._tc=setTimeout(()=>loadChats().catch(()=>{}),300);});
+    $('auditQ').addEventListener('input',()=>{clearTimeout(window._ta);window._ta=setTimeout(()=>loadAudit().catch(()=>{}),300);});
+    document.addEventListener('keydown',e=>{
+      if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!$('dash').classList.contains('hidden'))openCmd();}
+      else if(e.key==='Escape'){closeModal();closeCmd();}
+    });
 
-    (async()=>{if(token){try{await loadOverview();showDash();switchTab('overview');return;}catch{logout();}}showLogin();})();
+    (async()=>{ if(token){try{await loadOverview();showDash();switchTab('overview');return;}catch{logout();}} showLogin(); })();
   </script>
 </body>
 </html>

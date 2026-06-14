@@ -264,6 +264,38 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages(send_at);
   CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_messages(chat_id, sender_id);
+
+  -- Call log. One row per participant per call (so each side keeps its own
+  -- direction/outcome). call_id is the shared WebRTC id; (user_id, call_id) is
+  -- unique so a re-posted log just updates the existing entry.
+  CREATE TABLE IF NOT EXISTS calls (
+    id         TEXT PRIMARY KEY,
+    call_id    TEXT NOT NULL,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    peer_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    direction  TEXT NOT NULL CHECK (direction IN ('incoming','outgoing')),
+    video      INTEGER NOT NULL DEFAULT 0,
+    outcome    TEXT NOT NULL
+      CHECK (outcome IN ('completed','missed','declined','canceled','failed')),
+    duration   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_calls_user_callid ON calls(user_id, call_id);
+  CREATE INDEX IF NOT EXISTS idx_calls_user ON calls(user_id, created_at);
+
+  -- Audit trail of admin actions (user edits, bans, deletions, broadcasts,
+  -- config changes, content publishing …). Append-only accountability log shown
+  -- in the admin portal so every privileged change is attributable.
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id         TEXT PRIMARY KEY,
+    actor      TEXT NOT NULL DEFAULT 'admin',
+    action     TEXT NOT NULL,
+    target     TEXT NOT NULL DEFAULT '',
+    detail     TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------

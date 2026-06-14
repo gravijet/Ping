@@ -30,7 +30,13 @@ Online-Status, Lesebestätigungen).
 - **Vorlesen (Text-to-Speech)** – Nachrichten vorlesen lassen, optional
   automatisch im offenen Chat; Sprache, Tempo und Tonhöhe einstellbar.
 - **Status** – wie bei WhatsApp: Text-, Bild- **oder Video**-Updates, die nach
-  24 h ablaufen, mit „gesehen"-Ringen und Betrachterliste.
+  24 h ablaufen, mit „gesehen"-Ringen und Betrachterliste. Beim Ansehen wird
+  automatisch beim ersten **noch ungesehenen** Update gestartet (alte werden nicht
+  erneut gezeigt), und die Ringfarben zeigen klar, was neu und was schon gesehen ist.
+- **Anrufe** – 1:1-**Sprach- und Videoanrufe** über WebRTC, mit echtem
+  Klingelton/Freizeichen, Vibration, Anrufdauer, Voll­bild-Eingangsanruf (auch
+  über den Sperrbildschirm) und **Anrufverlauf** (Tab „Anrufe", inkl. Rückruf).
+  STUN/TURN liefert der Server über `/api/ice`.
 - **Verifizierungs-Badges** – ein unverkennbares **offizielles Siegel** für das
   „Ping-Team"-Konto, ein **blauer Haken** für Ping-Mitarbeiter/Admins und ein
   goldenes **Ping-Premium**-Abzeichen. Die Badges erscheinen überall neben dem
@@ -60,7 +66,11 @@ Online-Status, Lesebestätigungen).
 - **Admin** – Web-Portal **und** In-App-Panel (für Admin-Konten): Statistik,
   Nutzerverwaltung, Premium vergeben, Durchsagen und offizielle Status (auch mit
   Bild/Video) an alle.
-- **Benachrichtigungen** – lokale Hinweise bei neuen Nachrichten (Android).
+- **Benachrichtigungen** – Push **und** lokale Hinweise bei neuen Nachrichten,
+  Durchsagen, **Status-Updates** und **Anrufen** (Android, via Firebase Cloud
+  Messaging). Eingehende Anrufe kommen als hochpriorer Daten-Push und klingeln
+  per Voll­bild-Hinweis, auch wenn die App geschlossen ist; verpasste Anrufe
+  erzeugen eine eigene Notiz.
 - **Konto löschen** – jede Person kann ihr eigenes Konto dauerhaft löschen
   (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
   eigenen Nachrichten erscheinen dort nur noch als „Gelöschtes Konto".
@@ -125,7 +135,7 @@ Tests:
 
 ```bash
 cd server
-npm test           # 67 End-to-End-Tests (Konto, Kontakte, Medien, Status, Badges, Premium, Admin, Newsroom/Changelog …)
+npm test           # 81 End-to-End-Tests (Konto, Kontakte, Medien, Status, Badges, Premium, Admin, Newsroom/Changelog …)
 ```
 
 ### 2. App starten
@@ -183,23 +193,32 @@ sich jederzeit auf dem Login-Screen oder in den Einstellungen unter
 
 ## Admin-Portal
 
-Unter **`/admin`** (z. B. `https://<dein-server>/admin`) gibt es eine schlanke
-Web-Oberfläche zum Verwalten der Nutzer:
+Unter **`/admin`** (z. B. `https://<dein-server>/admin`) gibt es ein vollwertiges
+Dashboard (Hell-/Dunkel-Theme, Befehls-Palette mit **⌘K**) zum Verwalten von
+Ping:
 
-- Statistik (Nutzer, online, Chats, Gruppen, Nachrichten, aktive Status,
-  Newsroom- & Changelog-Beiträge),
-- Durchsage an alle verbundenen Apps senden,
-- offizielle **Status für alle** posten – als Text **oder mit Bild/Video** (Upload
-  direkt im Portal),
-- private „Ping-Team"-Nachrichten an einzelne Nutzer oder an alle,
-- **Inhalte** verwalten: **Newsroom-Artikel** (Kategorie, Titelbild, Markdown-
-  leichter Text) und **Changelog-Einträge** (Version, Art der Änderung) anlegen,
-  bearbeiten, anpinnen, als Entwurf speichern oder veröffentlichen,
-- Nutzer anlegen (Nummer, E-Mail, Passwort, optional Admin-Flag),
-- **Ping Premium** vergeben/entziehen (Premium-Badge),
-- Liste durchsuchen, Namen/Passwörter ändern, Admin-Rechte setzen, sperren,
-  Nutzer löschen. Das geschützte „Ping-Team"-Systemkonto lässt sich nicht
-  bearbeiten oder löschen.
+- **Übersicht** – Statistik-Kacheln und Trend-Charts (neue Nutzer & Nachrichten)
+  mit umschaltbarem Zeitfenster (7/14/30 Tage) sowie Auto-Refresh.
+- **Nutzer** – durchsuchbar, mit Filter-Chips (online/Admins/gesperrt/Premium),
+  sortierbaren Spalten und **Mehrfachauswahl** für Sammel-Aktionen
+  (Sperren/Entsperren/Löschen). Im Detail: Name/E-Mail/Über-mich/Passwort ändern,
+  Admin- und **Premium**-Badge setzen, sperren, Banner- oder „Ping-Team"-Chat-
+  Nachricht senden. Das geschützte „Ping-Team"-Systemkonto bleibt unantastbar.
+- **Moderation** – alle Chats einsehen (Mitglieder, Nachrichtenzahl, letzte
+  Aktivität), einen Chat öffnen, um die letzten Nachrichten zu prüfen, und Chats
+  bei Bedarf löschen.
+- **Durchsagen** – Push-Durchsage an alle, private „Ping-Team"-Nachricht an alle
+  und offizielle **Status für alle** (Text **oder** Bild/Video, Upload direkt im
+  Portal), inkl. Verlauf.
+- **Inhalte** – **Newsroom-Artikel** (Kategorie, Titelbild) und **Changelog-
+  Einträge** (Version, Art) anlegen, bearbeiten, anpinnen, als Entwurf speichern
+  oder veröffentlichen — mit **Live-Vorschau** des gerenderten Beitrags.
+- **Konfiguration** – Feature-Flags (auch neue hinzufügen), Hinweis-Banner,
+  Limits, Einladungs-URL und Mindest-Build — wirkt sofort, ohne App-Update.
+- **Audit-Log** – nachvollziehbare, durchsuchbare Historie **jeder** Admin-Aktion
+  (wer, was, woran, von welcher IP).
+- **System** – Server-Zustand (Version, Uptime, Speicher, Last, Push/SMS),
+  aktueller App-Build und **Backups** (auslösen & herunterladen).
 
 Der Zugang geht über das **`ADMIN_TOKEN`** (Header `X-Admin-Token`, timing-sicher
 verglichen) **oder** über ein angemeldetes Admin-Konto — Letzteres treibt auch
@@ -212,22 +231,29 @@ der Entwicklung lautet das Token `ping-admin-dev`.
 ## Website
 
 Die öffentliche Marketing-Seite läuft unter der Adresse
-**`example.invalid`**. Alle Seiten teilen sich ein
-Design-System (`server/public/site.css` + `site.js`):
+**`example.invalid`** und ist eine **Single-Page-App**: ein gemeinsames
+Shell (`index.html`) lädt das Design-System (`server/public/site.css` + `site.js`),
+und ein Client-Router rendert die einzelnen Ansichten **ohne vollständigen
+Seiten-Neuaufbau**. Der Server liefert dasselbe Shell für jede Route aus, sodass
+Deep-Links und Vor/Zurück-Navigation nativ funktionieren.
 
-- **`/`** – Startseite mit Live-Statistik, Funktionsüberblick, Newsroom- &
-  Changelog-Teasern und direktem APK-Download.
-- **`/news`** (+ `/news/:slug`) – **Newsroom** mit Artikeln, Kategorien und
-  Titelbildern; Einzelartikel mit eigenem Layout.
-- **`/changelog`** – **Changelog** als Timeline, filterbar nach Art der Änderung
-  (Neu/Verbessert/Behoben/Sicherheit).
+- **`/`** – Startseite mit Live-Statistik, Funktionsüberblick (echte Line-Icons),
+  Installationsschritten, **Download-Karte mit Per-ABI-Varianten & SHA-256**,
+  Newsroom- & Changelog-Teasern und FAQ.
+- **`/news`** (+ `/news/:slug`) – **Newsroom** mit Suche und Kategorie-Filter;
+  Einzelartikel mit Lesefortschritts-Balken, Lesezeit und Teilen/Link-kopieren.
+- **`/changelog`** – **Changelog** als Timeline, mit Volltext-Suche und Filter
+  nach Art der Änderung (Neu/Verbessert/Behoben/Sicherheit).
 - **`/status`** – öffentliche **System-Status-Seite**: zeigt live, ob API,
-  Echtzeit-Verbindung und Daten-Dienste laufen, inkl. Live-Zählern und Uptime.
+  Echtzeit-Verbindung und Daten-Dienste laufen, inkl. gemessener API-Latenz
+  (Sparkline), Live-Zählern und Uptime.
 - **`/legal`** – Impressum & Datenschutzerklärung.
 
-Newsroom und Changelog speisen sich aus der öffentlichen JSON-API
-(`/api/news`, `/api/news/:slug`, `/api/changelog`, `/api/public/stats`) und werden
-im Admin-Portal unter **Inhalte** gepflegt. Eine Startbefüllung gibt es per
+Dazu kommen **Hell-/Dunkel-Theme** (mit System-Erkennung, persistiert),
+Tastatur-Shortcut `/` für die Suche und ein „Nach oben"-Knopf. Newsroom und
+Changelog speisen sich aus der öffentlichen JSON-API (`/api/news`,
+`/api/news/:slug`, `/api/changelog`, `/api/public/stats`) und werden im
+Admin-Portal unter **Inhalte** gepflegt. Eine Startbefüllung gibt es per
 `node scripts/seed-content.mjs` (liest `ADMIN_TOKEN` aus `server/.env`).
 
 ---
@@ -242,7 +268,7 @@ cd server && npm test
 cd app && flutter analyze && flutter test
 ```
 
-- **Backend:** 67 Tests decken Registrierung (Nummer + E-Mail + Passwort,
+- **Backend:** 81 Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
   schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
   Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,
@@ -262,13 +288,10 @@ cd app && flutter analyze && flutter test
 ping/
 ├── server/
 │   ├── public/
-│   │   ├── index.html    # Landing-Page (Live-Stats, Newsroom/Changelog-Teaser)
-│   │   ├── news.html     # Newsroom (Liste + Einzelartikel)
-│   │   ├── changelog.html# Changelog-Timeline
-│   │   ├── status.html   # Öffentliche System-Status-Seite
-│   │   ├── legal.html    # Impressum & Datenschutz
-│   │   ├── site.css/.js  # Gemeinsames Web-Design-System (Nav, Footer, Helfer)
-│   │   └── admin.html    # Admin-Portal (statische Seite, tokengeschützt)
+│   │   ├── index.html    # SPA-Shell (für /, /news, /changelog, /status, /legal)
+│   │   ├── site.css      # Web-Design-System (Ink-Palette, Hell/Dunkel)
+│   │   ├── site.js       # Marketing-SPA: Router + alle Ansichten + Helfer
+│   │   └── admin.html    # Admin-Dashboard (statische Seite, tokengeschützt)
 │   ├── scripts/
 │   │   ├── publish-apk.sh   # Release-APK in den Download-Ordner kopieren
 │   │   └── seed-content.mjs # Newsroom/Changelog mit Startinhalten füllen
@@ -280,6 +303,7 @@ ping/
 │       ├── chatRepo.js   # Chats & Nachrichten (SQLite)
 │       ├── repo.js       # Nutzer, Avatare, Kontaktabgleich, Serialisierung
 │       ├── postsRepo.js  # Newsroom-Artikel & Changelog-Einträge (SQLite)
+│       ├── auditRepo.js  # Audit-Log der Admin-Aktionen (SQLite)
 │       ├── auth.js       # JWT + bcrypt + Admin-Token-Middleware
 │       ├── phone.js      # Telefonnummer-Normalisierung (E.164)
 │       ├── avatars.js    # Profilbilder auf der Platte

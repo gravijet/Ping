@@ -97,21 +97,33 @@ function isDeadTokenError(status, errJson) {
 }
 
 async function sendOne(accessToken, token, payload) {
-  const { title, body, data } = payload;
+  const { title, body, data, android, channelId } = payload;
   // FCM data values must be strings.
   const stringData = {};
   for (const [k, v] of Object.entries(data || {})) {
     stringData[k] = v == null ? '' : String(v);
   }
+  // A payload with no title/body is a *silent data message*: the client's
+  // background handler turns it into the right UI (e.g. a full-screen incoming
+  // call) instead of the OS drawing a tray notification. Used for calls.
+  const isDataOnly = !title && !body;
   const message = {
     token,
-    notification: { title, body },
     data: stringData,
     android: {
       priority: 'high',
-      notification: { sound: 'default', channel_id: 'ping_messages' },
+      ...(android || {}),
+      ...(isDataOnly
+        ? {}
+        : {
+            notification: {
+              sound: 'default',
+              channel_id: channelId || 'ping_messages',
+            },
+          }),
     },
   };
+  if (!isDataOnly) message.notification = { title, body };
   const res = await fetch(
     `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
     {
@@ -143,6 +155,8 @@ async function sendOne(accessToken, token, payload) {
  * the caller's perspective — failures are logged, dead tokens pruned.
  */
 export async function sendPushToUsers(userIds, payload) {
+  // Never hit the network (or a real device) from the test suite.
+  if (process.env.NODE_ENV === 'test') return 0;
   if (!pushEnabled() || userIds.length === 0) return 0;
   const tokens = tokensForUsers(userIds);
   if (tokens.length === 0) return 0;

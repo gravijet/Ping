@@ -49,6 +49,7 @@ import {
   remoteConfigSchema,
   scheduleSchema,
   joinSchema,
+  callLogSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import {
@@ -162,6 +163,13 @@ import {
   statusViewers,
 } from './statusRepo.js';
 import {
+  recordCall,
+  listCalls,
+  deleteCall,
+  clearCalls,
+  callView,
+} from './callsRepo.js';
+import {
   broadcastToChat,
   sendToUser,
   isOnline,
@@ -187,11 +195,32 @@ import {
   countPublishedPosts,
   postView,
 } from './postsRepo.js';
+import { recordAudit, listAudit } from './auditRepo.js';
 
 export const router = Router();
 
 // Wrap async handlers so thrown errors hit the error middleware.
 const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// Best-effort client IP (Cloudflare passes the real address in CF-Connecting-IP;
+// fall back to the socket address for local/dev/tests).
+function clientIp(req) {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  return req.ip || '';
+}
+
+// Record one privileged admin action. The actor is the signed-in admin user's
+// name when available, otherwise the shared portal token. Never throws.
+function audit(req, action, target = '', detail = '') {
+  recordAudit({
+    actor: req.user ? req.user.display_name : 'Portal-Token',
+    action,
+    target,
+    detail,
+    ip: clientIp(req),
+  });
+}
 
 // A constant bcrypt hash to compare against when no user is found, keeping
 // login timing roughly constant whether or not an account exists.
@@ -1643,8 +1672,21 @@ router.post(
       attachment: att,
       bgColor: bgColor || null,
     });
-    for (const peerId of getPeerIds(req.user.id)) {
+    const peerIds = getPeerIds(req.user.id).filter((id) => id !== req.user.id);
+    for (const peerId of peerIds) {
       sendToUser(peerId, 'status-added', { userId: req.user.id });
+    }
+    // Notify peers who aren't currently connected, on a quieter status channel so
+    // it never feels as loud as a direct message.
+    const poster = getUserById(req.user.id);
+    const offlinePeers = peerIds.filter((id) => !isOnline(id));
+    if (offlinePeers.length > 0) {
+      sendPushToUsers(offlinePeers, {
+        title: poster?.display_name || 'Ping',
+        body: 'hat einen neuen Status geteilt',
+        channelId: 'ping_status',
+        data: { type: 'status', userId: req.user.id, route: 'status' },
+      }).catch(() => {});
     }
     res.status(201).json({ status: statusView(row, req.user.id) });
   })
@@ -1724,6 +1766,92 @@ router.delete(
     }
     deleteStatus(s.id);
     res.status(204).end();
+  })
+);
+
+// ---- WebRTC calls ----------------------------------------------------------
+
+/** Build the ICE server list from config: public STUN plus a configured TURN. */
+function iceServers() {
+  const servers = [{ urls: config.ice.stun }];
+  if (config.ice.turnUrl) {
+    // Offer the TURN endpoint over both UDP/TCP (the url as configured) and, when
+    // a plain turn: url is given, a TLS turns: variant on 5349 for locked-down
+    // networks that only allow 443/TLS out.
+    const urls = [config.ice.turnUrl];
+    servers.push({
+      urls,
+      username: config.ice.turnUser,
+      credential: config.ice.turnPass,
+    });
+  }
+  return servers;
+}
+
+// ICE (STUN/TURN) servers for a call. Auth-gated so credentials aren't public.
+router.get(
+  '/ice',
+  requireAuth,
+  h(async (_req, res) => {
+    res.json({ iceServers: iceServers() });
+  })
+);
+
+// Record a finished call in the caller's/callee's own log. Idempotent per
+// (user, callId) so re-posting (retry) updates rather than duplicates.
+router.post(
+  '/calls',
+  requireAuth,
+  h(async (req, res) => {
+    const { peerId, callId, direction, video, outcome, duration } = parse(
+      callLogSchema,
+      req.body || {}
+    );
+    if (peerId === req.user.id) {
+      return res.status(400).json({ error: 'Ungültiger Gesprächspartner.' });
+    }
+    const peer = getUserById(peerId);
+    if (!peer) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    const row = recordCall({
+      userId: req.user.id,
+      peerId,
+      callId,
+      direction,
+      video: !!video,
+      outcome,
+      duration: duration || 0,
+    });
+    res.status(201).json({ call: callView(row) });
+  })
+);
+
+// The current user's call history (newest first), peers' deleted accounts skipped.
+router.get(
+  '/calls',
+  requireAuth,
+  h(async (req, res) => {
+    const calls = listCalls(req.user.id)
+      .map(callView)
+      .filter((c) => c.peer);
+    res.json({ calls });
+  })
+);
+
+router.delete(
+  '/calls/:id',
+  requireAuth,
+  h(async (req, res) => {
+    deleteCall(req.user.id, req.params.id);
+    res.status(204).end();
+  })
+);
+
+router.delete(
+  '/calls',
+  requireAuth,
+  h(async (req, res) => {
+    const cleared = clearCalls(req.user.id);
+    res.json({ ok: true, cleared });
   })
 );
 
@@ -1881,10 +2009,13 @@ router.get(
 router.get(
   '/admin/overview',
   requireAdmin,
-  h(async (_req, res) => {
+  h(async (req, res) => {
     const day = 86_400_000;
     const tNow = Date.now();
+    // The dashboard can ask for a 7/14/30-day window for the trend charts.
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 7), 30);
     res.json({
+      range: { days },
       stats: {
         users: countUsers(),
         online: onlineUserIds().length,
@@ -1899,16 +2030,29 @@ router.get(
         uploadBytes: totalUploadBytes(),
         newUsers24h: countUsersSince(tNow - day),
         newUsers7d: countUsersSince(tNow - 7 * day),
+        newUsers30d: countUsersSince(tNow - 30 * day),
         messages24h: countMessagesSince(tNow - day),
         messages7d: countMessagesSince(tNow - 7 * day),
+        messages30d: countMessagesSince(tNow - 30 * day),
         news: countPublishedPosts('news'),
         changelog: countPublishedPosts('changelog'),
       },
       charts: {
-        usersPerDay: usersPerDay(7),
-        messagesPerDay: messagesPerDay(7),
+        usersPerDay: usersPerDay(days),
+        messagesPerDay: messagesPerDay(days),
       },
       system: systemHealth(),
+    });
+  })
+);
+
+// Append-only audit trail of admin actions. Filter with ?q= and cap with ?limit=.
+router.get(
+  '/admin/audit',
+  requireAdmin,
+  h(async (req, res) => {
+    res.json({
+      entries: listAudit({ q: (req.query.q || '').toString(), limit: req.query.limit }),
     });
   })
 );
@@ -1962,6 +2106,7 @@ router.post(
       data: { type: 'announcement', ...(route ? { route } : {}) },
     });
     recordBroadcast({ title: title || '', body, delivered: online.size, pushed });
+    audit(req, 'broadcast.send', title || '(ohne Titel)', `${online.size} live · ${pushed} Push`);
     res.json({ ok: true, delivered: online.size, pushed });
   })
 );
@@ -1991,6 +2136,7 @@ router.post(
   h(async (req, res) => {
     const data = parse(postCreateSchema, req.body);
     const post = createPost(data);
+    audit(req, 'post.create', post.title, `${post.kind}${post.published ? ' · live' : ' · Entwurf'}`);
     res.status(201).json({ post: postView(post) });
   })
 );
@@ -2004,6 +2150,7 @@ router.patch(
     }
     const data = parse(postUpdateSchema, req.body);
     const post = updatePost(req.params.id, data);
+    audit(req, 'post.update', post.title, Object.keys(data).join(', '));
     res.json({ post: postView(post) });
   })
 );
@@ -2012,10 +2159,12 @@ router.delete(
   '/admin/posts/:id',
   requireAdmin,
   h(async (req, res) => {
-    if (!getPostById(req.params.id)) {
+    const existing = getPostById(req.params.id);
+    if (!existing) {
       return res.status(404).json({ error: 'Diesen Beitrag gibt es nicht.' });
     }
     deletePost(req.params.id);
+    audit(req, 'post.delete', existing.title, existing.kind);
     res.status(204).end();
   })
 );
@@ -2034,7 +2183,9 @@ router.put(
   requireAdmin,
   h(async (req, res) => {
     const patch = parse(remoteConfigSchema, req.body);
-    res.json(setRemoteConfig(patch));
+    const next = setRemoteConfig(patch);
+    audit(req, 'config.update', '', Object.keys(patch).join(', '));
+    res.json(next);
   })
 );
 
@@ -2062,8 +2213,10 @@ router.delete(
   '/admin/chats/:id',
   requireAdmin,
   h(async (req, res) => {
+    const existing = getChat(req.params.id);
     const ok = adminDeleteChat(req.params.id);
     if (!ok) return res.status(404).json({ error: 'Diesen Chat gibt es nicht.' });
+    audit(req, 'chat.delete', req.params.id, existing ? existing.type : '');
     res.status(204).end();
   })
 );
@@ -2078,8 +2231,9 @@ router.get(
 router.post(
   '/admin/backups',
   requireAdmin,
-  h(async (_req, res) => {
+  h(async (req, res) => {
     const file = backupNow();
+    audit(req, 'backup.create', file ? file.split('/').pop() : '', '');
     res.json({ ok: !!file, file: file ? file.split('/').pop() : null });
   })
 );
@@ -2133,6 +2287,7 @@ router.post(
       res
     );
     if (!user) return;
+    audit(req, 'user.create', displayName, isAdmin ? 'Admin' : 'Nutzer');
     res.status(201).json({ user: adminUser(user) });
   })
 );
@@ -2194,6 +2349,17 @@ router.patch(
     broadcastSelf(user);
     if (nowDisabled) disconnectUser(user.id, 'disabled');
 
+    // Record exactly which fields an admin touched (never the new values).
+    const changed = [];
+    if (displayName !== undefined) changed.push('name');
+    if (email !== undefined) changed.push('email');
+    if (about !== undefined) changed.push('about');
+    if (password !== undefined) changed.push('passwort');
+    if (isAdmin !== undefined) changed.push(isAdmin ? '+admin' : '-admin');
+    if (disabled !== undefined) changed.push(disabled ? 'gesperrt' : 'entsperrt');
+    if (premium !== undefined) changed.push(premium ? '+premium' : '-premium');
+    audit(req, 'user.update', user.display_name, changed.join(', '));
+
     res.json({ user: adminUser(user) });
   })
 );
@@ -2212,6 +2378,7 @@ router.post(
       body,
       data: { type: 'announcement', ...(route ? { route } : {}) },
     });
+    audit(req, 'user.message', user.display_name, 'Banner');
     res.json({ ok: true, pushed });
   })
 );
@@ -2228,6 +2395,7 @@ router.post(
     if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
     const { body } = parse(officialMessageSchema, req.body);
     const ok = deliverOfficialMessage(user.id, { body });
+    audit(req, 'user.dm', user.display_name, 'Ping-Team-Chat');
     res.json({ ok });
   })
 );
@@ -2245,6 +2413,7 @@ router.post(
       if (deliverOfficialMessage(id, { body })) delivered++;
     }
     recordBroadcast({ title: 'Direktnachricht', body, delivered, pushed: 0 });
+    audit(req, 'broadcast.dm', 'alle', `${delivered} Nutzer`);
     res.json({ ok: true, delivered });
   })
 );
@@ -2318,6 +2487,7 @@ router.post(
     for (const id of onlineUserIds()) {
       sendToUser(id, 'status-added', { userId: OFFICIAL_USER_ID });
     }
+    audit(req, 'status.post', 'alle', type);
     res.status(201).json({ status: statusView(row, OFFICIAL_USER_ID) });
   })
 );
@@ -2376,6 +2546,7 @@ router.delete(
     for (const peerId of peers) {
       sendToUser(peerId, 'user-updated', { user: tombstone });
     }
+    audit(req, 'user.delete', user.display_name, user.email || '');
     res.status(204).end();
   })
 );

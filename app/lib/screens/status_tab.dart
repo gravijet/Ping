@@ -276,35 +276,46 @@ class _StatusGroupTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final official = group.user.official;
+    final unseen = group.items.where((s) => !s.seen).length;
+    final time = TimeFormat.messageTime(
+        DateTime.fromMillisecondsSinceEpoch(group.updatedAt));
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: _Ring(
         seen: [for (final s in group.items) s.seen],
         official: official,
-        child: PingAvatar(
-          initials: group.user.initials,
-          color: group.user.color,
-          size: 52,
-          imageUrl: state.avatarUrl(group.user),
-          imageHeaders: state.authHeaders,
+        // A fully-watched ring fades its avatar a touch, so "new" stands out.
+        child: Opacity(
+          opacity: unseen == 0 && !official ? 0.6 : 1.0,
+          child: PingAvatar(
+            initials: group.user.initials,
+            color: group.user.color,
+            size: 52,
+            imageUrl: state.avatarUrl(group.user),
+            imageHeaders: state.authHeaders,
+          ),
         ),
       ),
       title: NameWithBadge(
         name: group.user.label,
         user: group.user,
-        style: const TextStyle(fontWeight: FontWeight.w600),
+        style: TextStyle(
+            fontWeight: unseen > 0 ? FontWeight.w700 : FontWeight.w600),
       ),
       subtitle: Text(
         official
-            ? 'Offizielles Update · ${TimeFormat.messageTime(DateTime.fromMillisecondsSinceEpoch(group.updatedAt))}'
-            : TimeFormat.messageTime(
-                DateTime.fromMillisecondsSinceEpoch(group.updatedAt)),
-        style: official
-            ? TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w600)
-            : null,
+            ? 'Offizielles Update · $time'
+            : unseen > 0
+                ? '$unseen neu · $time'
+                : 'Angesehen · $time',
+        style: TextStyle(
+          color: (official || unseen > 0)
+              ? scheme.primary
+              : scheme.onSurfaceVariant,
+          fontWeight: (official || unseen > 0) ? FontWeight.w600 : null,
+        ),
       ),
       onTap: onTap,
     );
@@ -361,9 +372,12 @@ class _RingPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const stroke = 3.0;
+    // Unseen arcs are drawn noticeably thicker than already-seen ones, so at a
+    // glance a vivid, bold ring = new and a thin grey ring = all watched.
+    const unseenStroke = 3.6;
+    const seenStroke = 1.6;
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2 - stroke / 2;
+    final radius = size.shortestSide / 2 - unseenStroke / 2;
     final rect = Rect.fromCircle(center: center, radius: radius);
     final n = seen.isEmpty ? 1 : seen.length;
     final gap = n == 1 ? 0.0 : math.min(0.16, 0.9 / n);
@@ -372,37 +386,40 @@ class _RingPainter extends CustomPainter {
     // The narrow surface-coloured gap between the ring and the avatar.
     canvas.drawCircle(
       center,
-      radius - stroke / 2 - 1.4,
+      radius - unseenStroke / 2 - 1.4,
       Paint()..color = surface,
     );
-
-    if (official) {
-      canvas.drawCircle(
-        center,
-        radius,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke + 1.5
-          ..color = const Color(0xFF0A84FF).withValues(alpha: 0.45)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
-      );
-    }
 
     final unseenShader = const SweepGradient(
       colors: [..._unseen, Color(0xFF0A84FF)],
     ).createShader(rect);
 
+    // A soft glow under any vivid (unseen / official) arc to make "new" pop.
+    final hasVivid = official || (seen.isNotEmpty && seen.any((s) => !s));
+    if (hasVivid) {
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = unseenStroke + 1.5
+          ..color = const Color(0xFF0A84FF).withValues(alpha: 0.40)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+    }
+
     var start = -math.pi / 2 + gap / 2;
     for (var i = 0; i < n; i++) {
       final isSeen = seen.isEmpty ? false : seen[i];
+      final vivid = official || !isSeen;
       final paint = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
+        ..strokeWidth = vivid ? unseenStroke : seenStroke
         ..strokeCap = n == 1 ? StrokeCap.butt : StrokeCap.round;
-      if (isSeen && !official) {
-        paint.color = seenColor;
-      } else {
+      if (vivid) {
         paint.shader = unseenShader;
+      } else {
+        paint.color = seenColor;
       }
       canvas.drawArc(rect, start, sweep, false, paint);
       start += sweep + gap;

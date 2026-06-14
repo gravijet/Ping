@@ -44,12 +44,19 @@ class CallScreen extends StatelessWidget {
       case CallState.connecting:
         return 'Verbinde …';
       case CallState.active:
-        return 'Verbunden';
+        return _formatDuration(controller.elapsed);
       case CallState.ended:
         return 'Beendet';
       case CallState.idle:
         return '';
     }
+  }
+
+  static String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
   }
 
   @override
@@ -183,14 +190,22 @@ class CallScreen extends StatelessWidget {
           label: 'Stumm',
           onTap: controller.toggleMute,
         ),
-        if (controller.video)
+        if (controller.video) ...[
+          _CircleButton(
+            icon: controller.cameraOn
+                ? Icons.videocam_rounded
+                : Icons.videocam_off_rounded,
+            color: controller.cameraOn ? Colors.white12 : Colors.white24,
+            label: 'Video',
+            onTap: controller.toggleCamera,
+          ),
           _CircleButton(
             icon: Icons.cameraswitch_rounded,
             color: Colors.white12,
-            label: 'Kamera',
+            label: 'Wechseln',
             onTap: controller.switchCamera,
-          )
-        else
+          ),
+        ] else
           _CircleButton(
             icon: controller.speakerOn
                 ? Icons.volume_up_rounded

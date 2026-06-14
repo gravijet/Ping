@@ -154,19 +154,19 @@ export function mountDownloads(app, publicDir) {
   // Landing page.
   app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
-  // Marketing site sub-pages. The newsroom, changelog and status pages are
-  // static shells that fill themselves in from the public JSON API
-  // (/api/news, /api/changelog, /api/public/stats). `/news/:slug` serves the
-  // same shell, which reads the slug from the URL to render a single article.
-  const page = (name) => (_req, res) => res.sendFile(path.join(publicDir, name));
-  app.get('/news', page('news.html'));
-  app.get('/news/:slug', page('news.html'));
-  app.get('/changelog', page('changelog.html'));
+  // The marketing site is a single-page app: every route below serves the same
+  // shell (index.html) and the client router (site.js) renders the right view
+  // from the URL without a full reload. Serving the shell server-side keeps deep
+  // links and the browser back/forward button working natively.
+  const shell = (_req, res) => res.sendFile(path.join(publicDir, 'index.html'));
+  app.get('/news', shell);
+  app.get('/news/:slug', shell);
+  app.get('/changelog', shell);
+  app.get('/status', shell);
+  app.get('/legal', shell);
   // A shared group-invite link lands on the install page (the app does the
   // actual joining by code). Keeps invite URLs from 404-ing.
-  app.get('/join/:code', page('index.html'));
-  app.get('/status', page('status.html'));
-  app.get('/legal', page('legal.html'));
+  app.get('/join/:code', shell);
 
   // Shared design system + helpers, served with long-lived caching headers.
   const asset = (name, type) => (_req, res) => {

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme.dart';
+import '../models/call.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../models/remote_config.dart';
@@ -40,6 +41,7 @@ const _kLastSeenVersion = 'ping_last_seen_version';
 const _kDrafts = 'ping_drafts';
 const _kMe = 'ping_me'; // cached identity for offline cold-start
 const _kRemoteConfig = 'ping_remote_config'; // cached server-driven config
+const _kCallsSeen = 'ping_calls_seen_at'; // newest call timestamp marked as seen
 
 /// Friendly name shown instead of the raw server address by default, so the
 /// endpoint isn't advertised in the UI.
@@ -152,6 +154,128 @@ class AppState extends ChangeNotifier {
   /// A server-pushed banner to show app-wide, or null.
   RemoteNotice? get serverNotice => remoteConfig.notice;
 
+  // ---- Calls ---------------------------------------------------------------
+
+  /// Load the call history (newest first).
+  Future<void> loadCalls() async {
+    try {
+      final res = await _api.get('/calls');
+      calls
+        ..clear()
+        ..addAll((res['calls'] as List)
+            .map((e) => CallEntry.fromJson(e as Map<String, dynamic>)));
+      notifyListeners();
+    } on ApiException {
+      /* keep the previous list */
+    }
+  }
+
+  Future<void> clearCallHistory() async {
+    calls.clear();
+    notifyListeners();
+    try {
+      await _api.delete('/calls');
+    } on ApiException {
+      /* best effort */
+    }
+  }
+
+  Future<void> deleteCall(String id) async {
+    calls.removeWhere((c) => c.id == id);
+    notifyListeners();
+    try {
+      await _api.delete('/calls/$id');
+    } on ApiException {
+      /* best effort */
+    }
+  }
+
+  /// Persist a finished call to the server log and reflect it locally. Also
+  /// surfaces a "missed call" notification for an unanswered incoming call.
+  Future<void> _recordCall(CallLog log) async {
+    notifications.cancelIncomingCall();
+    if (!log.outgoing && log.outcome == CallOutcome.missed) {
+      notifications.showMissedCall(name: log.peer.label);
+    }
+    try {
+      final res = await _api.post('/calls', {
+        'peerId': log.peer.id,
+        'callId': log.callId,
+        'direction': log.directionName,
+        'video': log.video,
+        'outcome': log.outcomeName,
+        'duration': log.duration.inSeconds,
+      });
+      final entry = CallEntry.fromJson(res['call'] as Map<String, dynamic>);
+      calls.removeWhere((c) => c.callId == entry.callId);
+      calls.insert(0, entry);
+      _userCache[entry.peer.id] = entry.peer;
+      notifyListeners();
+    } on ApiException {
+      /* offline — the next loadCalls() will reconcile */
+    }
+  }
+
+  /// Start a call to [user] (from the chat header). Loads the history afterwards
+  /// so the entry shows up once the call ends.
+  Future<void> startCall(PingUser user, {required bool video}) async {
+    await callController.startCall(user, video: video);
+  }
+
+  /// A foreground "incoming call" data push arrived. If the live socket hasn't
+  /// delivered the WebRTC offer yet, ring via a notification and ask the caller
+  /// to (re)send the offer so it connects.
+  void _onIncomingCallPush(
+      String callId, String callerId, String callerName, bool video) {
+    if (callController.currentCallId == callId) return; // already ringing in-app
+    notifications.showIncomingCall(
+        callId: callId, callerName: callerName, video: video, callerId: callerId);
+    if (socketConnected) {
+      callController.requestOffer(callId, callerId);
+    } else {
+      _pendingOfferRequest = (callId, callerId);
+    }
+  }
+
+  void _onCallCanceledPush(String callId) {
+    notifications.cancelIncomingCall();
+    if (_pendingOfferRequest?.$1 == callId) _pendingOfferRequest = null;
+    if (callController.currentCallId == callId) {
+      callController.onRemoteEnd(const {});
+    }
+  }
+
+  /// Accept/decline from a call notification (foreground action or cold launch).
+  void _onCallAction(String callId, String callerId, bool video, bool accept) {
+    notifications.cancelIncomingCall();
+    final live = callController.currentCallId == callId &&
+        callController.state == CallState.incoming;
+    if (accept) {
+      if (live) {
+        callController.acceptCall();
+      } else {
+        // The offer isn't here yet — remember to auto-accept and pull it in.
+        _pendingAcceptCallId = callId;
+        if (socketConnected) {
+          callController.requestOffer(callId, callerId);
+        } else {
+          _pendingOfferRequest = (callId, callerId);
+        }
+      }
+    } else {
+      if (live) {
+        callController.rejectCall();
+      } else {
+        _pendingDeclineCallId = callId;
+        // Tell the caller now if we can, so they stop ringing.
+        if (socketConnected && callerId.isNotEmpty) {
+          _socket.send('call-reject',
+              {'to': callerId, 'callId': callId, 'reason': 'declined'});
+        }
+      }
+    }
+  }
+
   /// True when the server says this build is too old to keep running — the UI
   /// shows a blocking "please update" gate. Only meaningful where in-app updates
   /// exist (Android) and we actually know our build number.
@@ -190,6 +314,34 @@ class AppState extends ChangeNotifier {
   // Status ("stories")
   final List<PingStatus> statusMine = [];
   final List<StatusGroup> statusOthers = [];
+
+  // Call history (newest first).
+  final List<CallEntry> calls = [];
+  int _callsSeenAt = 0;
+  // Missed calls newer than the last time the user looked at the Anrufe tab.
+  int get missedCallCount =>
+      calls.where((c) => c.missed && c.createdAt > _callsSeenAt).length;
+
+  /// Mark the call history as seen (clears the tab badge). Called when the user
+  /// opens the Anrufe tab.
+  Future<void> markCallsSeen() async {
+    final newest = calls.isEmpty
+        ? DateTime.now().millisecondsSinceEpoch
+        : calls.first.createdAt;
+    if (newest <= _callsSeenAt) return;
+    _callsSeenAt = newest;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kCallsSeen, _callsSeenAt);
+  }
+
+  // A call we were asked to accept/decline from a notification before its
+  // WebSocket offer arrived (e.g. accepted from the lock-screen). Resolved when
+  // the matching `call-offer` comes in.
+  String? _pendingAcceptCallId;
+  String? _pendingDeclineCallId;
+  // A call whose offer we still need the caller to (re)send once we're online.
+  (String callId, String callerId)? _pendingOfferRequest;
 
   // Blocking
   final Set<String> blockedIds = {};
@@ -261,6 +413,7 @@ class AppState extends ChangeNotifier {
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
     settings = PingSettings.decode(prefs.getString(_kSettings));
     remoteConfig = RemoteConfig.decode(prefs.getString(_kRemoteConfig));
+    _callsSeenAt = prefs.getInt(_kCallsSeen) ?? 0;
     if (updater.supported) {
       _runningBuild = await updater.currentBuildNumber();
     }
@@ -284,6 +437,7 @@ class AppState extends ChangeNotifier {
       sendSignal: (type, payload) => _socket.send(type, payload),
       fetchIce: fetchIceServers,
     );
+    callController.onLogged = _recordCall;
     _socket = SocketService(
       onEvent: _onSocketEvent,
       onConnectionChange: (c) {
@@ -291,6 +445,10 @@ class AppState extends ChangeNotifier {
         socketConnected = c;
         if (c) {
           online = true;
+          // A call we accepted while offline/closed needs the caller to re-send
+          // its offer now that we have a live socket again.
+          final req = _pendingOfferRequest;
+          if (req != null) callController.requestOffer(req.$1, req.$2);
           // Run the heavy catch-up only when genuinely returning from an offline
           // stretch — not on the first connect of a normal sign-in, which loads
           // everything itself.
@@ -306,13 +464,22 @@ class AppState extends ChangeNotifier {
 
     await notifications.init();
     notifications.onTap = dispatchNotificationTarget;
+    notifications.onCallAction = _onCallAction;
     push.onToken = _onPushToken;
     push.onOpen = dispatchNotificationTarget;
+    push.onIncomingCall = _onIncomingCallPush;
+    push.onCallCanceled = _onCallCanceledPush;
     await push.start(notifications: notifications);
     // If the app was cold-launched by tapping a local notification, route to it
     // once the UI is ready.
     final launch = await notifications.launchTarget();
     if (launch != null) dispatchNotificationTarget(launch);
+    // Cold-launched by accepting/declining an incoming call from the lock screen.
+    final callLaunch = await notifications.launchCall();
+    if (callLaunch != null) {
+      _onCallAction(callLaunch.callId, callLaunch.callerId, callLaunch.video,
+          callLaunch.accept);
+    }
 
     if (token != null) {
       final cachedMe = prefs.getString(_kMe);
@@ -433,6 +600,7 @@ class AppState extends ChangeNotifier {
     await loadChats();
     await loadBlocks();
     await loadStatus();
+    loadCalls();
     loadRemoteConfig();
     // Replay anything composed while offline last session, then send it now.
     await _hydrateOutbox();
@@ -623,6 +791,7 @@ class AppState extends ChangeNotifier {
     // Best-effort refresh; a transient network error here shouldn't surface.
     loadChats().catchError((_) {});
     loadStatus();
+    loadCalls();
     loadRemoteConfig();
     checkForUpdate();
     _flushOutbox();
@@ -2230,11 +2399,25 @@ class AppState extends ChangeNotifier {
       // ---- WebRTC call signaling (relayed by the server) ----
       case 'call-offer':
         if (payload['from'] is Map) {
+          notifications.cancelIncomingCall();
+          final callId = payload['callId']?.toString();
+          if (callId != null && _pendingOfferRequest?.$1 == callId) {
+            _pendingOfferRequest = null;
+          }
           callController.onIncomingOffer(
             PingUser.fromJson(
                 (payload['from'] as Map).cast<String, dynamic>()),
             payload,
           );
+          // Honour an accept/decline the user already chose from the
+          // notification before the offer reached us.
+          if (callId != null && _pendingDeclineCallId == callId) {
+            _pendingDeclineCallId = null;
+            callController.rejectCall();
+          } else if (callId != null && _pendingAcceptCallId == callId) {
+            _pendingAcceptCallId = null;
+            callController.acceptCall();
+          }
         }
         break;
       case 'call-answer':
@@ -2242,6 +2425,9 @@ class AppState extends ChangeNotifier {
         break;
       case 'call-ice':
         callController.onRemoteIce(payload);
+        break;
+      case 'call-ready':
+        callController.onRemoteReady(payload);
         break;
       case 'call-reject':
         callController.onRemoteReject(payload);

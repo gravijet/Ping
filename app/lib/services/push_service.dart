@@ -6,11 +6,28 @@ import 'notification_target.dart';
 
 /// Top-level background handler. Required by firebase_messaging. Messages that
 /// carry a `notification` block are shown by the OS automatically while the app
-/// is in the background or terminated, so there is nothing to do here — but the
-/// handler must exist and be registered for FCM to deliver reliably.
+/// is in the background or terminated. *Calls* are sent as silent data messages,
+/// so we draw their full-screen incoming-call notification ourselves here (and
+/// dismiss it on a matching cancel).
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // No-op: the system tray displays the notification payload itself.
+  final data = message.data;
+  final type = (data['type'] ?? '').toString();
+  if (type == 'call') {
+    final svc = NotificationService();
+    await svc.init();
+    await svc.showIncomingCall(
+      callId: (data['callId'] ?? '').toString(),
+      callerName: (data['callerName'] ?? 'Anruf').toString(),
+      video: (data['video'] ?? '').toString() == '1',
+      callerId: (data['callerId'] ?? '').toString(),
+    );
+  } else if (type == 'call-cancel') {
+    final svc = NotificationService();
+    await svc.init();
+    await svc.cancelIncomingCall();
+  }
+  // Everything else carries a notification block the system tray shows itself.
 }
 
 /// Wires Firebase Cloud Messaging into the app: obtains the device token (so the
@@ -29,6 +46,14 @@ class PushService {
   /// Called when a push notification is tapped (background/terminated launch),
   /// with where it should take the user.
   void Function(NotificationTarget target)? onOpen;
+
+  /// Called for a foreground incoming-call data push (the phone is already awake).
+  void Function(
+          String callId, String callerId, String callerName, bool video)?
+      onIncomingCall;
+
+  /// Called for a foreground call-cancel data push (caller hung up / timed out).
+  void Function(String callId)? onCallCanceled;
 
   bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -68,16 +93,31 @@ class PushService {
   }
 
   void _onForeground(RemoteMessage message) {
+    final data = message.data;
+    final type = (data['type'] ?? '').toString();
+    // Calls are silent data messages handled by the live call layer, not the tray.
+    if (type == 'call') {
+      onIncomingCall?.call(
+        (data['callId'] ?? '').toString(),
+        (data['callerId'] ?? '').toString(),
+        (data['callerName'] ?? 'Anruf').toString(),
+        (data['video'] ?? '').toString() == '1',
+      );
+      return;
+    }
+    if (type == 'call-cancel') {
+      onCallCanceled?.call((data['callId'] ?? '').toString());
+      return;
+    }
     final n = message.notification;
     if (n == null) return;
-    final data = message.data;
     final target =
         NotificationTarget.fromData(data) ?? const NotificationTarget();
     _notifications?.showMessage(
       title: n.title ?? 'Ping',
       body: n.body ?? '',
       target: target,
-      announcement: (data['type'] ?? '').toString() == 'announcement',
+      announcement: type == 'announcement',
     );
   }
 

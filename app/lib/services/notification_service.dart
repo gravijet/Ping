@@ -13,6 +13,14 @@ class NotificationService {
   /// Called when a notification is tapped, with where it should take the user.
   void Function(NotificationTarget target)? onTap;
 
+  /// Called when the user taps Accept/Decline on an incoming-call notification.
+  void Function(String callId, String callerId, bool video, bool accept)?
+      onCallAction;
+
+  /// Fixed id for the (single) incoming-call notification, so it can be replaced
+  /// and cancelled deterministically.
+  static const int _callNotificationId = 911000;
+
   static const _messageChannel = AndroidNotificationChannel(
     'ping_messages',
     'Nachrichten',
@@ -27,6 +35,22 @@ class NotificationService {
     importance: Importance.max,
   );
 
+  static const _statusChannel = AndroidNotificationChannel(
+    'ping_status',
+    'Status-Updates',
+    description: 'Wenn Kontakte einen neuen Status teilen',
+    importance: Importance.defaultImportance,
+  );
+
+  static const _callChannel = AndroidNotificationChannel(
+    'ping_calls',
+    'Anrufe',
+    description: 'Eingehende Sprach- und Videoanrufe',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+  );
+
   Future<void> init() async {
     if (_ready) return;
     // Android is the shipped mobile target; the Windows desktop build wires up
@@ -39,19 +63,43 @@ class NotificationService {
     try {
       await _plugin.initialize(
         settings,
-        onDidReceiveNotificationResponse: (resp) {
-          final target = NotificationTarget.decode(resp.payload);
-          if (target != null) onTap?.call(target);
-        },
+        onDidReceiveNotificationResponse: _onResponse,
       );
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
       await androidPlugin?.createNotificationChannel(_messageChannel);
       await androidPlugin?.createNotificationChannel(_announcementChannel);
+      await androidPlugin?.createNotificationChannel(_statusChannel);
+      await androidPlugin?.createNotificationChannel(_callChannel);
       _ready = true;
     } catch (_) {
       _ready = false;
     }
+  }
+
+  void _onResponse(NotificationResponse resp) {
+    final payload = resp.payload ?? '';
+    // Incoming-call actions / tap.
+    final call = _decodeCall(payload);
+    if (call != null) {
+      final accept = resp.actionId != 'call_decline';
+      onCallAction?.call(call.$1, call.$2, call.$3, accept);
+      return;
+    }
+    final target = NotificationTarget.decode(payload);
+    if (target != null) onTap?.call(target);
+  }
+
+  /// Parse a `call:<callId>:<callerId>:<video>` payload, or null.
+  static (String, String, bool)? _decodeCall(String payload) {
+    if (!payload.startsWith('call:')) return null;
+    final parts = payload.substring(5).split(':');
+    if (parts.isEmpty || parts[0].isEmpty) return null;
+    return (
+      parts[0],
+      parts.length > 1 ? parts[1] : '',
+      parts.length > 2 && parts[2] == '1',
+    );
   }
 
   /// If the app was cold-launched by tapping a *local* notification, return its
@@ -110,5 +158,115 @@ class NotificationService {
   Future<void> cancelForChat(String chatId) async {
     if (!_ready) return;
     await _plugin.cancel(chatId.hashCode & 0x7fffffff);
+  }
+
+  /// A quiet "new status" notification on the status channel.
+  Future<void> showStatus({required String name}) async {
+    if (!_ready) return;
+    await _plugin.show(
+      'status:$name'.hashCode & 0x7fffffff,
+      name,
+      'hat einen neuen Status geteilt',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'ping_status',
+          'Status-Updates',
+          channelDescription: 'Wenn Kontakte einen neuen Status teilen',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+      ),
+      payload: const NotificationTarget(route: 'status').encode(),
+    );
+  }
+
+  /// Show the full-screen incoming-call notification (rings the device even when
+  /// the app is in the background or closed) with Accept/Decline actions.
+  Future<void> showIncomingCall({
+    required String callId,
+    required String callerName,
+    required bool video,
+    String callerId = '',
+  }) async {
+    if (!_ready) return;
+    final details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'ping_calls',
+        'Anrufe',
+        channelDescription: 'Eingehende Sprach- und Videoanrufe',
+        importance: Importance.max,
+        priority: Priority.max,
+        category: AndroidNotificationCategory.call,
+        fullScreenIntent: true,
+        ongoing: true,
+        autoCancel: false,
+        playSound: true,
+        enableVibration: true,
+        timeoutAfter: 45000,
+        actions: const [
+          AndroidNotificationAction('call_decline', 'Ablehnen',
+              cancelNotification: true),
+          AndroidNotificationAction('call_accept', 'Annehmen',
+              cancelNotification: true, showsUserInterface: true),
+        ],
+      ),
+    );
+    await _plugin.show(
+      _callNotificationId,
+      callerName,
+      video ? 'Eingehender Videoanruf' : 'Eingehender Anruf',
+      details,
+      payload: 'call:$callId:$callerId:${video ? '1' : '0'}',
+    );
+  }
+
+  Future<void> cancelIncomingCall() async {
+    if (!_ready) return;
+    await _plugin.cancel(_callNotificationId);
+  }
+
+  /// If the app was cold-launched by tapping/accepting an incoming-call
+  /// notification, return the call so the app can ask the caller to re-send the
+  /// offer and connect. Returns null on a plain launch or an explicit decline.
+  Future<({String callId, String callerId, bool video, bool accept})?>
+      launchCall() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return null;
+    try {
+      final details = await _plugin.getNotificationAppLaunchDetails();
+      final resp = details?.notificationResponse;
+      if (details?.didNotificationLaunchApp != true || resp == null) return null;
+      final call = _decodeCall(resp.payload ?? '');
+      if (call == null) return null;
+      return (
+        callId: call.$1,
+        callerId: call.$2,
+        video: call.$3,
+        accept: resp.actionId != 'call_decline',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A "missed call" entry after an unanswered/cancelled incoming call.
+  Future<void> showMissedCall({required String name}) async {
+    if (!_ready) return;
+    await _plugin.show(
+      'missed:$name${DateTime.now().millisecondsSinceEpoch ~/ 1000}'.hashCode &
+          0x7fffffff,
+      'Verpasster Anruf',
+      name,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'ping_calls',
+          'Anrufe',
+          channelDescription: 'Eingehende Sprach- und Videoanrufe',
+          importance: Importance.high,
+          priority: Priority.high,
+          category: AndroidNotificationCategory.missedCall,
+        ),
+      ),
+      payload: const NotificationTarget(route: 'calls').encode(),
+    );
   }
 }

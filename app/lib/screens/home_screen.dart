@@ -16,6 +16,7 @@ import '../widgets/update_sheet.dart';
 import '../widgets/verified_badge.dart';
 import 'app_navigation.dart';
 import 'archived_chats_screen.dart';
+import 'calls_tab.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
 import 'saved_messages_screen.dart';
@@ -31,7 +32,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  late final TabController _tabs = TabController(length: 3, vsync: this);
   late final AppState _state = context.read<AppState>();
   bool _loading = true;
   String? _error;
@@ -58,7 +59,11 @@ class _HomeScreenState extends State<HomeScreen>
       WidgetsBinding.instance.addPostFrameCallback(
           (_) => _handleNotificationTarget(pending));
     }
-    _tabs.addListener(() => setState(() {}));
+    _tabs.addListener(() {
+      setState(() {});
+      // Opening the Anrufe tab clears its missed-call badge.
+      if (_tabs.index == 2) _state.markCallsSeen();
+    });
   }
 
   @override
@@ -161,6 +166,10 @@ class _HomeScreenState extends State<HomeScreen>
     if (!mounted) return;
     if (target.isChat) {
       _openChatById(target.chatId!);
+    } else if (target.route == 'calls') {
+      _tabs.animateTo(2);
+    } else if (target.route == 'status') {
+      _tabs.animateTo(1);
     } else if (target.route != null) {
       navigateToAppRoute(context, target.route!);
     }
@@ -187,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen>
     final state = context.watch<AppState>();
     final scheme = Theme.of(context).colorScheme;
     final onStatus = _tabs.index == 1;
+    final onCalls = _tabs.index == 2;
 
     // Proactively offer a freshly-detected update once (per version).
     if (state.updateAutoPromptPending && !_autoUpdateShown) {
@@ -242,29 +252,17 @@ class _HomeScreenState extends State<HomeScreen>
           tabs: [
             const Tab(text: 'Chats'),
             Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Status'),
-                  if (state.statusUnseen > 0) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${state.statusUnseen}',
-                        style: TextStyle(
-                            color: scheme.primary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                ],
+              child: _TabLabel(
+                text: 'Status',
+                badge: state.statusUnseen,
+                scheme: scheme,
+              ),
+            ),
+            Tab(
+              child: _TabLabel(
+                text: 'Anrufe',
+                badge: state.missedCallCount,
+                scheme: scheme,
               ),
             ),
           ],
@@ -276,14 +274,23 @@ class _HomeScreenState extends State<HomeScreen>
               onPressed: () => showAddStatusSheet(context),
               icon: Icons.add_a_photo_rounded,
             )
-          : PingGradientFab(
-              heroTag: 'fab',
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const NewChatScreen()),
-              ),
-              icon: Icons.edit_rounded,
-              label: 'Neuer Chat',
-            ),
+          : onCalls
+              ? PingGradientFab(
+                  heroTag: 'fab',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NewChatScreen()),
+                  ),
+                  icon: Icons.add_ic_call_rounded,
+                  label: 'Anruf',
+                )
+              : PingGradientFab(
+                  heroTag: 'fab',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NewChatScreen()),
+                  ),
+                  icon: Icons.edit_rounded,
+                  label: 'Neuer Chat',
+                ),
       body: Column(
         children: [
           if (!state.online) _OfflineBanner(state: state),
@@ -295,6 +302,7 @@ class _HomeScreenState extends State<HomeScreen>
                 RefreshIndicator(
                     onRefresh: _refresh, child: _chatsBody(state, scheme)),
                 const StatusTab(),
+                const CallsTab(),
               ],
             ),
           ),
@@ -595,6 +603,42 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// A tab title with an optional count pill (unseen status / missed calls).
+class _TabLabel extends StatelessWidget {
+  final String text;
+  final int badge;
+  final ColorScheme scheme;
+  const _TabLabel(
+      {required this.text, required this.badge, required this.scheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(text),
+        if (badge > 0) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$badge',
+              style: TextStyle(
+                  color: scheme.primary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

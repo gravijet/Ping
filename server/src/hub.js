@@ -18,6 +18,7 @@ import {
   getUserChats,
   purgeMessage,
 } from './chatRepo.js';
+import { sendPushToUsers } from './push.js';
 
 // Tracks every live socket per user. A user can be connected from several
 // devices at once (phone + desktop), so we keep a Set per user id.
@@ -249,6 +250,7 @@ async function handleMessage(ws, msg) {
     case 'call-answer':
     case 'call-ice':
     case 'call-accept':
+    case 'call-ready':
     case 'call-reject':
     case 'call-end': {
       const to = payload?.to;
@@ -256,6 +258,28 @@ async function handleMessage(ws, msg) {
       if (hasBlocked(to, userId) || hasBlocked(userId, to)) break;
       const from = publicUser(getUserById(userId));
       sendToUser(to, type, { ...payload, from });
+      // A new call also pushes the callee a *silent, high-priority* data message
+      // so their phone rings even when the app is backgrounded or closed; ending
+      // the call pushes a matching cancel so the ring stops and a missed call can
+      // be shown. ICE/answer are pure socket traffic and never push.
+      if (type === 'call-offer') {
+        sendPushToUsers([to], {
+          channelId: 'ping_calls',
+          android: { priority: 'high', ttl: '45s' },
+          data: {
+            type: 'call',
+            callId: payload?.callId ?? '',
+            video: payload?.video ? '1' : '',
+            callerId: userId,
+            callerName: from?.displayName || from?.label || 'Anruf',
+          },
+        }).catch(() => {});
+      } else if (type === 'call-end' || type === 'call-reject') {
+        sendPushToUsers([to], {
+          android: { priority: 'high', ttl: '45s' },
+          data: { type: 'call-cancel', callId: payload?.callId ?? '' },
+        }).catch(() => {});
+      }
       break;
     }
     case 'ping':

@@ -946,6 +946,37 @@ test('admin broadcast is recorded in history', async () => {
   assert.ok(hist.json.broadcasts.some((b) => b.body === 'Test-Durchsage'));
 });
 
+test('admin actions are written to the audit log', async () => {
+  // A broadcast is an auditable action.
+  await api('/api/admin/broadcast', {
+    method: 'POST',
+    admin: ADMIN,
+    body: { title: 'Audit', body: 'Eintrag erzeugen' },
+  });
+  const log = await api('/api/admin/audit', { admin: ADMIN });
+  assert.equal(log.status, 200);
+  assert.ok(Array.isArray(log.json.entries));
+  assert.ok(log.json.entries.some((e) => e.action === 'broadcast.send'));
+
+  // Filtering narrows the result set.
+  const filtered = await api('/api/admin/audit?q=broadcast.send', { admin: ADMIN });
+  assert.ok(filtered.json.entries.every((e) => /broadcast\.send/.test(e.action)));
+
+  // The endpoint is admin-gated.
+  const noAuth = await api('/api/admin/audit');
+  assert.equal(noAuth.status, 401);
+});
+
+test('admin overview accepts a 7/14/30-day range', async () => {
+  const r = await api('/api/admin/overview?days=30', { admin: ADMIN });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.range.days, 30);
+  assert.equal(r.json.charts.usersPerDay.length, 30);
+  // Out-of-range values clamp into [7, 30].
+  const clamped = await api('/api/admin/overview?days=999', { admin: ADMIN });
+  assert.equal(clamped.json.range.days, 30);
+});
+
 test('landing page and APK download endpoints respond', async () => {
   const home = await fetch(base + '/');
   assert.equal(home.status, 200);
@@ -1897,4 +1928,90 @@ test('public stats expose non-sensitive aggregate counters', async () => {
   // No per-user fields leak.
   assert.equal(r.json.phone, undefined);
   assert.equal(r.json.email, undefined);
+});
+
+test('ice servers are returned to authenticated users and include STUN', async () => {
+  const a = await register('+4915900200001', 'icetest-a@example.com', 'Ice A');
+  const anon = await api('/api/ice');
+  assert.equal(anon.status, 401);
+  const r = await api('/api/ice', { token: a.token });
+  assert.equal(r.status, 200);
+  assert.ok(Array.isArray(r.json.iceServers));
+  assert.ok(r.json.iceServers.length >= 1);
+  assert.ok(
+    r.json.iceServers.some((s) =>
+      (Array.isArray(s.urls) ? s.urls.join(' ') : s.urls || '').includes('stun:')
+    ),
+    'expected at least one STUN server'
+  );
+});
+
+test('call log: record a call, list it, and clear it', async () => {
+  const a = await register('+4915900200002', 'clog-a@example.com', 'Call A');
+  const b = await register('+4915900200003', 'clog-b@example.com', 'Call B');
+
+  // A records an outgoing, completed 42s call to B.
+  const made = await api('/api/calls', {
+    method: 'POST',
+    token: a.token,
+    body: {
+      peerId: b.user.id,
+      callId: 'call-xyz',
+      direction: 'outgoing',
+      video: true,
+      outcome: 'completed',
+      duration: 42,
+    },
+  });
+  assert.equal(made.status, 201, JSON.stringify(made.json));
+  assert.equal(made.json.call.outcome, 'completed');
+  assert.equal(made.json.call.duration, 42);
+  assert.equal(made.json.call.peer.id, b.user.id);
+  // The peer's phone/email never leak into a call entry.
+  assert.equal(made.json.call.peer.phone, undefined);
+  assert.equal(made.json.call.peer.email, undefined);
+
+  // Re-posting the same callId updates rather than duplicating it.
+  await api('/api/calls', {
+    method: 'POST',
+    token: a.token,
+    body: {
+      peerId: b.user.id,
+      callId: 'call-xyz',
+      direction: 'outgoing',
+      outcome: 'completed',
+      duration: 60,
+    },
+  });
+  const list = await api('/api/calls', { token: a.token });
+  assert.equal(list.status, 200);
+  const mine = list.json.calls.filter((c) => c.callId === 'call-xyz');
+  assert.equal(mine.length, 1, 'same call id must not duplicate');
+  assert.equal(mine[0].duration, 60);
+
+  // B's log is independent (and currently empty for this call id).
+  const bList = await api('/api/calls', { token: b.token });
+  assert.ok(!bList.json.calls.some((c) => c.callId === 'call-xyz'));
+
+  // Clearing wipes only the caller's own history.
+  const cleared = await api('/api/calls', { method: 'DELETE', token: a.token });
+  assert.equal(cleared.status, 200);
+  const after = await api('/api/calls', { token: a.token });
+  assert.equal(after.json.calls.length, 0);
+});
+
+test('call log rejects logging a call with yourself and unknown peers', async () => {
+  const a = await register('+4915900200004', 'clog-c@example.com', 'Call C');
+  const self = await api('/api/calls', {
+    method: 'POST',
+    token: a.token,
+    body: { peerId: a.user.id, callId: 'c1', direction: 'outgoing', outcome: 'completed' },
+  });
+  assert.equal(self.status, 400);
+  const ghost = await api('/api/calls', {
+    method: 'POST',
+    token: a.token,
+    body: { peerId: 'nobody', callId: 'c2', direction: 'outgoing', outcome: 'missed' },
+  });
+  assert.equal(ghost.status, 404);
 });

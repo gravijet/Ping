@@ -167,6 +167,16 @@ export const statusSchema = z
     { message: 'Ein Status braucht Text, ein Bild oder ein Video.' }
   );
 
+// A call-log entry the client posts when a call ends. duration is in seconds.
+export const callLogSchema = z.object({
+  peerId: z.string().min(1, 'Gesprächspartner fehlt.'),
+  callId: z.string().min(1).max(64),
+  direction: z.enum(['incoming', 'outgoing']),
+  video: z.boolean().optional(),
+  outcome: z.enum(['completed', 'missed', 'declined', 'canceled', 'failed']),
+  duration: z.number().int().nonnegative().max(86_400).optional(),
+});
+
 // Start a direct chat by user id or phone number. Discovery by email was
 // removed on purpose — people are found only by their phone number.
 export const directChatSchema = z
