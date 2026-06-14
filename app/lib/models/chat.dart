@@ -69,6 +69,30 @@ class Chat {
     return letters.characters.take(2).toString().toUpperCase();
   }
 
+  /// Serialise for the on-device chat-list cache (round-trips through
+  /// [Chat.fromJson]) so the list renders offline.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'type': type,
+        'title': title,
+        'avatarColor': avatarColor,
+        'memberIds': memberIds,
+        'members': members.map((m) => m.toJson()).toList(),
+        if (otherUser != null) 'otherUser': otherUser!.toJson(),
+        if (ownerId != null) 'ownerId': ownerId,
+        'self': self,
+        'description': description,
+        'hasAvatar': hasAvatar,
+        'avatarVersion': avatarVersion,
+        'locked': locked,
+        'archived': archived,
+        'expireSeconds': expireSeconds,
+        if (lastMessage != null) 'lastMessage': lastMessage!.toJson(),
+        'unread': unread,
+        'muted': muted,
+        'updatedAt': updatedAt,
+      };
+
   factory Chat.fromJson(Map<String, dynamic> json) => Chat(
         id: json['id'] as String,
         type: json['type'] as String,

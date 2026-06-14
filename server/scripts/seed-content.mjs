@@ -49,10 +49,9 @@ const POSTS = [
     kind: 'news',
     category: 'Unternehmen',
     title: 'Ping hat ein neues Zuhause: example.invalid',
-    summary: 'Wir ziehen auf unsere neue Hauptadresse um – die alte funktioniert natürlich weiter.',
+    summary: 'Ping ist ab sofort unter unserer Hauptadresse example.invalid erreichbar.',
     body:
       '## Neue Hauptadresse\nPing ist ab sofort unter **example.invalid** erreichbar.\n\n' +
-      '- Die bisherige Adresse *example.invalid* funktioniert weiterhin\n' +
       '- Bestehende Installationen musst du **nicht** anpassen\n' +
       '- Neue Downloads verweisen automatisch auf die neue Adresse\n\n' +
       'Danke, dass du Ping nutzt. 💙',

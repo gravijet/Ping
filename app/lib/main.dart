@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
+import 'screens/call_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
@@ -109,6 +110,10 @@ class _PingAppState extends State<PingApp> with WidgetsBindingObserver {
       theme: PingTheme.light(design),
       darkTheme: PingTheme.dark(design),
       themeMode: themeMode,
+      // The call overlay floats above every screen so an incoming call rings
+      // wherever the user is.
+      builder: (context, child) =>
+          CallOverlay(child: child ?? const SizedBox.shrink()),
       home: const _Root(),
     );
   }

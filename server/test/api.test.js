@@ -10,6 +10,9 @@ process.env.API_RATE_MAX = '1000000';
 process.env.ADMIN_TOKEN = 'test-admin-token';
 
 const { createServer } = await import('../src/index.js');
+const { config } = await import('../src/config.js');
+const { createScheduled } = await import('../src/scheduledRepo.js');
+const { runMaintenance } = await import('../src/maintenance.js');
 
 const ADMIN = 'test-admin-token';
 let server;
@@ -800,6 +803,53 @@ test('admin can list and trigger DB backups', async () => {
   assert.equal(made.json.ok, true);
 });
 
+test('admin can download a backup, and bad/traversal names are rejected', async () => {
+  // Make sure at least one snapshot exists.
+  await api('/api/admin/backups', { method: 'POST', admin: ADMIN });
+  const list = await api('/api/admin/backups', { admin: ADMIN });
+  assert.ok(list.json.backups.length > 0, 'expected at least one backup');
+  const name = list.json.backups[0].name;
+
+  // Download is binary, so fetch directly rather than via the JSON helper.
+  const dl = await fetch(base + '/api/admin/backups/' + encodeURIComponent(name), {
+    headers: { 'x-admin-token': ADMIN },
+  });
+  assert.equal(dl.status, 200);
+  assert.match(dl.headers.get('content-disposition') || '', /attachment/);
+  const buf = await dl.arrayBuffer();
+  assert.ok(buf.byteLength > 0, 'downloaded backup should not be empty');
+
+  // Without the admin token it's rejected.
+  const noAuth = await fetch(base + '/api/admin/backups/' + encodeURIComponent(name));
+  assert.equal(noAuth.status, 401);
+
+  // Only the exact ping-YYYYMMDD-HHMM.db shape is served; everything else 404s
+  // (this also blocks path traversal).
+  for (const bad of ['evil.txt', 'ping-2026.db', '..%2f..%2fping.db', name + '.bak']) {
+    const r = await fetch(base + '/api/admin/backups/' + bad, {
+      headers: { 'x-admin-token': ADMIN },
+    });
+    assert.equal(r.status, 404, `expected 404 for ${bad} (got ${r.status})`);
+  }
+});
+
+test('cloudflare access gate blocks admin when configured without a valid assertion', async () => {
+  const saved = config.cfAccess;
+  config.cfAccess = { teamDomain: 'example.cloudflareaccess.com', aud: 'test-aud' };
+  try {
+    // No Cf-Access-Jwt-Assertion header → rejected before requireAdmin.
+    const blocked = await fetch(base + '/api/admin/backups', {
+      headers: { 'x-admin-token': ADMIN },
+    });
+    assert.equal(blocked.status, 403);
+  } finally {
+    config.cfAccess = saved; // restore the no-op state
+  }
+  // With the feature off again, admin works as before.
+  const ok = await api('/api/admin/backups', { admin: ADMIN });
+  assert.equal(ok.status, 200);
+});
+
 test('SMS OTP: request a code, verify it, and register with the token', async () => {
   const phone = '+436601234567';
   const req = await api('/api/auth/request-code', {
@@ -1060,6 +1110,188 @@ test('download info exposes the build number for auto-update', async () => {
   } else {
     assert.equal(info.status, 404); // no build published — also valid
   }
+});
+
+test('scheduled messages: schedule, list, reject past, cancel, sweep delivers', async () => {
+  const a = await register('0699 2500001', 'sch-a@example.com', 'SchA');
+  const b = await register('0699 2500002', 'sch-b@example.com', 'SchB');
+  const chat = await api('/api/chats/direct', {
+    method: 'POST', token: a.token, body: { phone: '0699 2500002' },
+  });
+  const chatId = chat.json.chat.id;
+
+  // Schedule a future message.
+  const sch = await api(`/api/chats/${chatId}/schedule`, {
+    method: 'POST', token: a.token,
+    body: { body: 'später', sendAt: Date.now() + 3600_000 },
+  });
+  assert.equal(sch.status, 201);
+  assert.equal(sch.json.scheduled.body, 'später');
+
+  // It shows in the sender's scheduled list.
+  const list = await api(`/api/chats/${chatId}/scheduled`, { token: a.token });
+  assert.equal(list.json.scheduled.length, 1);
+
+  // Past timestamps are rejected.
+  const bad = await api(`/api/chats/${chatId}/schedule`, {
+    method: 'POST', token: a.token, body: { body: 'x', sendAt: Date.now() - 1000 },
+  });
+  assert.equal(bad.status, 400);
+
+  // Cancelling removes it.
+  const del = await api(`/api/chats/${chatId}/scheduled/${sch.json.scheduled.id}`, {
+    method: 'DELETE', token: a.token,
+  });
+  assert.equal(del.status, 204);
+  const list2 = await api(`/api/chats/${chatId}/scheduled`, { token: a.token });
+  assert.equal(list2.json.scheduled.length, 0);
+
+  // A due row is delivered by the maintenance sweep and dequeued.
+  createScheduled({
+    chatId, senderId: a.user.id, type: 'text',
+    body: 'jetzt fällig', sendAt: Date.now() - 1000,
+  });
+  const result = runMaintenance();
+  assert.ok(result.deliveredScheduled >= 1);
+  const hist = await api(`/api/chats/${chatId}/messages`, { token: b.token });
+  assert.ok(hist.json.messages.some((m) => m.body === 'jetzt fällig'));
+});
+
+test('group invite links: create, join by code, idempotent, revoke', async () => {
+  const owner = await register('0699 9500001', 'inv-o@example.com', 'InvOwner');
+  const joiner = await register('0699 9500002', 'inv-j@example.com', 'InvJoiner');
+
+  const grp = await api('/api/chats/group', {
+    method: 'POST', token: owner.token, body: { name: 'Community', memberIds: [] },
+  });
+  assert.equal(grp.status, 201);
+  const gid = grp.json.chat.id;
+
+  // Owner mints an invite link.
+  const inv = await api(`/api/chats/${gid}/invite`, { method: 'POST', token: owner.token });
+  assert.equal(inv.status, 200);
+  const code = inv.json.code;
+  assert.ok(code && code.length >= 4);
+
+  // Joiner joins by code.
+  const join = await api('/api/chats/join', {
+    method: 'POST', token: joiner.token, body: { code },
+  });
+  assert.equal(join.status, 201);
+  assert.equal(join.json.joined, true);
+  assert.equal(join.json.chat.id, gid);
+
+  // Re-joining is idempotent.
+  const again = await api('/api/chats/join', {
+    method: 'POST', token: joiner.token, body: { code },
+  });
+  assert.equal(again.status, 200);
+  assert.equal(again.json.joined, false);
+
+  // Bogus codes 404.
+  const bad = await api('/api/chats/join', {
+    method: 'POST', token: joiner.token, body: { code: 'nope-nope' },
+  });
+  assert.equal(bad.status, 404);
+
+  // A non-owner can't rotate the link.
+  const rot = await api(`/api/chats/${gid}/invite`, { method: 'POST', token: joiner.token });
+  assert.equal(rot.status, 403);
+
+  // Owner revokes → the code stops working.
+  const del = await api(`/api/chats/${gid}/invite`, { method: 'DELETE', token: owner.token });
+  assert.equal(del.status, 204);
+  const after = await api('/api/chats/join', {
+    method: 'POST', token: joiner.token, body: { code },
+  });
+  assert.equal(after.status, 404);
+});
+
+test('webrtc: ice config + call signaling relay between two users', async () => {
+  const a = await register('0699 9600001', 'call-a@example.com', 'CallA');
+  const b = await register('0699 9600002', 'call-b@example.com', 'CallB');
+
+  // ICE config is auth-gated and always offers at least a STUN server.
+  const ice = await api('/api/ice', { token: a.token });
+  assert.equal(ice.status, 200);
+  assert.ok(ice.json.iceServers[0].urls.startsWith('stun:'));
+  assert.equal((await api('/api/ice')).status, 401);
+
+  // Signaling relay: A's offer reaches B, tagged with from=A.
+  const aWs = await connect(a.token);
+  await waitFor(aWs, 'ready');
+  const bWs = await connect(b.token);
+  await waitFor(bWs, 'ready');
+
+  aWs.send(JSON.stringify({
+    type: 'call-offer',
+    payload: { to: b.user.id, sdp: 'OFFER', video: true },
+  }));
+  const offer = await waitFor(bWs, 'call-offer');
+  assert.equal(offer.from.id, a.user.id);
+  assert.equal(offer.sdp, 'OFFER');
+  assert.equal(offer.video, true);
+
+  // B answers; A receives it.
+  bWs.send(JSON.stringify({
+    type: 'call-answer',
+    payload: { to: a.user.id, sdp: 'ANSWER' },
+  }));
+  const answer = await waitFor(aWs, 'call-answer');
+  assert.equal(answer.from.id, b.user.id);
+  assert.equal(answer.sdp, 'ANSWER');
+
+  aWs.close();
+  bWs.close();
+});
+
+test('remote config: public defaults, admin update, public reflects', async () => {
+  // Public endpoint returns the built-in defaults.
+  const pub = await fetch(base + '/api/config');
+  assert.equal(pub.status, 200);
+  const def = await pub.json();
+  assert.equal(def.flags.polls, true);
+  assert.equal(def.flags.calls, false);
+  assert.equal(def.values.maxStatusSeconds, 30);
+  assert.equal(def.notice, null);
+
+  // Admin updates a flag, the notice and the minimum supported build.
+  const upd = await api('/api/admin/config', {
+    method: 'PUT',
+    admin: ADMIN,
+    body: {
+      flags: { calls: true },
+      notice: { text: 'Wartung heute 22 Uhr', level: 'warning' },
+      minSupportedBuild: 12,
+    },
+  });
+  assert.equal(upd.status, 200);
+  assert.equal(upd.json.flags.calls, true);
+  assert.equal(upd.json.flags.polls, true); // untouched flags are preserved
+  assert.equal(upd.json.minSupportedBuild, 12);
+  assert.equal(upd.json.notice.text, 'Wartung heute 22 Uhr');
+
+  // The public endpoint reflects the change (no app update needed).
+  const pub2 = await (await fetch(base + '/api/config')).json();
+  assert.equal(pub2.flags.calls, true);
+  assert.equal(pub2.notice.level, 'warning');
+
+  // The notice can be cleared back to null.
+  const cleared = await api('/api/admin/config', {
+    method: 'PUT', admin: ADMIN, body: { notice: null },
+  });
+  assert.equal(cleared.json.notice, null);
+  assert.equal(cleared.json.flags.calls, true); // other fields untouched
+
+  // Writing requires the admin token, and the schema is strict.
+  const noauth = await api('/api/admin/config', {
+    method: 'PUT', body: { flags: { calls: false } },
+  });
+  assert.equal(noauth.status, 401);
+  const bad = await api('/api/admin/config', {
+    method: 'PUT', admin: ADMIN, body: { bogus: 1 },
+  });
+  assert.equal(bad.status, 400);
 });
 
 test('two users can start a chat and message each other', async () => {

@@ -173,6 +173,7 @@
         <div class="navitem" data-tab="users"><span class="i">👤</span><span class="lbl">Nutzer</span></div>
         <div class="navitem" data-tab="broadcast"><span class="i">📣</span><span class="lbl">Durchsagen</span></div>
         <div class="navitem" data-tab="content"><span class="i">📰</span><span class="lbl">Inhalte</span></div>
+        <div class="navitem" data-tab="config"><span class="i">⚙️</span><span class="lbl">Konfiguration</span></div>
         <div class="navitem" data-tab="system"><span class="i">🖥️</span><span class="lbl">System</span></div>
       </div>
       <div class="foot"><button class="btn ghost" id="logoutBtn">⎋ Abmelden</button></div>
@@ -316,10 +317,38 @@
           </div>
           <div>
             <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">💾 Backups</h3><button class="btn sm" id="backupBtn">Jetzt sichern</button></div>
-            <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Datei</th><th>Größe</th><th>Erstellt</th></tr></thead><tbody id="backupRows"></tbody></table></div>
+            <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Datei</th><th>Größe</th><th>Erstellt</th><th></th></tr></thead><tbody id="backupRows"></tbody></table></div>
             <p id="backupEmpty" class="empty hidden">Noch keine Backups.</p>
           </div>
         </div>
+      </section>
+
+      <!-- CONFIG (remote config / feature flags) -->
+      <section data-pane="config" class="hidden">
+        <div class="topbar"><div><h2>Konfiguration</h2><div class="muted">Feature-Flags, Limits &amp; Hinweis-Banner – wirkt sofort, ohne App-Update</div></div>
+          <button class="btn sec sm" data-reload="config">↻</button></div>
+        <div class="card">
+          <h3>🚩 Feature-Flags</h3>
+          <div class="muted" style="margin-bottom:10px">Schalter, die Funktionen in der App ein- oder ausblenden.</div>
+          <div id="cfgFlags" class="grid2"></div>
+        </div>
+        <div class="card">
+          <h3>📢 Hinweis-Banner</h3>
+          <div class="muted" style="margin-bottom:10px">Erscheint app-weit ganz oben. Text leeren = kein Banner.</div>
+          <div class="grid2">
+            <div style="grid-column:1 / -1"><label>Text</label><input id="cfg_notice_text" maxlength="300" placeholder="z. B. Geplante Wartung heute 22–23 Uhr" /></div>
+            <div><label>Stufe</label><select id="cfg_notice_level"><option value="info">Info</option><option value="warning">Warnung</option><option value="critical">Kritisch</option></select></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>⚙️ Limits &amp; Mindest-Build</h3>
+          <div class="grid2">
+            <div><label>Max. Status-Video (Sekunden)</label><input id="cfg_max_status" type="number" min="1" max="300" /></div>
+            <div><label>Mindest-Build (versionCode)</label><input id="cfg_min_build" type="number" min="0" /></div>
+          </div>
+          <p class="hint">Apps mit kleinerem versionCode bekommen einen blockierenden „Update erforderlich"-Screen. 0 = aus.</p>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center"><button class="btn" id="cfgSaveBtn">Speichern</button><span class="muted" id="cfgUpdated"></span></div>
       </section>
     </main>
   </div>
@@ -358,7 +387,7 @@
       try{await loadOverview();sessionStorage.setItem('ping_admin_token',token);showDash();switchTab('overview');}
       catch(e){token='';$('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.';}}
 
-    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,content:loadContent,system:loadSystem};
+    const LOADERS={overview:loadOverview,users:loadUsers,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,system:loadSystem};
     let activeTab='overview';
     function switchTab(name){
       activeTab=name;
@@ -571,8 +600,28 @@
       loadBackups();
     }
     async function loadBackups(){const {backups}=await api('/admin/backups');const rows=$('backupRows');rows.innerHTML='';$('backupEmpty').classList.toggle('hidden',backups.length>0);
-      for(const b of backups){const tr=document.createElement('tr');tr.innerHTML='<td>'+esc(b.name||'')+'</td><td>'+human(b.size)+'</td><td>'+fmtDateTime(b.createdAt)+'</td>';rows.appendChild(tr);}}
+      for(const b of backups){const tr=document.createElement('tr');tr.innerHTML='<td>'+esc(b.name||'')+'</td><td>'+human(b.size)+'</td><td>'+fmtDateTime(b.createdAt)+'</td><td style="text-align:right"><button class="btn sec sm" onclick="downloadBackup(\''+esc(b.name||'')+'\')">⬇︎ Laden</button></td>';rows.appendChild(tr);}}
+    async function downloadBackup(name){try{const r=await fetch('/api/admin/backups/'+encodeURIComponent(name),{headers:{'X-Admin-Token':token}});if(!r.ok)throw 0;const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;a.click();URL.revokeObjectURL(u);}catch{toast('Download fehlgeschlagen.');}}
     async function makeBackup(){try{await api('/admin/backups',{method:'POST'});toast('Backup erstellt.');loadSystem();}catch(e){toast(e.message);}}
+
+    // ---- config (remote config / feature flags) ----
+    async function loadConfig(){
+      const c=await api('/admin/config');
+      const keys=Object.keys(c.flags||{}).sort();
+      $('cfgFlags').innerHTML=keys.map(k=>'<label style="display:flex;gap:8px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-flag="'+esc(k)+'" style="width:auto"'+(c.flags[k]?' checked':'')+' /> '+esc(k)+'</label>').join('')||'<span class="muted">Keine Flags.</span>';
+      $('cfg_notice_text').value=c.notice?c.notice.text:'';
+      $('cfg_notice_level').value=c.notice?c.notice.level:'info';
+      $('cfg_max_status').value=(c.values&&c.values.maxStatusSeconds)||30;
+      $('cfg_min_build').value=c.minSupportedBuild||0;
+      $('cfgUpdated').textContent=c.updatedAt?('Zuletzt geändert: '+fmtDateTime(c.updatedAt)):'';
+    }
+    async function saveConfig(){
+      const flags={};document.querySelectorAll('[data-flag]').forEach(el=>{flags[el.dataset.flag]=el.checked;});
+      const text=$('cfg_notice_text').value.trim();
+      const notice=text?{text,level:$('cfg_notice_level').value}:null;
+      const body={flags,values:{maxStatusSeconds:Math.max(1,Number($('cfg_max_status').value)||30)},notice,minSupportedBuild:Math.max(0,Number($('cfg_min_build').value)||0)};
+      try{await api('/admin/config',{method:'PUT',body:JSON.stringify(body)});toast('Konfiguration gespeichert.');loadConfig();}catch(e){toast(e.message);}
+    }
 
     // ---- wire ----
     $('b_route').innerHTML=routeOptions();
@@ -580,6 +629,7 @@
     $('logoutBtn').onclick=logout;$('broadcastBtn').onclick=broadcast;$('createBtn').onclick=createUser;$('backupBtn').onclick=makeBackup;
     $('dmAllBtn').onclick=broadcastDm;$('statusBtn').onclick=postStatus;
     $('savePostBtn').onclick=savePost;$('cancelEditBtn').onclick=resetEditor;
+    $('cfgSaveBtn').onclick=saveConfig;
     $('csvBtn').onclick=async()=>{try{const r=await fetch('/api/admin/users.csv',{headers:{'X-Admin-Token':token}});const blob=await r.blob();const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='ping-users.csv';a.click();URL.revokeObjectURL(u);}catch{toast('Export fehlgeschlagen.');}};
     $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});

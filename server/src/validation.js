@@ -132,6 +132,24 @@ export const messageSendSchema = z
     { message: 'Die Nachricht braucht Text oder einen Anhang.' }
   );
 
+// A "send later" message: the same content as a normal message plus the epoch
+// millisecond timestamp it should go out at (validated as future in the route).
+export const scheduleSchema = z
+  .object({
+    body: z.string().max(4000, 'Die Nachricht ist zu lang.').optional(),
+    type: z.enum(mediaTypes).optional(),
+    attachment: attachmentSchema.optional(),
+    replyTo: z.string().min(1).optional(),
+    sendAt: z.number().int(),
+  })
+  .refine(
+    (d) => {
+      const t = d.type || 'text';
+      return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
+    },
+    { message: 'Die Nachricht braucht Text oder einen Anhang.' }
+  );
+
 // A status update ("story"): coloured text card, or an image with a caption.
 export const statusSchema = z
   .object({
@@ -239,6 +257,30 @@ export const adminBroadcastSchema = z.object({
 export const messageStorageSchema = z.object({
   mode: z.enum(['server', 'local']),
 });
+
+// Joining a group via its shareable invite code.
+export const joinSchema = z.object({
+  code: z.string().trim().min(4, 'Ungültiger Code.').max(64),
+});
+
+// An app-wide notice banner pushed via remote config (no app update needed).
+export const noticeSchema = z
+  .object({
+    text: z.string().trim().min(1).max(300),
+    level: z.enum(['info', 'warning', 'critical']).default('info'),
+    route: appRouteSchema.optional(),
+  })
+  .strict();
+
+// A partial update to the server-driven runtime config (admin only).
+export const remoteConfigSchema = z
+  .object({
+    flags: z.record(z.boolean()).optional(),
+    values: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    notice: noticeSchema.nullable().optional(),
+    minSupportedBuild: z.number().int().min(0).max(1000000).optional(),
+  })
+  .strict();
 
 // Per-account privacy switches (extend here as more arrive).
 export const privacySchema = z.object({

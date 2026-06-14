@@ -5,6 +5,7 @@ import '../models/message.dart';
 import '../services/audio_player_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
+import '../utils/message_format.dart';
 import 'receipt_ticks.dart';
 import 'verified_badge.dart';
 
@@ -239,13 +240,17 @@ class MessageBubble extends StatelessWidget {
             Padding(
               padding: EdgeInsets.fromLTRB(
                   hasMedia ? 6 : 0, hasMedia ? 6 : 0, hasMedia ? 6 : 0, 0),
-              child: Text(
-                message.body,
-                style: TextStyle(
-                    color: fg,
-                    fontSize: (jumbo ? 44 : 15.5) * textScale,
-                    height: jumbo ? 1.1 : 1.3),
-              ),
+              child: jumbo
+                  ? Text(
+                      message.body,
+                      style: TextStyle(
+                          color: fg, fontSize: 44 * textScale, height: 1.1),
+                    )
+                  : FormattedMessageText(
+                      text: message.body,
+                      style: TextStyle(
+                          color: fg, fontSize: 15.5 * textScale, height: 1.3),
+                    ),
             ),
           Padding(
             padding:

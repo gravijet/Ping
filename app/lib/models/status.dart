@@ -34,6 +34,19 @@ class PingStatus {
   bool get isVideo => type == 'video';
   bool get isMedia => type != 'text';
 
+  PingStatus copyWith({bool? seen, int? viewCount}) => PingStatus(
+        id: id,
+        userId: userId,
+        type: type,
+        body: body,
+        attachment: attachment,
+        bgColor: bgColor,
+        createdAt: createdAt,
+        expiresAt: expiresAt,
+        seen: seen ?? this.seen,
+        viewCount: viewCount ?? this.viewCount,
+      );
+
   Color get background {
     final hex = (bgColor ?? '#0A84FF').replaceFirst('#', '');
     return Color(int.parse('FF$hex', radix: 16));
@@ -68,6 +81,20 @@ class StatusGroup {
     required this.hasUnseen,
     required this.updatedAt,
   });
+
+  /// Index of the first not-yet-seen item, or 0 when everything is seen (so the
+  /// viewer replays from the start). Skips statuses you've already watched.
+  int get firstUnseen {
+    final i = items.indexWhere((s) => !s.seen);
+    return i < 0 ? 0 : i;
+  }
+
+  StatusGroup copyWith({List<PingStatus>? items, bool? hasUnseen}) => StatusGroup(
+        user: user,
+        items: items ?? this.items,
+        hasUnseen: hasUnseen ?? this.hasUnseen,
+        updatedAt: updatedAt,
+      );
 
   factory StatusGroup.fromJson(Map<String, dynamic> json) => StatusGroup(
         user: PingUser.fromJson(json['user'] as Map<String, dynamic>),

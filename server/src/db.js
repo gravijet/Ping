@@ -43,7 +43,9 @@ db.exec(`
     direct_key   TEXT,
     -- A read-only channel (e.g. the official "Ping Team" broadcast): only the
     -- server delivers messages into it; normal members can't reply.
-    locked       INTEGER NOT NULL DEFAULT 0
+    locked       INTEGER NOT NULL DEFAULT 0,
+    -- A group's shareable join code (null = no invite link active).
+    invite_code  TEXT
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_direct_key
     ON chats(direct_key) WHERE direct_key IS NOT NULL;
@@ -237,6 +239,31 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_posts_kind
     ON posts(kind, published, created_at);
+
+  -- Server-driven runtime configuration: feature flags, limits, an app-wide
+  -- notice banner and a minimum supported build. A single JSON row the app reads
+  -- at /api/config and caches, so a lot can change without shipping a new APK.
+  CREATE TABLE IF NOT EXISTS app_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  -- Messages a user composed now but asked to send later. The maintenance sweep
+  -- delivers due ones (send_at <= now) into the chat as normal messages.
+  CREATE TABLE IF NOT EXISTS scheduled_messages (
+    id         TEXT PRIMARY KEY,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    sender_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL DEFAULT 'text',
+    body       TEXT NOT NULL DEFAULT '',
+    attachment TEXT,
+    reply_to   TEXT,
+    send_at    INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_messages(send_at);
+  CREATE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_messages(chat_id, sender_id);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -335,6 +362,11 @@ function ensureColumns() {
     // Disappearing messages: new messages in this chat expire after this many
     // seconds (0 = off).
     db.exec('ALTER TABLE chats ADD COLUMN expire_seconds INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!chatCols.includes('invite_code')) {
+    // A group's shareable join code (null = no link). Anyone with the code can
+    // join the group via POST /chats/join.
+    db.exec('ALTER TABLE chats ADD COLUMN invite_code TEXT');
   }
   const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
   if (!msgCols.includes('expires_at')) {

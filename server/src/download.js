@@ -61,45 +61,83 @@ function latestApk() {
 function apkInfo() {
   const latest = latestApk();
   if (!latest) return null;
-  if (cache && cache.full === latest.full && cache.mtime === latest.mtime) {
+  const dir = path.dirname(latest.full);
+
+  // Optional sidecar version.json (written by scripts/publish-apk.sh). It names
+  // the universal APK explicitly and lists the per-ABI splits, so we never serve
+  // a split as the default download by accident.
+  let meta = null;
+  try {
+    meta = JSON.parse(fs.readFileSync(path.join(dir, 'version.json'), 'utf8'));
+  } catch {
+    /* derive everything from the file itself */
+  }
+
+  // The universal build: the file named in version.json if present, otherwise
+  // the newest *.apk on disk.
+  let universal = latest;
+  if (meta && meta.file) {
+    const full = path.join(dir, meta.file);
+    try {
+      const st = fs.statSync(full);
+      universal = { f: meta.file, full, mtime: st.mtimeMs, size: st.size };
+    } catch {
+      /* named universal missing — keep the mtime pick */
+    }
+  }
+
+  if (cache && cache.full === universal.full && cache.mtime === universal.mtime) {
     return cache;
   }
-  let sha = '';
-  try {
-    sha = crypto.createHash('sha256').update(fs.readFileSync(latest.full)).digest('hex');
-  } catch {
-    /* ignore */
+
+  let sha = (meta && meta.sha256) || '';
+  if (!sha) {
+    try {
+      sha = crypto.createHash('sha256').update(fs.readFileSync(universal.full)).digest('hex');
+    } catch {
+      /* ignore */
+    }
   }
-  // Optional sidecar version.json (written by scripts/publish-apk.sh).
-  let version = null;
-  let build = null;
-  try {
-    const meta = JSON.parse(
-      fs.readFileSync(path.join(path.dirname(latest.full), 'version.json'), 'utf8')
-    );
-    version = meta.version || null;
-    build = meta.build || null;
-  } catch {
-    /* derive from filename */
-  }
+
+  let version = (meta && meta.version) || null;
+  let build = (meta && meta.build) || null;
   if (!version) {
-    const m = latest.f.match(/(\d+\.\d+\.\d+(?:\+\d+)?)/);
+    const m = universal.f.match(/(\d+\.\d+\.\d+(?:\+\d+)?)/);
     version = m ? m[1].split('+')[0] : '2.0.0';
     if (m && m[1].includes('+')) build = m[1];
   }
   // The Android version code (build number) is the part after "+" in
   // "<name>+<code>". The app compares this integer to decide if an update is
   // available — far more reliable than parsing a semver string.
-  let versionCode = null;
-  const plus = (build || '').split('+')[1];
-  if (plus && /^\d+$/.test(plus)) versionCode = Number(plus);
+  let versionCode = meta && Number.isInteger(meta.versionCode) ? meta.versionCode : null;
+  if (versionCode === null) {
+    const plus = (build || '').split('+')[1];
+    if (plus && /^\d+$/.test(plus)) versionCode = Number(plus);
+  }
+
+  // Resolve the per-ABI splits that actually exist on disk.
+  const variants = {};
+  if (meta && meta.variants && typeof meta.variants === 'object') {
+    for (const [abi, v] of Object.entries(meta.variants)) {
+      if (!v || !v.file) continue;
+      const full = path.join(dir, v.file);
+      try {
+        const st = fs.statSync(full);
+        variants[abi] = { full, size: v.size || st.size, sha256: v.sha256 || '' };
+      } catch {
+        /* split missing on disk — skip it */
+      }
+    }
+  }
+
   cache = {
-    ...latest,
+    ...universal,
     sha,
     version,
     build: build || version,
     versionCode,
-    updatedAt: Math.round(latest.mtime),
+    updatedAt: Math.round(universal.mtime),
+    variants,
   };
   return cache;
 }
@@ -124,6 +162,9 @@ export function mountDownloads(app, publicDir) {
   app.get('/news', page('news.html'));
   app.get('/news/:slug', page('news.html'));
   app.get('/changelog', page('changelog.html'));
+  // A shared group-invite link lands on the install page (the app does the
+  // actual joining by code). Keeps invite URLs from 404-ing.
+  app.get('/join/:code', page('index.html'));
   app.get('/status', page('status.html'));
   app.get('/legal', page('legal.html'));
 
@@ -136,10 +177,20 @@ export function mountDownloads(app, publicDir) {
   app.get('/site.css', asset('site.css', 'text/css; charset=utf-8'));
   app.get('/site.js', asset('site.js', 'application/javascript; charset=utf-8'));
 
-  // Metadata for the landing page (version / size / hash).
+  // Metadata for the landing page + in-app updater (version / size / hash). The
+  // `variants` map lets the app download the smaller APK split for its own CPU
+  // ABI; the top-level fields stay the universal APK (default + fallback).
   app.get('/download/info', (_req, res) => {
     const info = apkInfo();
     if (!info) return res.status(404).json({ error: 'Noch kein Build verfügbar.' });
+    const variants = {};
+    for (const [abi, v] of Object.entries(info.variants || {})) {
+      variants[abi] = {
+        url: `/download/abi/${abi}`,
+        size: v.size,
+        sha256: v.sha256,
+      };
+    }
     res.json({
       version: info.version,
       build: info.build,
@@ -149,6 +200,7 @@ export function mountDownloads(app, publicDir) {
       updatedAt: info.updatedAt,
       filename: `ping-${info.version}.apk`,
       url: '/download',
+      variants,
     });
   });
 
@@ -167,4 +219,26 @@ export function mountDownloads(app, publicDir) {
   app.get('/download/ping.apk', serve);
   app.get('/ping.apk', serve);
   app.get('/app-release.apk', serve);
+
+  // A specific per-ABI split (smaller than the universal APK). The :abi segment
+  // is only ever used as a lookup key into the known variants — never to build a
+  // path — so it can't be used for traversal.
+  app.get('/download/abi/:abi', (req, res) => {
+    const info = apkInfo();
+    const v = info && info.variants ? info.variants[req.params.abi] : null;
+    if (!v) {
+      return res
+        .status(404)
+        .type('text/plain; charset=utf-8')
+        .send('Für diese Architektur gibt es keinen passenden Build.');
+    }
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="ping-${info.version}-${req.params.abi}.apk"`
+    );
+    res.setHeader('Content-Length', v.size);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    fs.createReadStream(v.full).pipe(res);
+  });
 }

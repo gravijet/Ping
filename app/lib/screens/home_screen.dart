@@ -5,10 +5,12 @@ import 'package:provider/provider.dart';
 
 import '../models/chat.dart';
 import '../models/message.dart';
+import '../models/remote_config.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../services/notification_target.dart';
 import '../widgets/brand.dart';
+import '../widgets/changelog_view.dart';
 import '../widgets/chat_tile.dart';
 import '../widgets/update_sheet.dart';
 import '../widgets/verified_badge.dart';
@@ -178,6 +180,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   bool _autoUpdateShown = false;
+  bool _whatsNewShown = false;
 
   @override
   Widget build(BuildContext context) {
@@ -193,6 +196,25 @@ class _HomeScreenState extends State<HomeScreen>
         state.markUpdatePrompted(); // persist in the background
         showUpdateSheet(context);
       });
+    }
+
+    // After an update was installed, show the changelog for the new version once.
+    if (state.whatsNewVersion != null &&
+        !_whatsNewShown &&
+        !state.updateAutoPromptPending) {
+      _whatsNewShown = true;
+      final version = state.whatsNewVersion!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        state.clearWhatsNew(); // persist in the background
+        showWhatsNewSheet(context, version: version);
+      });
+    }
+
+    // The server can mark old builds as unsupported — block the app behind a
+    // mandatory-update gate rather than letting an incompatible client run.
+    if (state.updateMandatory) {
+      return const _ForceUpdateScreen();
     }
 
     return Scaffold(
@@ -262,11 +284,20 @@ class _HomeScreenState extends State<HomeScreen>
               icon: Icons.edit_rounded,
               label: 'Neuer Chat',
             ),
-      body: TabBarView(
-        controller: _tabs,
+      body: Column(
         children: [
-          RefreshIndicator(onRefresh: _refresh, child: _chatsBody(state, scheme)),
-          const StatusTab(),
+          if (!state.online) _OfflineBanner(state: state),
+          if (state.serverNotice != null) _NoticeBanner(notice: state.serverNotice!),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                RefreshIndicator(
+                    onRefresh: _refresh, child: _chatsBody(state, scheme)),
+                const StatusTab(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -642,6 +673,138 @@ class _UpdateBanner extends StatelessWidget {
                 icon: Icon(Icons.close_rounded,
                     color: scheme.onPrimaryContainer, size: 20),
                 onPressed: state.dismissUpdate,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A slim bar shown while the device is offline. Reflects the outbox so the user
+/// knows their messages aren't lost — they'll go out automatically on reconnect.
+class _OfflineBanner extends StatelessWidget {
+  final AppState state;
+  const _OfflineBanner({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final pending = state.pendingOutbox;
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Row(
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 18, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                pending > 0
+                    ? 'Offline · $pending Nachricht${pending == 1 ? '' : 'en'} wird gesendet, sobald du wieder verbunden bist'
+                    : 'Offline · du siehst gespeicherte Inhalte',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant),
+              ),
+            ),
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A server-pushed notice banner (remote config). Colour + icon reflect the
+/// level so a "critical" outage notice reads differently from a feature tip.
+class _NoticeBanner extends StatelessWidget {
+  final RemoteNotice notice;
+  const _NoticeBanner({required this.notice});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (bg, fg, icon) = switch (notice.level) {
+      'critical' => (
+          scheme.errorContainer,
+          scheme.onErrorContainer,
+          Icons.error_outline_rounded
+        ),
+      'warning' => (
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+          Icons.warning_amber_rounded
+        ),
+      _ => (
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer,
+          Icons.campaign_rounded
+        ),
+    };
+    return Material(
+      color: bg,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 9, 16, 9),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: fg),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                notice.text,
+                style: TextStyle(
+                    fontSize: 12.8, fontWeight: FontWeight.w600, color: fg),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen blocking gate shown when the server marks the running build as
+/// unsupported (remote config `minSupportedBuild`). The only way forward is the
+/// in-app update.
+class _ForceUpdateScreen extends StatelessWidget {
+  const _ForceUpdateScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.system_update_rounded, size: 72, color: scheme.primary),
+              const SizedBox(height: 18),
+              Text('Update erforderlich',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 10),
+              Text(
+                'Diese Version von Ping wird nicht mehr unterstützt. '
+                'Bitte aktualisiere, um weiter zu chatten.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () => showUpdateSheet(context),
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('Jetzt aktualisieren'),
               ),
             ],
           ),

@@ -130,6 +130,31 @@ export const config = {
   // to a known value so the portal works out of the box.
   adminToken: process.env.ADMIN_TOKEN || (isProd ? null : 'ping-admin-dev'),
 
+  // The URL path the admin portal HTML is served at. Set this to something
+  // non-guessable in production (e.g. ADMIN_PATH=/control-7f3a) so the dashboard
+  // isn't sitting at the obvious /admin. Always starts with a slash.
+  adminPath: (() => {
+    let p = (process.env.ADMIN_PATH || '/admin').trim();
+    if (!p.startsWith('/')) p = `/${p}`;
+    return p.replace(/\/+$/, '') || '/admin';
+  })(),
+
+  // ---- Cloudflare Zero Trust (Access) --------------------------------------
+  // When this deployment sits behind a Cloudflare Access application, Cloudflare
+  // authenticates the visitor (email/Google/etc.) before the request reaches us
+  // and forwards a signed JWT in the `Cf-Access-Jwt-Assertion` header. Setting
+  // both values turns on origin-side verification of that JWT for the admin
+  // portal + /api/admin, so even a request that bypasses Cloudflare (hitting the
+  // origin IP directly) can't reach admin. Leave unset to disable (dev/tests).
+  //   CF_ACCESS_TEAM_DOMAIN – e.g. "myteam.cloudflareaccess.com" or "myteam"
+  //   CF_ACCESS_AUD         – the Access application's Audience (AUD) tag
+  cfAccess: (() => {
+    let team = (process.env.CF_ACCESS_TEAM_DOMAIN || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (team && !team.includes('.')) team = `${team}.cloudflareaccess.com`;
+    const aud = (process.env.CF_ACCESS_AUD || '').trim();
+    return team && aud ? { teamDomain: team, aud } : null;
+  })(),
+
   // ---- App download (landing page + APK) -----------------------------------
   // Where the public landing page picks up the latest Android build. The newest
   // *.apk in this directory is what visitors download from `/` and `/download`.
@@ -139,8 +164,7 @@ export const config = {
     process.env.APK_DIR ||
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'downloads'),
   // The public URL of this deployment (used in invite links / landing copy).
-  // Primary domain is example.invalid; example.invalid stays a
-  // working alias for the same backend.
+  // Primary domain is ping.example.invalid.
   publicUrl: (process.env.PUBLIC_URL || 'https://example.invalid').replace(/\/$/, ''),
 
   // ---- SMS phone verification (server-side OTP) ----------------------------
@@ -169,4 +193,15 @@ export const config = {
   otpMaxAttempts: Number(process.env.OTP_MAX_ATTEMPTS) || 5,
   // Don't let the same number request a fresh code more often than this.
   otpResendMs: Number(process.env.OTP_RESEND_MS) || 30 * 1000,
+
+  // ---- WebRTC calls (ICE servers) ------------------------------------------
+  // STUN is always available (public Google STUN by default). For reliable calls
+  // through NAT/firewalls, run a TURN server (coturn) and set TURN_URL/_USER/
+  // _PASS — see server/deploy/coturn.md.
+  ice: {
+    stun: process.env.STUN_URL || 'stun:stun.l.google.com:19302',
+    turnUrl: process.env.TURN_URL || '', // e.g. turn:example.invalid:3478
+    turnUser: process.env.TURN_USER || '',
+    turnPass: process.env.TURN_PASS || '',
+  },
 };

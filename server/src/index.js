@@ -12,6 +12,7 @@ import { ensureOfficialUser } from './repo.js';
 import { startBackupScheduler } from './backup.js';
 import { startMaintenance } from './maintenance.js';
 import { mountDownloads } from './download.js';
+import { requireCfAccess } from './cfAccess.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -52,7 +53,9 @@ export function createApp() {
   );
 
   // The admin portal (served before the JSON body parser; it has no API body).
-  app.get(['/admin', '/admin/'], (_req, res) =>
+  // Lives at config.adminPath (set ADMIN_PATH to hide it) and, when Cloudflare
+  // Access is configured, is gated by a verified Access JWT.
+  app.get([config.adminPath, `${config.adminPath}/`], requireCfAccess, (_req, res) =>
     res.sendFile(path.join(publicDir, 'admin.html'))
   );
 
@@ -96,6 +99,10 @@ export function createApp() {
     keyGenerator: clientKey,
     message: { error: 'Zu viele Versuche. Bitte warte einen Moment und versuch es erneut.' },
   });
+  // Cloudflare Access gate (no-op unless configured) runs before the admin
+  // limiter + token check, so unauthenticated traffic is rejected at the edge of
+  // the API too — not just on the portal page.
+  app.use('/api/admin', requireCfAccess);
   app.use('/api/admin', adminLimiter);
 
   // General API rate limit.

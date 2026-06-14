@@ -28,6 +28,8 @@ const s = {
   ),
   setChatLockedStmt: db.prepare('UPDATE chats SET locked = ? WHERE id = ?'),
   setChatExpireStmt: db.prepare('UPDATE chats SET expire_seconds = ? WHERE id = ?'),
+  setInviteCodeStmt: db.prepare('UPDATE chats SET invite_code = ? WHERE id = ?'),
+  chatByInviteCode: db.prepare('SELECT * FROM chats WHERE invite_code = ?'),
   userChats: db.prepare(`
     SELECT c.* FROM chats c
     JOIN chat_members m ON m.chat_id = c.id
@@ -124,6 +126,9 @@ export function setChatExpire(chatId, seconds) {
   s.setChatExpireStmt.run(seconds, chatId);
   return s.chatById.get(chatId);
 }
+export const setInviteCode = (chatId, code) => s.setInviteCodeStmt.run(code, chatId);
+export const getChatByInviteCode = (code) =>
+  code ? s.chatByInviteCode.get(code) : undefined;
 export const getMembers = (chatId) => s.members.all(chatId);
 export const getMemberIds = (chatId) => s.memberIds.all(chatId).map((r) => r.user_id);
 export const addMember = (chatId, userId, role = 'member') =>

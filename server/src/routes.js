@@ -1,4 +1,5 @@
 import os from 'node:os';
+import crypto from 'node:crypto';
 import express, { Router } from 'express';
 import {
   hashPassword,
@@ -45,7 +46,18 @@ import {
   messageStorageSchema,
   postCreateSchema,
   postUpdateSchema,
+  remoteConfigSchema,
+  scheduleSchema,
+  joinSchema,
 } from './validation.js';
+import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
+import {
+  createScheduled,
+  listScheduled,
+  getScheduled,
+  deleteScheduled,
+  scheduledView,
+} from './scheduledRepo.js';
 import {
   createUser,
   OFFICIAL_USER_ID,
@@ -108,6 +120,8 @@ import {
   setArchived,
   setChatLocked,
   setChatExpire,
+  setInviteCode,
+  getChatByInviteCode,
   searchMessages,
   updateGroupMeta,
   setChatAvatar,
@@ -155,7 +169,8 @@ import {
   disconnectUser,
 } from './hub.js';
 import { sendPushToUsers, pushEnabled } from './push.js';
-import { listBackups, backupNow } from './backup.js';
+import { deliverMessage, pushMessage } from './deliver.js';
+import { listBackups, backupNow, backupFilePath } from './backup.js';
 import {
   savePushToken,
   removeUserPushToken,
@@ -248,31 +263,11 @@ function messagePreview(msg) {
   }
 }
 
-// Send a push to chat members who don't have the app open (no live socket) and
-// haven't muted the chat — so a new message still pings their phone. The sender
-// and anyone currently connected over WebSocket are skipped (they already get
-// it live / are looking at the app). Fire-and-forget.
+// Push to offline, non-muted chat members. Delegates to the shared primitive in
+// deliver.js so the live route, the official-message path and the scheduled-
+// message sweeper all push identically.
 function pushForMessage(chat, msg, senderId) {
-  const sender = getUserById(senderId);
-  const isGroup = chat.type === 'group';
-  const targets = getMembers(chat.id)
-    .filter((m) => m.user_id !== senderId && !m.muted && !isOnline(m.user_id))
-    .map((m) => m.user_id);
-  if (targets.length === 0) return;
-  const senderName = sender?.display_name || 'Ping';
-  const preview = messagePreview(msg);
-  const title = isGroup ? chat.name || 'Gruppe' : senderName;
-  const body = isGroup ? `${senderName}: ${preview}` : preview;
-  sendPushToUsers(targets, {
-    title,
-    body,
-    data: {
-      type: 'message',
-      chatId: chat.id,
-      messageId: msg.id,
-      senderId,
-    },
-  }).catch(() => {});
+  pushMessage(chat, msg, senderId);
 }
 
 // Deliver a real, persisted message from the official "Ping Team" account into a
@@ -350,6 +345,16 @@ router.get(
       uptimeSec: Math.round(process.uptime()),
       time: Date.now(),
     });
+  })
+);
+
+// Server-driven runtime config (feature flags, limits, an app-wide notice, the
+// minimum supported build). Public + non-sensitive; the app caches it so much
+// can change without shipping a new APK.
+router.get(
+  '/config',
+  h(async (_req, res) => {
+    res.json(getRemoteConfig());
   })
 );
 
@@ -943,6 +948,176 @@ router.post(
     }
     pushForMessage(req.chat, msg, req.user.id);
     res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// ---- WebRTC calls ----
+// ICE servers for the client's RTCPeerConnection: a STUN server always, plus a
+// TURN server (with credentials) when one is configured. Auth-gated so the TURN
+// credentials aren't handed out publicly.
+router.get(
+  '/ice',
+  requireAuth,
+  h(async (_req, res) => {
+    const servers = [{ urls: config.ice.stun }];
+    if (config.ice.turnUrl) {
+      servers.push({
+        urls: config.ice.turnUrl,
+        username: config.ice.turnUser,
+        credential: config.ice.turnPass,
+      });
+    }
+    res.json({ iceServers: servers });
+  })
+);
+
+// ---- Group invite links (communities) ----
+const newInviteCode = () => crypto.randomBytes(6).toString('base64url');
+
+// Current invite link for a group (any member may view it to share).
+router.get(
+  '/chats/:id/invite',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.type !== 'group') {
+      return res.status(400).json({ error: 'Einladungslinks gibt es nur für Gruppen.' });
+    }
+    const code = req.chat.invite_code || null;
+    res.json({ code, url: code ? `${config.publicUrl}/join/${code}` : null });
+  })
+);
+
+// Create or rotate the invite link (owner only).
+router.post(
+  '/chats/:id/invite',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.type !== 'group') {
+      return res.status(400).json({ error: 'Einladungslinks gibt es nur für Gruppen.' });
+    }
+    if (!requireGroupOwner(req, res)) return;
+    const code = newInviteCode();
+    setInviteCode(req.chat.id, code);
+    res.json({ code, url: `${config.publicUrl}/join/${code}` });
+  })
+);
+
+// Revoke the invite link (owner only).
+router.delete(
+  '/chats/:id/invite',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.type !== 'group') {
+      return res.status(400).json({ error: 'Einladungslinks gibt es nur für Gruppen.' });
+    }
+    if (!requireGroupOwner(req, res)) return;
+    setInviteCode(req.chat.id, null);
+    res.status(204).end();
+  })
+);
+
+// Join a group by its invite code. Idempotent: re-joining just returns the chat.
+router.post(
+  '/chats/join',
+  requireAuth,
+  h(async (req, res) => {
+    const { code } = parse(joinSchema, req.body || {});
+    const chat = getChatByInviteCode(code.trim());
+    if (!chat || chat.type !== 'group') {
+      return res.status(404).json({ error: 'Dieser Einladungslink ist ungültig.' });
+    }
+    if (isMember(chat.id, req.user.id)) {
+      return res.json({ chat: chatView(chat, req.user.id), joined: false });
+    }
+    addMember(chat.id, req.user.id);
+    const sys = createMessage({
+      chatId: chat.id,
+      senderId: req.user.id,
+      type: 'system',
+      body: `${req.user.display_name} ist über einen Einladungslink beigetreten.`,
+    });
+    sendToUser(req.user.id, 'chat-created', { chat: chatView(chat, req.user.id) });
+    for (const memberId of getMemberIds(chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(sys, memberId) });
+    }
+    res.status(201).json({ chat: chatView(chat, req.user.id), joined: true });
+  })
+);
+
+// ---- Scheduled messages ("send later") ----
+const MAX_SCHEDULE_MS = 365 * 24 * 60 * 60 * 1000; // a year out, at most
+
+router.post(
+  '/chats/:id/schedule',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { body, type = 'text', attachment, replyTo: replyRaw, sendAt } = parse(
+      scheduleSchema,
+      req.body || {}
+    );
+    if (sendAt <= Date.now() + 5000) {
+      return res.status(400).json({ error: 'Der Sendezeitpunkt muss in der Zukunft liegen.' });
+    }
+    if (sendAt > Date.now() + MAX_SCHEDULE_MS) {
+      return res.status(400).json({ error: 'Der Sendezeitpunkt liegt zu weit in der Zukunft.' });
+    }
+    const replyTo = replyRaw ? replyRaw.toString() : null;
+    if (replyTo) {
+      const target = getMessage(replyTo);
+      if (!target || target.chat_id !== req.chat.id) {
+        return res.status(400).json({ error: 'Die zitierte Nachricht gehört nicht zu diesem Chat.' });
+      }
+    }
+    const att = attachment
+      ? {
+          ...attachment,
+          kind:
+            attachment.kind ||
+            kindForMime(attachment.mime || '', attachment.name || ''),
+        }
+      : null;
+    const row = createScheduled({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type,
+      body: (body || '').trim(),
+      attachment: att,
+      replyTo,
+      sendAt,
+    });
+    res.status(201).json({ scheduled: scheduledView(row) });
+  })
+);
+
+router.get(
+  '/chats/:id/scheduled',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    res.json({
+      scheduled: listScheduled(req.chat.id, req.user.id).map(scheduledView),
+    });
+  })
+);
+
+router.delete(
+  '/chats/:id/scheduled/:sid',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const row = getScheduled(req.params.sid);
+    if (!row || row.chat_id !== req.chat.id || row.sender_id !== req.user.id) {
+      return res.status(404).json({ error: 'Diese geplante Nachricht gibt es nicht.' });
+    }
+    deleteScheduled(row.id);
+    res.status(204).end();
   })
 );
 
@@ -1845,6 +2020,24 @@ router.delete(
   })
 );
 
+// ---- Admin: runtime config ----
+router.get(
+  '/admin/config',
+  requireAdmin,
+  h(async (_req, res) => {
+    res.json(getRemoteConfig());
+  })
+);
+
+router.put(
+  '/admin/config',
+  requireAdmin,
+  h(async (req, res) => {
+    const patch = parse(remoteConfigSchema, req.body);
+    res.json(setRemoteConfig(patch));
+  })
+);
+
 // ---- Admin: chat moderation ----
 router.get(
   '/admin/chats',
@@ -1888,6 +2081,18 @@ router.post(
   h(async (_req, res) => {
     const file = backupNow();
     res.json({ ok: !!file, file: file ? file.split('/').pop() : null });
+  })
+);
+
+// Download a single snapshot. The filename is strictly validated (see
+// backupFilePath) so this can't be used to read arbitrary files.
+router.get(
+  '/admin/backups/:name',
+  requireAdmin,
+  h(async (req, res) => {
+    const full = backupFilePath(req.params.name);
+    if (!full) return res.status(404).json({ error: 'Backup nicht gefunden.' });
+    res.download(full, req.params.name);
   })
 );
 

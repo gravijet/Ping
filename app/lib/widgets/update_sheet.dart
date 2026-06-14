@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../services/app_state.dart';
 import '../services/update_service.dart';
+import 'changelog_view.dart';
 
 /// Show the in-app update flow: checks for the newest build, then downloads and
 /// launches the Android package installer with a live progress bar.
@@ -31,6 +32,7 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   UpdateInfo? _info;
   double _progress = 0;
   String _current = '';
+  List<Map<String, dynamic>> _changelog = const [];
 
   @override
   void initState() {
@@ -59,6 +61,11 @@ class _UpdateSheetState extends State<_UpdateSheet> {
       _info = info;
       _phase = info != null ? _Phase.available : _Phase.upToDate;
     });
+    // Show what's new for the offered version, if the changelog has an entry.
+    if (info != null) {
+      final cl = await state.changelogFor(info.version);
+      if (mounted) setState(() => _changelog = cl);
+    }
   }
 
   Future<void> _downloadAndInstall() async {
@@ -151,6 +158,22 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           _versionRow('Installiert', _current, scheme),
           _versionRow('Neu', info.version, scheme, highlight: true),
           _versionRow('Größe', _human(info.size), scheme),
+          if (_changelog.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Was ist neu',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: scheme.onSurface)),
+            ),
+            const SizedBox(height: 4),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: SingleChildScrollView(
+                child: ChangelogList(entries: _changelog),
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,

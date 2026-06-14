@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
@@ -21,6 +22,9 @@ class _AdminScreenState extends State<AdminScreen> {
   String _query = '';
   bool _loading = true;
   String? _error;
+  // True when /api/admin is gated by Cloudflare Access (the native client can't
+  // carry that browser login) — we then offer to open the web portal instead.
+  bool _cloudflareBlocked = false;
 
   @override
   void initState() {
@@ -34,20 +38,52 @@ class _AdminScreenState extends State<AdminScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _cloudflareBlocked = false;
     });
     try {
       final stats = await _api.get('/admin/stats');
+      // A non-JSON answer means something (usually a Cloudflare Access page)
+      // sits in front of /api/admin and intercepted the request.
+      if (stats is! Map) {
+        if (mounted) setState(() => _cloudflareBlocked = true);
+        return;
+      }
       final users = await _api.get('/admin/users', {if (_query.isNotEmpty) 'q': _query});
       if (!mounted) return;
       setState(() {
-        _stats = (stats as Map).cast<String, dynamic>();
-        _users = users['users'] as List;
+        _stats = stats.cast<String, dynamic>();
+        _users = (users is Map ? users['users'] : null) as List? ?? const [];
       });
     } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (!mounted) return;
+      if (_isCloudflareBlock(e)) {
+        setState(() => _cloudflareBlocked = true);
+      } else {
+        setState(() => _error = e.message);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Konnte das Admin-Panel nicht laden.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Whether an error came from the Cloudflare Access gate in front of admin.
+  bool _isCloudflareBlock(ApiException e) {
+    final m = e.message.toLowerCase();
+    return m.contains('cloudflare') || (e.status == 403 && m.contains('access'));
+  }
+
+  /// Open the web admin portal in the browser, where the Cloudflare Access
+  /// login works. The user signs in there and can return to the app any time.
+  Future<void> _openWebPortal() async {
+    final base = context.read<AppState>().baseUrl;
+    final root = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
+    final ok = await launchUrl(
+      Uri.parse('$root/admin'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok && mounted) _toast('Konnte den Browser nicht öffnen.');
   }
 
   Future<void> _reload() async {
@@ -340,9 +376,11 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       body: _loading && _stats == null
           ? const Center(child: CircularProgressIndicator())
-          : _error != null && _stats == null
-              ? Center(child: Text(_error!))
-              : RefreshIndicator(
+          : _cloudflareBlocked && _stats == null
+              ? _cloudflareGate()
+              : _error != null && _stats == null
+                  ? Center(child: Text(_error!))
+                  : RefreshIndicator(
                   onRefresh: _refresh,
                   child: ListView(
                     children: [
@@ -365,6 +403,46 @@ class _AdminScreenState extends State<AdminScreen> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  /// Shown when Cloudflare Access guards the admin API: the panel can't load
+  /// natively, so we send the admin to the web portal to sign in there.
+  Widget _cloudflareGate() {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock_outline_rounded, size: 56, color: scheme.primary),
+            const SizedBox(height: 16),
+            const Text('Über Cloudflare geschützt',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            Text(
+              'Das Admin-Dashboard ist über Cloudflare abgesichert und lässt '
+              'sich in der App nicht direkt öffnen. Melde dich im Browser an '
+              'und verwalte alles dort — mit „Zurück" kommst du wieder in die App.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 22),
+            FilledButton.icon(
+              onPressed: _openWebPortal,
+              icon: const Icon(Icons.open_in_browser_rounded),
+              label: const Text('Im Browser anmelden'),
+            ),
+            const SizedBox(height: 6),
+            TextButton(
+              onPressed: _refresh,
+              child: const Text('Erneut versuchen'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

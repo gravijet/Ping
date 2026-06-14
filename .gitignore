@@ -9,3 +9,6 @@ build/
 *.iml
 .idea/
 local.properties
+
+# Published APK binaries are served from disk, not tracked in git.
+server/public/downloads/*.apk

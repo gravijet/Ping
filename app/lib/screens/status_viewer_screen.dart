@@ -6,6 +6,7 @@ import '../models/status.dart';
 import '../services/app_state.dart';
 import '../utils/format.dart';
 import '../widgets/avatar.dart';
+import '../widgets/speed_badge.dart';
 import '../widgets/verified_badge.dart';
 
 /// Full-screen story viewer that steps through one or more contacts' statuses
@@ -33,6 +34,8 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   int _item = 0;
   // Drives the top bar for video items (images/text use [_progress]).
   double _videoProgress = 0;
+  final TextEditingController _replyCtrl = TextEditingController();
+  final FocusNode _replyFocus = FocusNode();
 
   bool _isVideo(PingStatus s) => s.isVideo || s.attachment?.kind == 'video';
 
@@ -40,10 +43,21 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   void initState() {
     super.initState();
     _group = widget.initialGroup.clamp(0, widget.groups.length - 1);
+    // Begin at the first status this person posted that we haven't watched yet,
+    // so re-opening (or a freshly added status) doesn't replay the old ones.
+    _item = widget.mine ? 0 : widget.groups[_group].firstUnseen;
     _progress = AnimationController(vsync: this, duration: const Duration(seconds: 5))
       ..addStatusListener((s) {
         if (s == AnimationStatus.completed) _next();
       });
+    // Pause the story while the reply field is focused; resume when it isn't.
+    _replyFocus.addListener(() {
+      if (_replyFocus.hasFocus) {
+        _progress.stop();
+      } else if (mounted && !_isVideo(_current)) {
+        _progress.forward();
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _start());
   }
 
@@ -160,8 +174,53 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     if (mounted) Navigator.of(context).maybePop();
   }
 
+  Future<void> _sendReply() async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty) return;
+    final state = context.read<AppState>();
+    final owner = _currentGroup.user;
+    _replyCtrl.clear();
+    _replyFocus.unfocus();
+    try {
+      await state.replyToStatus(owner, text);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Antwort an ${owner.label} gesendet')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Antwort konnte nicht gesendet werden')),
+        );
+      }
+    }
+  }
+
+  /// Tap a quick-reaction emoji → sends it as a status reply (a DM).
+  Future<void> _quickReact(String emoji) async {
+    final state = context.read<AppState>();
+    final owner = _currentGroup.user;
+    try {
+      await state.replyToStatus(owner, emoji);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$emoji an ${owner.label} gesendet')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reaktion konnte nicht gesendet werden')),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _replyCtrl.dispose();
+    _replyFocus.dispose();
     _progress.dispose();
     super.dispose();
   }
@@ -175,9 +234,14 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     return Scaffold(
       backgroundColor: status.isMedia ? Colors.black : status.background,
       body: GestureDetector(
+        // Opaque so a tap anywhere — including on a plain text status, where the
+        // empty area around the text would otherwise miss — advances the story.
+        behavior: HitTestBehavior.opaque,
         onTapUp: (d) {
           final w = MediaQuery.of(context).size.width;
-          if (d.globalPosition.dx < w * 0.33) {
+          // A tap anywhere advances to the next status; only a thin left edge
+          // goes back, so single-tapping reliably moves forward to the end.
+          if (d.globalPosition.dx < w * 0.15) {
             _prev();
           } else {
             _next();
@@ -236,6 +300,84 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
                           label: const Text('Löschen'),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              ),
+            // Reply to someone else's status → opens a DM with them. Not shown
+            // for the official Ping-Team channel (it's read-only).
+            if (!widget.mine && !group.user.official)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom),
+                  child: SafeArea(
+                    top: false,
+                    child: GestureDetector(
+                      // Absorb taps so interacting with the bar doesn't advance.
+                      onTap: () {},
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                for (final e in const [
+                                  '❤️', '😂', '😮', '😢', '👏', '🔥'
+                                ])
+                                  GestureDetector(
+                                    onTap: () => _quickReact(e),
+                                    child: Padding(
+                                      padding:
+                                          const EdgeInsets.symmetric(vertical: 4),
+                                      child: Text(e,
+                                          style: const TextStyle(fontSize: 28)),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _replyCtrl,
+                                focusNode: _replyFocus,
+                                style: const TextStyle(color: Colors.white),
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (_) => _sendReply(),
+                                decoration: InputDecoration(
+                                  hintText: 'Auf Status antworten …',
+                                  hintStyle:
+                                      const TextStyle(color: Colors.white70),
+                                  filled: true,
+                                  fillColor:
+                                      Colors.white.withValues(alpha: 0.15),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(24),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 18, vertical: 10),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon:
+                                  const Icon(Icons.send_rounded, color: Colors.white),
+                              onPressed: _sendReply,
+                            ),
+                          ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -406,6 +548,14 @@ class _StatusVideoViewState extends State<_StatusVideoView> {
   late final VideoPlayerController _c;
   bool _ready = false;
   bool _ended = false;
+  bool _fast = false;
+
+  // Hold to play at 2×, release to return to normal speed.
+  void _setFast(bool fast) {
+    if (!_ready || _fast == fast) return;
+    _c.setPlaybackSpeed(fast ? 2.0 : 1.0);
+    setState(() => _fast = fast);
+  }
 
   @override
   void initState() {
@@ -451,10 +601,27 @@ class _StatusVideoViewState extends State<_StatusVideoView> {
     if (!_ready) {
       return const Center(child: CircularProgressIndicator(color: Colors.white));
     }
-    return Center(
-      child: AspectRatio(
-        aspectRatio: _c.value.aspectRatio == 0 ? 9 / 16 : _c.value.aspectRatio,
-        child: VideoPlayer(_c),
+    return GestureDetector(
+      // Long-press anywhere on the video to scrub at 2×; tap still bubbles up to
+      // the viewer's navigation handler.
+      onLongPressStart: (_) => _setFast(true),
+      onLongPressEnd: (_) => _setFast(false),
+      onLongPressCancel: () => _setFast(false),
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: _c.value.aspectRatio == 0 ? 9 / 16 : _c.value.aspectRatio,
+              child: VideoPlayer(_c),
+            ),
+          ),
+          if (_fast)
+            const Padding(
+              padding: EdgeInsets.only(top: 70),
+              child: SpeedBadge(),
+            ),
+        ],
       ),
     );
   }

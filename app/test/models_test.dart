@@ -1,8 +1,14 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ping/models/chat.dart';
 import 'package:ping/models/message.dart';
+import 'package:ping/models/remote_config.dart';
+import 'package:ping/models/status.dart';
 import 'package:ping/models/user.dart';
+import 'package:ping/services/outbox_store.dart';
+import 'package:ping/utils/message_format.dart';
 
 void main() {
   group('PingUser', () {
@@ -272,6 +278,222 @@ void main() {
         'expiresAt': DateTime.now().millisecondsSinceEpoch - 1000,
       });
       expect(expired.isExpired, true);
+    });
+  });
+
+  group('StatusGroup', () {
+    PingStatus item(String id, {required bool seen}) => PingStatus(
+          id: id,
+          userId: 'u1',
+          type: 'text',
+          body: id,
+          createdAt: 0,
+          expiresAt: 0,
+          seen: seen,
+        );
+
+    StatusGroup groupWith(List<PingStatus> items) => StatusGroup(
+          user: const PingUser(
+              id: 'u1', phone: '+1', displayName: 'A', avatarColor: '#0A84FF'),
+          items: items,
+          hasUnseen: items.any((s) => !s.seen),
+          updatedAt: 0,
+        );
+
+    test('firstUnseen skips already-seen statuses', () {
+      final g = groupWith([
+        item('a', seen: true),
+        item('b', seen: true),
+        item('c', seen: false),
+      ]);
+      // Re-opening jumps past the two watched items straight to the new one.
+      expect(g.firstUnseen, 2);
+    });
+
+    test('firstUnseen replays from the start when everything is seen', () {
+      final g = groupWith([item('a', seen: true), item('b', seen: true)]);
+      expect(g.firstUnseen, 0);
+    });
+
+    test('marking an item seen clears hasUnseen once nothing is left', () {
+      var g = groupWith([item('a', seen: true), item('b', seen: false)]);
+      expect(g.hasUnseen, true);
+      final items = [g.items[0], g.items[1].copyWith(seen: true)];
+      g = g.copyWith(items: items, hasUnseen: items.any((s) => !s.seen));
+      expect(g.hasUnseen, false);
+      expect(g.firstUnseen, 0);
+    });
+  });
+
+  group('Offline cache serialisation', () {
+    test('PingUser round-trips through toJson/fromJson', () {
+      final u = PingUser.fromJson({
+        'id': 'u1',
+        'phone': '+431',
+        'displayName': 'Mara',
+        'avatarColor': '#FF8800',
+        'about': 'hi',
+        'hasAvatar': true,
+        'avatarVersion': 3,
+        'isAdmin': true,
+        'premium': true,
+        'messageStorage': 'local',
+        'showLastSeen': false,
+      });
+      final back = PingUser.fromJson(
+          jsonDecode(jsonEncode(u.toJson())) as Map<String, dynamic>);
+      expect(back.id, 'u1');
+      expect(back.displayName, 'Mara');
+      expect(back.avatarColor, '#FF8800');
+      expect(back.hasAvatar, true);
+      expect(back.avatarVersion, 3);
+      expect(back.isAdmin, true);
+      expect(back.premium, true);
+      expect(back.messageStorage, 'local');
+      expect(back.showLastSeen, false);
+    });
+
+    test('Chat round-trips with otherUser + lastMessage', () {
+      final c = Chat.fromJson({
+        'id': 'c1',
+        'type': 'direct',
+        'title': 'Mara',
+        'avatarColor': '#0A84FF',
+        'memberIds': ['me', 'u1'],
+        'otherUser': {
+          'id': 'u1',
+          'phone': '+431',
+          'displayName': 'Mara',
+          'avatarColor': '#0A84FF',
+        },
+        'lastMessage': {
+          'id': 'm1',
+          'chatId': 'c1',
+          'senderId': 'u1',
+          'type': 'text',
+          'body': 'hey',
+          'createdAt': 5,
+        },
+        'unread': 2,
+        'muted': true,
+        'archived': true,
+        'expireSeconds': 3600,
+        'updatedAt': 9,
+      });
+      final back = Chat.fromJson(
+          jsonDecode(jsonEncode(c.toJson())) as Map<String, dynamic>);
+      expect(back.id, 'c1');
+      expect(back.otherUser?.displayName, 'Mara');
+      expect(back.lastMessage?.body, 'hey');
+      expect(back.unread, 2);
+      expect(back.muted, true);
+      expect(back.archived, true);
+      expect(back.expireSeconds, 3600);
+      expect(back.memberIds, ['me', 'u1']);
+    });
+
+    test('RemoteConfig parses flags/values/notice and round-trips', () {
+      final c = RemoteConfig.fromJson({
+        'flags': {'polls': true, 'calls': false},
+        'values': {'maxStatusSeconds': 45, 'inviteUrl': 'https://x'},
+        'notice': {'text': 'Wartung', 'level': 'warning'},
+        'minSupportedBuild': 12,
+      });
+      expect(c.flag('polls'), true);
+      expect(c.flag('calls'), false);
+      expect(c.flag('unknown', fallback: true), true); // unknown → fallback
+      expect(c.intValue('maxStatusSeconds', 30), 45);
+      expect(c.stringValue('inviteUrl'), 'https://x');
+      expect(c.notice?.level, 'warning');
+      expect(c.minSupportedBuild, 12);
+
+      final back = RemoteConfig.decode(c.encode());
+      expect(back.flag('polls'), true);
+      expect(back.intValue('maxStatusSeconds', 0), 45);
+      expect(back.notice?.text, 'Wartung');
+      expect(back.minSupportedBuild, 12);
+    });
+
+    test('RemoteConfig.decode tolerates garbage and empty', () {
+      expect(RemoteConfig.decode(null).flag('x', fallback: true), true);
+      expect(RemoteConfig.decode('not json').minSupportedBuild, 0);
+      expect(RemoteConfig.decode('').notice, isNull);
+    });
+
+    test('OutboxEntry round-trips and preserves replyTo + attachment', () {
+      const e = OutboxEntry(
+        tempId: 'tmp-1',
+        chatId: 'c1',
+        type: 'image',
+        body: 'caption',
+        createdAt: 42,
+        replyTo: 'm0',
+        attachment: {'kind': 'image', 'url': '/api/uploads/x'},
+      );
+      final back = OutboxEntry.fromJson(
+          jsonDecode(jsonEncode(e.toJson())) as Map<String, dynamic>);
+      expect(back.tempId, 'tmp-1');
+      expect(back.chatId, 'c1');
+      expect(back.type, 'image');
+      expect(back.body, 'caption');
+      expect(back.replyTo, 'm0');
+      expect(back.createdAt, 42);
+      expect(back.attachment?['url'], '/api/uploads/x');
+    });
+  });
+
+  group('Message formatting', () {
+    test('parses bold/italic/strike/code and keeps the text intact', () {
+      final runs = parseMessageFormat('a *b* _c_ ~d~ `e`');
+      expect(runs.firstWhere((r) => r.bold).text, 'b');
+      expect(runs.firstWhere((r) => r.italic).text, 'c');
+      expect(runs.firstWhere((r) => r.strike).text, 'd');
+      expect(runs.firstWhere((r) => r.code).text, 'e');
+      expect(runs.map((r) => r.text).join(), 'a b c d e');
+    });
+
+    test('does NOT format intra-word text, math or paths', () {
+      for (final s in [
+        'snake_case',
+        '2*3=6',
+        'a_b_c',
+        'http://x/y_z',
+        'C*',
+        'plain text',
+      ]) {
+        final runs = parseMessageFormat(s);
+        expect(runs.every((r) => r.isPlain), true, reason: s);
+        expect(runs.map((r) => r.text).join(), s, reason: s);
+      }
+    });
+
+    test('||spoiler|| is recognised', () {
+      final runs = parseMessageFormat('it was ||the butler||');
+      expect(runs.firstWhere((r) => r.spoiler).text, 'the butler');
+    });
+
+    test('bold and italic nest', () {
+      final r = parseMessageFormat('*_x_*').single;
+      expect(r.bold && r.italic, true);
+      expect(r.text, 'x');
+    });
+
+    test('inline code is literal inside', () {
+      final r = parseMessageFormat('`a*b*c`').single;
+      expect(r.code, true);
+      expect(r.text, 'a*b*c');
+    });
+
+    test('unmatched markers stay literal', () {
+      final runs = parseMessageFormat('*hello');
+      expect(runs.every((r) => r.isPlain), true);
+      expect(runs.map((r) => r.text).join(), '*hello');
+    });
+
+    test('hasFormatting pre-check', () {
+      expect(hasFormatting('plain text'), false);
+      expect(hasFormatting('a *b*'), true);
+      expect(hasFormatting('x||y'), true);
     });
   });
 }

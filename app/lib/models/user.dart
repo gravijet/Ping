@@ -112,6 +112,28 @@ class PingUser {
         premium: premium ?? this.premium,
       );
 
+  /// Serialise for the on-device cache (round-trips through [PingUser.fromJson]).
+  /// Used to keep the signed-in identity and chat peers available offline.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'phone': phone,
+        'displayName': displayName,
+        'avatarColor': avatarColor,
+        'about': about,
+        'hasAvatar': hasAvatar,
+        'avatarVersion': avatarVersion,
+        if (lastSeen != null) 'lastSeen': lastSeen,
+        'online': online,
+        if (email != null) 'email': email,
+        'hasPassword': hasPassword,
+        'isAdmin': isAdmin,
+        'messageStorage': messageStorage,
+        'showLastSeen': showLastSeen,
+        'official': official,
+        'verified': verified,
+        'premium': premium,
+      };
+
   factory PingUser.fromJson(Map<String, dynamic> json) => PingUser(
         id: json['id'] as String,
         phone: (json['phone'] ?? '') as String,

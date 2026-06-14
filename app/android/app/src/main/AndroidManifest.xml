@@ -5,8 +5,16 @@
     <!-- Read the address book to find which of your contacts already use Ping.
          Contacts are matched on the server and never stored there. -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
-    <!-- Record voice messages. -->
+    <!-- Record voice messages + WebRTC call audio. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Voice/video calls (WebRTC). -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <!-- Install an in-app update: the downloaded APK opens the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
@@ -66,6 +74,11 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:mimeType="application/vnd.android.package-archive"/>
+        </intent>
+        <!-- Open https links (e.g. the web admin portal) in the browser. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
         </intent>
     </queries>
 </manifest>

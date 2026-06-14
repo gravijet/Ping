@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -110,8 +113,12 @@ Future<void> _pickStatusImage(
 
 Future<void> _pickStatusVideo(
     BuildContext context, ImageSource source, bool official) async {
+  // The maximum status video length is server-tunable (remote config) so it can
+  // be changed without an app update.
+  final maxSecs =
+      context.read<AppState>().remoteConfig.intValue('maxStatusSeconds', 30);
   final file = await ImagePicker()
-      .pickVideo(source: source, maxDuration: const Duration(seconds: 30));
+      .pickVideo(source: source, maxDuration: Duration(seconds: maxSecs));
   if (file == null || !context.mounted) return;
   Navigator.of(context).push(MaterialPageRoute(
     builder: (_) => StatusVideoComposer(
@@ -194,7 +201,10 @@ class _MyStatusTile extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           _Ring(
-            hasUnseen: false,
+            // Your own statuses count as seen, so the ring is a calm grey.
+            seen: mine.isEmpty
+                ? const [true]
+                : List<bool>.filled(mine.length, true),
             child: PingAvatar(
               initials: me?.initials ?? '',
               color: me?.color ?? scheme.primary,
@@ -270,7 +280,7 @@ class _StatusGroupTile extends StatelessWidget {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: _Ring(
-        hasUnseen: group.hasUnseen,
+        seen: [for (final s in group.items) s.seen],
         official: official,
         child: PingAvatar(
           initials: group.user.initials,
@@ -301,15 +311,17 @@ class _StatusGroupTile extends StatelessWidget {
   }
 }
 
-/// A status "ring" around an avatar: a blue gradient when there's something
-/// unseen, otherwise a subtle grey. The official "Ping Team" ring always glows
-/// in the brand gradient so it stands apart from everyone else's.
+/// A segmented status ring around an avatar — one arc per status item, like
+/// WhatsApp/Instagram. Unseen segments glow in the brand gradient; segments
+/// you've already watched fade to a calm grey, so it's obvious at a glance how
+/// much is still new. The official "Ping Team" ring always glows.
 class _Ring extends StatelessWidget {
-  final bool hasUnseen;
+  /// One flag per status item: `true` = already seen (grey), `false` = unseen.
+  final List<bool> seen;
   final bool official;
   final Widget child;
   const _Ring({
-    required this.hasUnseen,
+    required this.seen,
     required this.child,
     this.official = false,
   });
@@ -317,39 +329,90 @@ class _Ring extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final showGradient = hasUnseen || official;
-    return Container(
-      padding: const EdgeInsets.all(2.5),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: showGradient
-            ? const LinearGradient(
-                colors: [Color(0xFF0A84FF), Color(0xFF34B7F1)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              )
-            : null,
-        color: showGradient
-            ? null
-            : scheme.outlineVariant.withValues(alpha: 0.6),
-        boxShadow: official
-            ? [
-                BoxShadow(
-                  color: const Color(0xFF0A84FF).withValues(alpha: 0.45),
-                  blurRadius: 10,
-                  spreadRadius: 0.5,
-                ),
-              ]
-            : null,
+    return CustomPaint(
+      painter: _RingPainter(
+        seen: seen,
+        official: official,
+        seenColor: scheme.outlineVariant.withValues(alpha: 0.7),
+        surface: scheme.surface,
       ),
-      child: Container(
-        padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: scheme.surface,
-        ),
+      child: Padding(
+        padding: const EdgeInsets.all(4.5),
         child: child,
       ),
     );
   }
+}
+
+class _RingPainter extends CustomPainter {
+  final List<bool> seen;
+  final bool official;
+  final Color seenColor;
+  final Color surface;
+
+  static const _unseen = [Color(0xFF0A84FF), Color(0xFF34B7F1)];
+
+  _RingPainter({
+    required this.seen,
+    required this.official,
+    required this.seenColor,
+    required this.surface,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 3.0;
+    final center = size.center(Offset.zero);
+    final radius = size.shortestSide / 2 - stroke / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final n = seen.isEmpty ? 1 : seen.length;
+    final gap = n == 1 ? 0.0 : math.min(0.16, 0.9 / n);
+    final sweep = (2 * math.pi - gap * n) / n;
+
+    // The narrow surface-coloured gap between the ring and the avatar.
+    canvas.drawCircle(
+      center,
+      radius - stroke / 2 - 1.4,
+      Paint()..color = surface,
+    );
+
+    if (official) {
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke + 1.5
+          ..color = const Color(0xFF0A84FF).withValues(alpha: 0.45)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+    }
+
+    final unseenShader = const SweepGradient(
+      colors: [..._unseen, Color(0xFF0A84FF)],
+    ).createShader(rect);
+
+    var start = -math.pi / 2 + gap / 2;
+    for (var i = 0; i < n; i++) {
+      final isSeen = seen.isEmpty ? false : seen[i];
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = n == 1 ? StrokeCap.butt : StrokeCap.round;
+      if (isSeen && !official) {
+        paint.color = seenColor;
+      } else {
+        paint.shader = unseenShader;
+      }
+      canvas.drawArc(rect, start, sweep, false, paint);
+      start += sweep + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RingPainter old) =>
+      official != old.official ||
+      surface != old.surface ||
+      seenColor != old.seenColor ||
+      !listEquals(seen, old.seen);
 }

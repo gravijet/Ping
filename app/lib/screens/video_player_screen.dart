@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../widgets/speed_badge.dart';
+
 /// Full-screen player for a network video (auth-gated uploads need [headers]).
 class VideoPlayerScreen extends StatefulWidget {
   final String url;
@@ -15,6 +17,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final VideoPlayerController _controller;
   bool _ready = false;
   bool _error = false;
+  bool _fast = false;
+
+  // Hold to play at 2×, release to return to normal speed.
+  void _setFast(bool fast) {
+    if (!_ready || _fast == fast) return;
+    _controller.setPlaybackSpeed(fast ? 2.0 : 1.0);
+    setState(() => _fast = fast);
+  }
 
   @override
   void initState() {
@@ -63,6 +73,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ? const CircularProgressIndicator(color: Colors.white)
                 : GestureDetector(
                     onTap: _toggle,
+                    onLongPressStart: (_) => _setFast(true),
+                    onLongPressEnd: (_) => _setFast(false),
+                    onLongPressCancel: () => _setFast(false),
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
@@ -75,6 +88,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                         if (!_controller.value.isPlaying)
                           const Icon(Icons.play_circle_fill_rounded,
                               color: Colors.white70, size: 72),
+                        if (_fast)
+                          const Positioned(top: 24, child: SpeedBadge()),
                         Positioned(
                           left: 0,
                           right: 0,

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -47,12 +48,28 @@ class UpdateInfo {
 /// Checks the server for a newer APK and, on demand, downloads and launches the
 /// Android package installer. Android-only; no-ops elsewhere.
 class UpdateService {
+  static const _native = MethodChannel('ping/native');
+
   bool get supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   PackageInfo? _package;
+  String? _abi;
 
   Future<PackageInfo> _info() async => _package ??= await PackageInfo.fromPlatform();
+
+  /// The device's primary CPU ABI (e.g. "arm64-v8a"), used to pick the matching
+  /// APK split. Empty string when it can't be determined; cached after first read.
+  Future<String> _deviceAbi() async {
+    if (!supported) return '';
+    if (_abi != null) return _abi!;
+    try {
+      _abi = await _native.invokeMethod<String>('primaryAbi') ?? '';
+    } catch (_) {
+      _abi = '';
+    }
+    return _abi!;
+  }
 
   /// The running app's version name, e.g. "2.1.0".
   Future<String> currentVersion() async => (await _info()).version;
@@ -74,19 +91,41 @@ class UpdateService {
       if (res.statusCode != 200) return null;
       final json = jsonDecodeSafe(res.body);
       if (json == null) return null;
-      return UpdateInfo.fromJson(json, root);
+      final info = UpdateInfo.fromJson(json, root);
+      // Prefer the per-ABI split that matches this device — a far smaller
+      // download — falling back to the universal APK when there's no match.
+      final variants = json['variants'];
+      if (variants is Map) {
+        final abi = await _deviceAbi();
+        final v = abi.isNotEmpty ? variants[abi] : null;
+        if (v is Map && v['url'] != null) {
+          final rel = v['url'].toString();
+          return UpdateInfo(
+            version: info.version,
+            build: info.build,
+            versionCode: info.versionCode,
+            size: (v['size'] as num?)?.toInt() ?? info.size,
+            sha256: (v['sha256'] ?? info.sha256).toString(),
+            downloadUrl: rel.startsWith('http') ? rel : '$root$rel',
+          );
+        }
+      }
+      return info;
     } catch (_) {
       return null;
     }
   }
 
-  /// Whether [info] is newer than what's installed. Prefers the integer version
-  /// code (reliable); falls back to a semver comparison of the version name.
+  /// Whether [info] is newer than what's installed. An update is offered when
+  /// *either* the integer version code or the marketing version is higher — the
+  /// version-name check keeps working even if a per-ABI split carries an
+  /// inflated version code, so split-installed users still get updates.
   Future<bool> isNewer(UpdateInfo info) async {
     if (!supported) return false;
     final code = info.versionCode;
-    if (code != null) return code > await currentBuildNumber();
-    return _semverGreater(info.version, await currentVersion());
+    final byCode = code != null && code > await currentBuildNumber();
+    final byName = _semverGreater(info.version, await currentVersion());
+    return byCode || byName;
   }
 
   /// Download the APK to a temp file, reporting progress in 0..1. Returns the

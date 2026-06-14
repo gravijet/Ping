@@ -23,6 +23,26 @@ class TimeFormat {
 
   static String messageTime(DateTime t) => _time.format(t);
 
+  /// A friendly absolute date + time, e.g. "heute, 14:05", "morgen, 09:00" or
+  /// "14. Jun, 18:30" — used for scheduled-message labels.
+  static String dateTime(DateTime t) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final that = DateTime(t.year, t.month, t.day);
+    final diff = that.difference(today).inDays;
+    final String datePart;
+    if (diff == 0) {
+      datePart = 'heute';
+    } else if (diff == 1) {
+      datePart = 'morgen';
+    } else if (t.year == now.year) {
+      datePart = _dayMonth.format(t);
+    } else {
+      datePart = _full.format(t);
+    }
+    return '$datePart, ${_time.format(t)}';
+  }
+
   /// Date + time for the message-info sheet, e.g. "3. Jun, 14:05".
   static String receiptStamp(int? ms) {
     if (ms == null) return '—';

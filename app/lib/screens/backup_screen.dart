@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
@@ -22,8 +21,9 @@ class _BackupScreenState extends State<BackupScreen> {
   Future<void> _export() async {
     setState(() => _busy = true);
     try {
-      final path = await context.read<AppState>().exportDataToFile();
+      final path = await context.read<AppState>().exportDataToDownloads();
       if (!mounted) return;
+      if (path == null) return; // user cancelled the save dialog
       setState(() => _lastPath = path);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Backup gespeichert.')),
@@ -98,14 +98,9 @@ class _BackupScreenState extends State<BackupScreen> {
               tileColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14)),
-              leading: const Icon(Icons.insert_drive_file_rounded),
-              title: const Text('Letztes Backup'),
+              leading: Icon(Icons.check_circle_rounded, color: scheme.primary),
+              title: const Text('Letztes Backup gespeichert'),
               subtitle: Text(_lastPath!.split('/').last),
-              trailing: IconButton(
-                icon: const Icon(Icons.open_in_new_rounded),
-                onPressed: () => launchUrl(Uri.file(_lastPath!),
-                    mode: LaunchMode.externalApplication),
-              ),
             ),
           ],
         ],

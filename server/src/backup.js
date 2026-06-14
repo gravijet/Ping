@@ -61,6 +61,22 @@ export function listBackups() {
   }
 }
 
+/**
+ * Resolve a snapshot filename to its absolute path, or null when the name is
+ * invalid or the file doesn't exist. Only the exact `ping-YYYYMMDD-HHMM.db`
+ * shape is accepted, which also blocks path traversal (no slashes, no `..`).
+ */
+export function backupFilePath(name) {
+  if (typeof name !== 'string' || !/^ping-\d{8}-\d{4}\.db$/.test(name)) {
+    return null;
+  }
+  const base = path.resolve(config.backupDir);
+  const full = path.resolve(base, name);
+  // Defence in depth: the resolved file must sit directly inside backupDir.
+  if (path.dirname(full) !== base) return null;
+  return fs.existsSync(full) ? full : null;
+}
+
 let timer = null;
 
 /** Start the daily backup scheduler (no-op if disabled). */

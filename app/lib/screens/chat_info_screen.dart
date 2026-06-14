@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -241,6 +242,20 @@ class ChatInfoScreen extends StatelessWidget {
                       .textTheme
                       .titleSmall
                       ?.copyWith(color: scheme.onSurfaceVariant)),
+            ),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: scheme.primaryContainer,
+                child: Icon(Icons.link_rounded, color: scheme.onPrimaryContainer),
+              ),
+              title: const Text('Einladungslink',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Per Link zur Gruppe einladen'),
+              onTap: () => showModalBottomSheet(
+                context: context,
+                showDragHandle: true,
+                builder: (_) => _InviteLinkSheet(chat: chat, isOwner: isOwner),
+              ),
             ),
             ListTile(
               leading: CircleAvatar(
@@ -625,6 +640,141 @@ class _Section extends StatelessWidget {
           const SizedBox(height: 6),
           child,
         ],
+      ),
+    );
+  }
+}
+
+/// Bottom sheet that shows (and, for owners, creates/rotates/revokes) a group's
+/// shareable invite link.
+class _InviteLinkSheet extends StatefulWidget {
+  final Chat chat;
+  final bool isOwner;
+  const _InviteLinkSheet({required this.chat, required this.isOwner});
+
+  @override
+  State<_InviteLinkSheet> createState() => _InviteLinkSheetState();
+}
+
+class _InviteLinkSheetState extends State<_InviteLinkSheet> {
+  String? _code;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      _code = await context.read<AppState>().fetchGroupInvite(widget.chat.id);
+    } catch (_) {
+      /* leave null */
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _create() async {
+    setState(() => _loading = true);
+    try {
+      _code = await context.read<AppState>().createGroupInvite(widget.chat.id);
+    } catch (_) {
+      /* ignore */
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _revoke() async {
+    try {
+      await context.read<AppState>().revokeGroupInvite(widget.chat.id);
+    } catch (_) {
+      /* ignore */
+    }
+    if (mounted) setState(() => _code = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.read<AppState>();
+    final scheme = Theme.of(context).colorScheme;
+    final url = _code != null ? state.inviteUrl(_code!) : null;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.link_rounded),
+                const SizedBox(width: 10),
+                Text('Einladungslink',
+                    style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (_loading)
+              const Center(
+                  child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: CircularProgressIndicator()))
+            else if (url != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: SelectableText(url,
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: url));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Link kopiert')));
+                        }
+                      },
+                      icon: const Icon(Icons.copy_rounded),
+                      label: const Text('Kopieren'),
+                    ),
+                  ),
+                  if (widget.isOwner) ...[
+                    const SizedBox(width: 10),
+                    IconButton(
+                      tooltip: 'Neuen Link erstellen',
+                      onPressed: _create,
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'Link deaktivieren',
+                      onPressed: _revoke,
+                      icon: const Icon(Icons.link_off_rounded),
+                    ),
+                  ],
+                ],
+              ),
+            ] else ...[
+              Text('Für diese Gruppe ist kein Einladungslink aktiv.',
+                  style: TextStyle(color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 12),
+              if (widget.isOwner)
+                FilledButton.icon(
+                  onPressed: _create,
+                  icon: const Icon(Icons.add_link_rounded),
+                  label: const Text('Link erstellen'),
+                ),
+            ],
+          ],
+        ),
       ),
     );
   }

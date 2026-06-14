@@ -1,7 +1,13 @@
 import { WebSocketServer } from 'ws';
 import { verifyToken } from './auth.js';
 import { config } from './config.js';
-import { getUserById, publicUser, touchLastSeen, getMessageStorage } from './repo.js';
+import {
+  getUserById,
+  publicUser,
+  touchLastSeen,
+  getMessageStorage,
+  hasBlocked,
+} from './repo.js';
 import {
   getMemberIds,
   isMember,
@@ -234,6 +240,22 @@ async function handleMessage(ws, msg) {
         sendToUser(userId, 'read-self', { chatId, messageIds });
         purgeFullyReadLocalMessages(messageIds);
       }
+      break;
+    }
+    // WebRTC call signaling: the server is a blind relay between the two
+    // parties. SDP offers/answers, ICE candidates, ringing and hang-ups are
+    // forwarded to the `to` user, tagged with who they came `from`.
+    case 'call-offer':
+    case 'call-answer':
+    case 'call-ice':
+    case 'call-accept':
+    case 'call-reject':
+    case 'call-end': {
+      const to = payload?.to;
+      if (typeof to !== 'string' || to === userId) break;
+      if (hasBlocked(to, userId) || hasBlocked(userId, to)) break;
+      const from = publicUser(getUserById(userId));
+      sendToUser(to, type, { ...payload, from });
       break;
     }
     case 'ping':

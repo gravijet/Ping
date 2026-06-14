@@ -68,6 +68,42 @@ class NewChatScreen extends StatelessWidget {
     await _openChat(context, () => state.startDirectByPhone(phone));
   }
 
+  Future<void> _joinByLink(BuildContext context) async {
+    final controller = TextEditingController();
+    final input = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Per Einladungslink beitreten'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Einladungscode oder Link',
+            hintText: 'Code einfügen',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('Beitreten')),
+        ],
+      ),
+    );
+    if (input == null || !context.mounted) return;
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return;
+    // Accept either a bare code or a full "…/join/<code>" link.
+    final code =
+        trimmed.contains('/join/') ? trimmed.split('/join/').last.trim() : trimmed;
+    if (code.isEmpty) return;
+    final state = context.read<AppState>();
+    await _openChat(context, () => state.joinGroupByCode(code));
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -104,6 +140,13 @@ class NewChatScreen extends StatelessWidget {
             () => Navigator.of(context).pushReplacement(
               MaterialPageRoute(builder: (_) => const NewGroupScreen()),
             ),
+          ),
+          _tile(
+            scheme,
+            Icons.link_rounded,
+            'Per Einladungslink beitreten',
+            'Mit einem Code einer Gruppe beitreten',
+            () => _joinByLink(context),
           ),
           _tile(
             scheme,

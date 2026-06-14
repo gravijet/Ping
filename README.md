@@ -211,9 +211,8 @@ der Entwicklung lautet das Token `ping-admin-dev`.
 
 ## Website
 
-Die öffentliche Marketing-Seite läuft unter der Hauptadresse
-**`example.invalid`** (die alte Adresse `example.invalid` bleibt als
-Alias erhalten und zeigt auf dasselbe Backend). Alle Seiten teilen sich ein
+Die öffentliche Marketing-Seite läuft unter der Adresse
+**`example.invalid`**. Alle Seiten teilen sich ein
 Design-System (`server/public/site.css` + `site.js`):
 
 - **`/`** – Startseite mit Live-Statistik, Funktionsüberblick, Newsroom- &

@@ -1,20 +1,25 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
+import '../models/remote_config.dart';
+import '../models/scheduled_message.dart';
 import '../models/settings.dart';
 import '../models/status.dart';
 import '../models/user.dart';
 import 'api_client.dart';
 import 'audio_player_service.dart';
+import 'call_service.dart';
+import 'chat_cache_store.dart';
 import 'media_service.dart';
 import 'local_message_store.dart';
+import 'outbox_store.dart';
 import 'notification_service.dart';
 import 'notification_target.dart';
 import 'push_service.dart';
@@ -31,7 +36,10 @@ const _kSettings = 'ping_settings';
 const _kChatWallpapers = 'ping_chat_wallpapers';
 const _kPinnedChats = 'ping_pinned_chats';
 const _kUpdatePrompted = 'ping_update_prompted_build';
+const _kLastSeenVersion = 'ping_last_seen_version';
 const _kDrafts = 'ping_drafts';
+const _kMe = 'ping_me'; // cached identity for offline cold-start
+const _kRemoteConfig = 'ping_remote_config'; // cached server-driven config
 
 /// Friendly name shown instead of the raw server address by default, so the
 /// endpoint isn't advertised in the UI.
@@ -43,8 +51,7 @@ const serverLabel = 'Ping Cloud';
 String _resolveDefaultServer() {
   const override = String.fromEnvironment('PING_SERVER');
   if (override.isNotEmpty) return override;
-  // Primary domain (example.invalid). The old example.invalid host
-  // keeps serving the same backend, so existing installs keep working.
+  // Primary domain (example.invalid), packed as base64.
   const packed = 'aHR0cHM6Ly9waW5nLmJlbmphbWluYmVyZ2VyLmF0';
   try {
     return utf8.decode(base64.decode(packed));
@@ -83,6 +90,11 @@ class AppState extends ChangeNotifier {
   bool _updateAutoPrompt = false;
   bool get updateAutoPromptPending => _updateAutoPrompt;
 
+  /// Set to the running app version when it has just been updated, so the home
+  /// screen can show the changelog ("Was ist neu") once. Null otherwise.
+  String? _whatsNewVersion;
+  String? get whatsNewVersion => _whatsNewVersion;
+
   /// Routes a tapped notification to its destination (a chat or a named screen).
   /// Set by the home screen once its Navigator is ready; until then targets are
   /// stashed in [_pendingTarget] (e.g. a cold launch from a notification).
@@ -102,6 +114,54 @@ class AppState extends ChangeNotifier {
   final MediaService media = MediaService();
   final LocalMessageStore localStore = LocalMessageStore();
   final StarredStore starredStore = StarredStore();
+  final ChatCacheStore chatCache = ChatCacheStore();
+  final OutboxStore outboxStore = OutboxStore();
+
+  /// Messages composed while offline, waiting to go out (mirrors [outboxStore]
+  /// on disk). Flushed in order the moment the connection returns.
+  final List<OutboxEntry> _outbox = [];
+  bool _flushing = false;
+
+  /// Best-effort connectivity flag driving the offline banner. True until a
+  /// network call fails with a transport error (or the socket drops while in the
+  /// foreground); flipped back on the next successful call or socket connect.
+  bool online = true;
+  bool _paused = false;
+  bool _wasOffline = false;
+
+  /// Server-driven runtime config (feature flags, limits, notice, min build).
+  /// Hydrated from cache on launch, refreshed from `/config` when online.
+  RemoteConfig remoteConfig = RemoteConfig.empty;
+  int _runningBuild = 0;
+
+  /// Drives 1:1 WebRTC calls. Created in [init]; signaling rides the socket.
+  late final CallController callController;
+
+  /// ICE servers (STUN/TURN) for a call, from `/api/ice`.
+  Future<List<Map<String, dynamic>>> fetchIceServers() async {
+    final res = await _api.get('/ice');
+    return ((res['iceServers'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// Whether a remotely-toggled feature is enabled (unknown flags use [fallback]).
+  bool feature(String name, {bool fallback = false}) =>
+      remoteConfig.flag(name, fallback: fallback);
+
+  /// A server-pushed banner to show app-wide, or null.
+  RemoteNotice? get serverNotice => remoteConfig.notice;
+
+  /// True when the server says this build is too old to keep running — the UI
+  /// shows a blocking "please update" gate. Only meaningful where in-app updates
+  /// exist (Android) and we actually know our build number.
+  bool get updateMandatory =>
+      updater.supported &&
+      _runningBuild > 0 &&
+      remoteConfig.minSupportedBuild > _runningBuild;
+
+  /// How many messages are still queued for delivery (shown in the banner).
+  int get pendingOutbox => _outbox.length;
 
   /// Message ids the user has bookmarked (for the star in bubbles + the
   /// "Gespeichert" screen). Hydrated from [starredStore] on launch.
@@ -200,6 +260,10 @@ class AppState extends ChangeNotifier {
     final token = prefs.getString(_kToken);
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
     settings = PingSettings.decode(prefs.getString(_kSettings));
+    remoteConfig = RemoteConfig.decode(prefs.getString(_kRemoteConfig));
+    if (updater.supported) {
+      _runningBuild = await updater.currentBuildNumber();
+    }
     _loadChatWallpapers(prefs);
     _loadPinnedChats(prefs);
     _loadDrafts(prefs);
@@ -216,10 +280,26 @@ class AppState extends ChangeNotifier {
     );
 
     _api = ApiClient(baseUrl: baseUrl, token: token);
+    callController = CallController(
+      sendSignal: (type, payload) => _socket.send(type, payload),
+      fetchIce: fetchIceServers,
+    );
     _socket = SocketService(
       onEvent: _onSocketEvent,
       onConnectionChange: (c) {
+        final was = socketConnected;
         socketConnected = c;
+        if (c) {
+          online = true;
+          // Run the heavy catch-up only when genuinely returning from an offline
+          // stretch — not on the first connect of a normal sign-in, which loads
+          // everything itself.
+          if (!was && _wasOffline) _onReconnected();
+        } else if (!_paused && status == AuthStatus.signedIn) {
+          // Dropped while in the foreground → treat as offline.
+          online = false;
+          _wasOffline = true;
+        }
         notifyListeners();
       },
     );
@@ -235,15 +315,32 @@ class AppState extends ChangeNotifier {
     if (launch != null) dispatchNotificationTarget(launch);
 
     if (token != null) {
+      final cachedMe = prefs.getString(_kMe);
       try {
         final res = await _api.get('/me');
         me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+        _cacheMe();
         status = AuthStatus.signedIn;
         await _afterSignIn();
-      } on ApiException {
-        // Token invalid/expired — fall back to the login screen.
-        await _clearToken();
-        status = AuthStatus.signedOut;
+      } on ApiException catch (e) {
+        if (e.status == null && cachedMe != null) {
+          // Transport error (offline) but we have a saved session — stay signed
+          // in and run from the on-device cache until the connection returns.
+          try {
+            me = PingUser.fromJson(
+                jsonDecode(cachedMe) as Map<String, dynamic>);
+            status = AuthStatus.signedIn;
+            online = false;
+            await _afterSignInOffline();
+          } catch (_) {
+            await _clearToken();
+            status = AuthStatus.signedOut;
+          }
+        } else {
+          // Token invalid/expired (the server actively rejected us) — log out.
+          await _clearToken();
+          status = AuthStatus.signedOut;
+        }
       }
     } else {
       status = AuthStatus.signedOut;
@@ -320,6 +417,7 @@ class AppState extends ChangeNotifier {
   Future<void> _handleAuthSuccess(dynamic res) async {
     final token = res['token'] as String;
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     _api.token = token;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kToken, token);
@@ -335,8 +433,156 @@ class AppState extends ChangeNotifier {
     await loadChats();
     await loadBlocks();
     await loadStatus();
+    loadRemoteConfig();
+    // Replay anything composed while offline last session, then send it now.
+    await _hydrateOutbox();
+    _flushOutbox();
     // Quietly check for a newer app build in the background.
     checkForUpdate();
+    // If the app was just updated, arm the one-time "what's new" changelog.
+    _checkWhatsNew();
+  }
+
+  /// Sign-in path when the server is unreachable at cold-start but we have a
+  /// saved session: render cached chats + queued messages and keep trying to
+  /// connect. A successful reconnect runs [_onReconnected] to catch everything up.
+  Future<void> _afterSignInOffline() async {
+    _wasOffline = true;
+    final cached = await chatCache.load();
+    if (cached.isNotEmpty) {
+      chats
+        ..clear()
+        ..addAll(cached);
+      for (final c in chats) {
+        _cacheChatUsers(c);
+      }
+      _sortChats();
+    }
+    await _hydrateOutbox();
+    _socket.connect(baseUrl, _api.token!);
+    notifyListeners();
+  }
+
+  /// First reconnect after an offline stretch: pull fresh data and push out
+  /// anything that queued while we were away.
+  void _onReconnected() {
+    _wasOffline = false;
+    loadChats().catchError((_) {});
+    loadStatus();
+    loadBlocks().catchError((_) {});
+    loadRemoteConfig();
+    _registerPushToken();
+    checkForUpdate();
+    _flushOutbox();
+  }
+
+  /// Fetch the server-driven config and cache it. Public + best-effort: a failure
+  /// just leaves the previously cached config in place.
+  Future<void> loadRemoteConfig() async {
+    try {
+      final res = await _api.get('/config');
+      remoteConfig = RemoteConfig.fromJson(Map<String, dynamic>.from(res as Map));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kRemoteConfig, remoteConfig.encode());
+      notifyListeners();
+    } on ApiException {
+      /* keep the cached config */
+    }
+  }
+
+  /// Persist the signed-in identity so an offline cold-start can still show the
+  /// user (name, avatar colour, admin flag …) without reaching the server.
+  void _cacheMe() {
+    final m = me;
+    if (m == null) return;
+    SharedPreferences.getInstance()
+        .then((prefs) => prefs.setString(_kMe, jsonEncode(m.toJson())))
+        .catchError((_) => false);
+  }
+
+  // ---- Outbox (offline send queue) -----------------------------------------
+
+  /// Re-insert the optimistic bubbles for any still-queued messages so they
+  /// reappear (with a clock) after an app restart.
+  Future<void> _hydrateOutbox() async {
+    final entries = await outboxStore.load();
+    _outbox
+      ..clear()
+      ..addAll(entries);
+    for (final e in entries) {
+      _appendMessage(_messageFromOutbox(e));
+    }
+    if (entries.isNotEmpty) notifyListeners();
+  }
+
+  Message _messageFromOutbox(OutboxEntry e) => Message(
+        id: e.tempId,
+        chatId: e.chatId,
+        senderId: me?.id,
+        type: e.type,
+        body: e.body,
+        attachment:
+            e.attachment != null ? Attachment.fromJson(e.attachment!) : null,
+        replyTo: e.replyTo,
+        createdAt: e.createdAt,
+        status: MessageStatus.sending,
+      );
+
+  Future<void> _enqueueOutbox(OutboxEntry e) async {
+    _outbox.add(e);
+    await outboxStore.save(_outbox);
+  }
+
+  /// Send everything queued while offline, oldest first. Stops at the first
+  /// transport error (still offline); drops messages the server permanently
+  /// refuses and marks their bubble failed.
+  Future<void> _flushOutbox() async {
+    if (_flushing || _outbox.isEmpty || _api.token == null) return;
+    _flushing = true;
+    try {
+      while (_outbox.isNotEmpty) {
+        final e = _outbox.first;
+        try {
+          final res = await _api.post('/chats/${e.chatId}/messages', {
+            if (e.type != 'text') 'type': e.type,
+            if (e.body.isNotEmpty) 'body': e.body,
+            if (e.attachment != null) 'attachment': e.attachment,
+            if (e.replyTo != null) 'replyTo': e.replyTo,
+          });
+          online = true;
+          final real = Message.fromJson(res['message'] as Map<String, dynamic>);
+          final list = _messages[e.chatId];
+          if (list != null) {
+            list.removeWhere((m) => m.id == e.tempId);
+            if (!list.any((m) => m.id == real.id)) list.add(real);
+          }
+          _bumpChat(e.chatId, real);
+          _outbox.removeAt(0);
+          await outboxStore.save(_outbox);
+          notifyListeners();
+        } on ApiException catch (err) {
+          if (err.status == null) {
+            online = false;
+            _wasOffline = true;
+            break; // still offline — try again on the next reconnect
+          }
+          // Permanent rejection (e.g. a locked channel): give up on this one so
+          // the queue can't get stuck, and surface it as failed.
+          final list = _messages[e.chatId];
+          if (list != null) {
+            final i = list.indexWhere((m) => m.id == e.tempId);
+            if (i != -1) {
+              list[i] = list[i].copyWith(status: MessageStatus.failed);
+            }
+          }
+          _outbox.removeAt(0);
+          await outboxStore.save(_outbox);
+          notifyListeners();
+        }
+      }
+    } finally {
+      _flushing = false;
+    }
   }
 
   // ---- Notification routing ------------------------------------------------
@@ -365,17 +611,21 @@ class AppState extends ChangeNotifier {
   /// treats us as offline and delivers new messages via push instead — this is
   /// what makes notifications arrive reliably whether the app is open or not.
   void appPaused() {
+    _paused = true;
     if (status == AuthStatus.signedIn) _socket.disconnect();
   }
 
   /// Reconnect and refresh when the app returns to the foreground.
   void appResumed() {
+    _paused = false;
     if (status != AuthStatus.signedIn || _api.token == null) return;
     if (!_socket.isConnected) _socket.connect(baseUrl, _api.token!);
     // Best-effort refresh; a transient network error here shouldn't surface.
     loadChats().catchError((_) {});
     loadStatus();
+    loadRemoteConfig();
     checkForUpdate();
+    _flushOutbox();
   }
 
   // ---- App updates ---------------------------------------------------------
@@ -407,6 +657,57 @@ class AppState extends ChangeNotifier {
     if (build != null) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kUpdatePrompted, build);
+    }
+  }
+
+  /// Published changelog entries for [version] (CMS posts carrying that
+  /// `version`), newest first. Empty on any error or when none exist.
+  Future<List<Map<String, dynamic>>> changelogFor(String version) async {
+    try {
+      final data = await _api.get('/changelog');
+      final posts = (data is Map && data['posts'] is List)
+          ? data['posts'] as List
+          : const [];
+      return posts
+          .whereType<Map>()
+          .map((p) => p.cast<String, dynamic>())
+          .where((p) => (p['version'] ?? '').toString() == version)
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Arm the one-time "what's new" sheet when the running version differs from
+  /// the last one we recorded (i.e. an update was installed). On a fresh install
+  /// we just record the version without showing anything.
+  Future<void> _checkWhatsNew() async {
+    try {
+      final current = await updater.currentVersion();
+      final prefs = await SharedPreferences.getInstance();
+      final last = prefs.getString(_kLastSeenVersion);
+      if (last == null) {
+        await prefs.setString(_kLastSeenVersion, current);
+        return;
+      }
+      if (last != current) {
+        _whatsNewVersion = current;
+        notifyListeners();
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  /// Clear the pending "what's new" flag and persist the version as seen, so the
+  /// changelog isn't shown again for this build.
+  Future<void> clearWhatsNew() async {
+    final v = _whatsNewVersion;
+    _whatsNewVersion = null;
+    notifyListeners();
+    if (v != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kLastSeenVersion, v);
     }
   }
 
@@ -449,12 +750,21 @@ class AppState extends ChangeNotifier {
     await _unregisterPushToken();
     await localStore.clearAll();
     await starredStore.clearAll();
+    await chatCache.clear();
+    await outboxStore.clear();
     starredIds.clear();
     _pinnedChats.clear();
     _loadedChats.clear();
     _drafts.clear();
+    _outbox.clear();
+    online = true;
+    _wasOffline = false;
     SharedPreferences.getInstance()
-        .then((prefs) => prefs.remove(_kDrafts))
+        .then((prefs) async {
+          await prefs.remove(_kDrafts);
+          await prefs.remove(_kMe);
+          return true;
+        })
         .catchError((_) => false);
     _socket.disconnect();
     await _clearToken();
@@ -682,25 +992,34 @@ class AppState extends ChangeNotifier {
   Future<void> setMessageStorage(String mode) async {
     final res = await _api.post('/me/message-storage', {'mode': mode});
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
   // ---- Backup / export -----------------------------------------------------
 
-  /// Download the full account + chat history from the server and write it to a
-  /// JSON file on the device. Returns the saved file path.
-  Future<String> exportDataToFile() async {
+  /// Download the full account + chat history from the server and let the user
+  /// save it wherever they like (e.g. Downloads) through the system "save"
+  /// dialog. Returns the saved path, or null if the user cancelled.
+  ///
+  /// Earlier this wrote into the app's private documents directory, which the
+  /// user could never reach (and the file:// "open" link was blocked on
+  /// Android) — so the backup was effectively undownloadable. The save dialog
+  /// (SAF on Android) puts the file somewhere the user actually controls.
+  Future<String?> exportDataToDownloads() async {
     final data = await _api.get('/me/export');
-    final dir = await getApplicationDocumentsDirectory();
+    final json = const JsonEncoder.withIndent('  ').convert(data);
     final ts = DateTime.now()
         .toIso8601String()
         .replaceAll(RegExp(r'[:.]'), '-')
         .split('-')
         .take(5)
         .join('-');
-    final file = File('${dir.path}/ping-backup-$ts.json');
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
-    return file.path;
+    return FilePicker.saveFile(
+      dialogTitle: 'Backup speichern',
+      fileName: 'ping-backup-$ts.json',
+      bytes: Uint8List.fromList(utf8.encode(json)),
+    );
   }
 
   // ---- Debug chat (*0111) --------------------------------------------------
@@ -981,6 +1300,7 @@ class AppState extends ChangeNotifier {
       if (avatarColor != null) 'avatarColor': avatarColor,
     });
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
@@ -993,6 +1313,7 @@ class AppState extends ChangeNotifier {
       if (currentPassword != null) 'currentPassword': currentPassword,
     });
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
@@ -1000,28 +1321,56 @@ class AppState extends ChangeNotifier {
   Future<void> uploadAvatar(List<int> bytes, String contentType) async {
     final res = await _api.postBytes('/me/avatar', bytes, contentType);
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
   Future<void> removeAvatar() async {
     final res = await _api.delete('/me/avatar');
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
   // ---- Chats & messages ----------------------------------------------------
 
   Future<void> loadChats() async {
-    final res = await _api.get('/chats');
-    chats
-      ..clear()
-      ..addAll((res['chats'] as List)
-          .map((e) => Chat.fromJson(e as Map<String, dynamic>)));
-    for (final c in chats) {
-      _cacheChatUsers(c);
+    try {
+      final res = await _api.get('/chats');
+      chats
+        ..clear()
+        ..addAll((res['chats'] as List)
+            .map((e) => Chat.fromJson(e as Map<String, dynamic>)));
+      for (final c in chats) {
+        _cacheChatUsers(c);
+      }
+      _sortChats();
+      online = true;
+      chatCache.save(List<Chat>.from(chats));
+      notifyListeners();
+    } on ApiException catch (e) {
+      if (e.status == null) {
+        // Offline: surface it (banner) and fall back to the cached list when we
+        // have nothing loaded yet. Don't throw — callers treat this as a no-op.
+        online = false;
+        _wasOffline = true;
+        if (chats.isEmpty) {
+          final cached = await chatCache.load();
+          if (cached.isNotEmpty) {
+            chats
+              ..clear()
+              ..addAll(cached);
+            for (final c in chats) {
+              _cacheChatUsers(c);
+            }
+            _sortChats();
+          }
+        }
+        notifyListeners();
+        return;
+      }
+      rethrow;
     }
-    _sortChats();
-    notifyListeners();
   }
 
   void _cacheChatUsers(Chat c) {
@@ -1044,13 +1393,27 @@ class AppState extends ChangeNotifier {
     }
     final before =
         (!reset && existing.isNotEmpty) ? existing.first.createdAt : null;
-    final res = await _api.get('/chats/$chatId/messages', {
-      if (before != null) 'before': before,
-      'limit': 40,
-    });
-    final fetched = (res['messages'] as List)
-        .map((e) => Message.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final List<Message> fetched;
+    try {
+      final res = await _api.get('/chats/$chatId/messages', {
+        if (before != null) 'before': before,
+        'limit': 40,
+      });
+      online = true;
+      fetched = (res['messages'] as List)
+          .map((e) => Message.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on ApiException catch (e) {
+      if (e.status == null) {
+        // Offline: keep showing whatever cache we already loaded above, and
+        // report "nothing new" rather than throwing an error at the user.
+        online = false;
+        _wasOffline = true;
+        notifyListeners();
+        return const [];
+      }
+      rethrow;
+    }
     if (reset) {
       // Merge with the local cache so messages the server has already purged
       // (in "nur lokal" storage mode) still show from this device's copy.
@@ -1115,9 +1478,26 @@ class AppState extends ChangeNotifier {
       list.removeWhere((m) => m.id == temp.id);
       if (!list.any((m) => m.id == real.id)) list.add(real);
       _bumpChat(chatId, real);
+      online = true;
       notifyListeners();
-    } on ApiException {
-      // Mark the optimistic bubble as failed so the user can retry.
+    } on ApiException catch (e) {
+      if (e.status == null) {
+        // Offline: queue it and keep the bubble as "sending" (a clock). It goes
+        // out automatically on reconnect — no error is shown to the user.
+        online = false;
+        _wasOffline = true;
+        await _enqueueOutbox(OutboxEntry(
+          tempId: temp.id,
+          chatId: chatId,
+          type: 'text',
+          body: body,
+          replyTo: replyTo,
+          createdAt: temp.createdAt,
+        ));
+        notifyListeners();
+        return;
+      }
+      // The server rejected it → mark failed so the user can retry.
       final list = _messages[chatId]!;
       final i = list.indexWhere((m) => m.id == temp.id);
       if (i != -1) list[i] = temp.copyWith(status: MessageStatus.failed);
@@ -1201,6 +1581,52 @@ class AppState extends ChangeNotifier {
     return (res['receipts'] as List)
         .map((e) => MessageReceiptInfo.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // ---- Scheduled messages ("send later") ----------------------------------
+
+  final Map<String, List<ScheduledMessage>> _scheduled = {};
+
+  List<ScheduledMessage> scheduledFor(String chatId) =>
+      _scheduled[chatId] ?? const [];
+
+  Future<void> loadScheduled(String chatId) async {
+    try {
+      final res = await _api.get('/chats/$chatId/scheduled');
+      _scheduled[chatId] = (res['scheduled'] as List)
+          .map((e) => ScheduledMessage.fromJson(e as Map<String, dynamic>))
+          .toList();
+      notifyListeners();
+    } on ApiException {
+      /* leave any previously loaded list in place */
+    }
+  }
+
+  Future<void> scheduleMessage(
+    String chatId, {
+    required String body,
+    String type = 'text',
+    Attachment? attachment,
+    String? replyTo,
+    required int sendAt,
+  }) async {
+    final res = await _api.post('/chats/$chatId/schedule', {
+      if (body.trim().isNotEmpty) 'body': body.trim(),
+      if (type != 'text') 'type': type,
+      if (attachment != null) 'attachment': attachment.toJson(),
+      if (replyTo != null) 'replyTo': replyTo,
+      'sendAt': sendAt,
+    });
+    final s = ScheduledMessage.fromJson(res['scheduled'] as Map<String, dynamic>);
+    (_scheduled[chatId] ??= []).add(s);
+    _scheduled[chatId]!.sort((a, b) => a.sendAt.compareTo(b.sendAt));
+    notifyListeners();
+  }
+
+  Future<void> cancelScheduled(String chatId, String id) async {
+    await _api.delete('/chats/$chatId/scheduled/$id');
+    _scheduled[chatId]?.removeWhere((s) => s.id == id);
+    notifyListeners();
   }
 
   Future<void> editMessage(String chatId, String messageId, String body) async {
@@ -1302,6 +1728,47 @@ class AppState extends ChangeNotifier {
         !c.isGroup && c.otherUser?.id == user.id);
     if (existing.isNotEmpty) return existing.first;
     final res = await _api.post('/chats/direct', {'userId': user.id});
+    final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
+    _upsertChat(chat);
+    _cacheChatUsers(chat);
+    notifyListeners();
+    return chat;
+  }
+
+  /// Reply to someone's status: opens (or reuses) a direct chat with the status
+  /// owner and sends [text] there — like replying to a story.
+  Future<void> replyToStatus(PingUser owner, String text) async {
+    final body = text.trim();
+    if (body.isEmpty) return;
+    final chat = await openDirectChat(owner);
+    await sendMessage(chat.id, body);
+  }
+
+  // ---- Group invite links (communities) ----
+
+  /// The current invite code for a group, or null if no link is active.
+  Future<String?> fetchGroupInvite(String chatId) async {
+    final res = await _api.get('/chats/$chatId/invite');
+    return res['code'] as String?;
+  }
+
+  /// Create or rotate a group's invite link (owner only). Returns the code.
+  Future<String> createGroupInvite(String chatId) async {
+    final res = await _api.post('/chats/$chatId/invite');
+    return res['code'] as String;
+  }
+
+  /// Turn off a group's invite link (owner only).
+  Future<void> revokeGroupInvite(String chatId) async {
+    await _api.delete('/chats/$chatId/invite');
+  }
+
+  /// Build the shareable URL for an invite [code] against the current server.
+  String inviteUrl(String code) => '${mediaUrl('/join/')}$code';
+
+  /// Join a group via an invite code. Returns the chat (existing or new).
+  Future<Chat> joinGroupByCode(String code) async {
+    final res = await _api.post('/chats/join', {'code': code.trim()});
     final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
     _upsertChat(chat);
     _cacheChatUsers(chat);
@@ -1424,6 +1891,7 @@ class AppState extends ChangeNotifier {
   Future<void> setShowLastSeen(bool show) async {
     final res = await _api.post('/me/privacy', {'showLastSeen': show});
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
     notifyListeners();
   }
 
@@ -1517,10 +1985,30 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> markStatusViewed(String id) async {
+    _markStatusSeenLocally(id);
     try {
       await _api.post('/status/$id/view');
     } on ApiException {
       /* a missed view receipt isn't worth surfacing */
+    }
+  }
+
+  /// Flip a just-watched status to "seen" in the in-memory feed so the ring on
+  /// the Status tab greys out that segment immediately, before the next reload.
+  void _markStatusSeenLocally(String id) {
+    for (var gi = 0; gi < statusOthers.length; gi++) {
+      final g = statusOthers[gi];
+      final ii = g.items.indexWhere((s) => s.id == id);
+      if (ii == -1) continue;
+      if (g.items[ii].seen) return; // already marked — nothing to do
+      final items = List<PingStatus>.from(g.items);
+      items[ii] = items[ii].copyWith(seen: true);
+      statusOthers[gi] = g.copyWith(
+        items: items,
+        hasUnseen: items.any((s) => !s.seen),
+      );
+      notifyListeners();
+      return;
     }
   }
 
@@ -1729,6 +2217,7 @@ class AppState extends ChangeNotifier {
         // An admin changed our account — apply it live (name, admin flag, …).
         final updated = PingUser.fromJson(payload['user'] as Map<String, dynamic>);
         me = updated;
+        _cacheMe();
         notifyListeners();
         break;
 
@@ -1736,6 +2225,29 @@ class AppState extends ChangeNotifier {
         // Account disabled or deleted by an admin: end the session immediately.
         final reason = (payload['reason'] as String?) ?? 'force-logout';
         _handleForcedLogout(reason);
+        break;
+
+      // ---- WebRTC call signaling (relayed by the server) ----
+      case 'call-offer':
+        if (payload['from'] is Map) {
+          callController.onIncomingOffer(
+            PingUser.fromJson(
+                (payload['from'] as Map).cast<String, dynamic>()),
+            payload,
+          );
+        }
+        break;
+      case 'call-answer':
+        callController.onRemoteAnswer(payload);
+        break;
+      case 'call-ice':
+        callController.onRemoteIce(payload);
+        break;
+      case 'call-reject':
+        callController.onRemoteReject(payload);
+        break;
+      case 'call-end':
+        callController.onRemoteEnd(payload);
         break;
     }
   }

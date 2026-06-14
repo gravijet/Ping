@@ -12,6 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/chat.dart';
 import '../models/message.dart';
+import '../models/scheduled_message.dart';
+import '../models/user.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
@@ -105,6 +107,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _loadInitial() async {
     final state = context.read<AppState>();
+    state.loadScheduled(widget.chatId); // show any "send later" messages
     try {
       final fetched = await state.loadMessages(widget.chatId, reset: true);
       if (fetched.length < 40) _hasMore = false;
@@ -343,6 +346,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           ),
           _TypingRow(chat: chat),
+          if (!chat.locked && state.scheduledFor(widget.chatId).isNotEmpty)
+            _ScheduledBar(
+              items: state.scheduledFor(widget.chatId),
+              onTap: () => _showScheduledSheet(state.scheduledFor(widget.chatId)),
+            ),
           if (_uploading) const LinearProgressIndicator(minHeight: 2),
           if (!chat.locked && !blockedOther && (_replyTo != null || _editing != null))
             _composerBanner(),
@@ -453,6 +461,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
       actions: [
+        if (!chat.isGroup &&
+            !chat.self &&
+            !chat.locked &&
+            chat.otherUser != null &&
+            state.feature('calls')) ...[
+          IconButton(
+            icon: const Icon(Icons.videocam_rounded),
+            tooltip: 'Videoanruf',
+            onPressed: () => _startCall(chat.otherUser!, video: true),
+          ),
+          IconButton(
+            icon: const Icon(Icons.call_rounded),
+            tooltip: 'Sprachanruf',
+            onPressed: () => _startCall(chat.otherUser!, video: false),
+          ),
+        ],
         IconButton(
           icon: const Icon(Icons.search_rounded),
           tooltip: 'In Chat suchen',
@@ -466,6 +490,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         const SizedBox(width: 4),
       ],
     );
+  }
+
+  Future<void> _startCall(PingUser user, {required bool video}) async {
+    try {
+      await context.read<AppState>().callController.startCall(user, video: video);
+    } catch (_) {
+      _showError('Anruf konnte nicht gestartet werden. '
+          'Prüfe die Kamera-/Mikrofon-Berechtigung.');
+    }
   }
 
   PreferredSizeWidget _buildSearchAppBar() {
@@ -1473,6 +1506,149 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Wrap the current selection (or insert an empty pair at the cursor) with a
+  /// formatting [marker] like `*`, `_`, `~`, `` ` `` or `||`.
+  void _applyFormat(String marker) {
+    final text = _input.text;
+    final sel = _input.selection;
+    final start = sel.isValid ? sel.start : text.length;
+    final end = sel.isValid ? sel.end : text.length;
+    final selected = text.substring(start, end);
+    final newText = text.replaceRange(start, end, '$marker$selected$marker');
+    final newSel = selected.isEmpty
+        ? TextSelection.collapsed(offset: start + marker.length)
+        : TextSelection(
+            baseOffset: start + marker.length,
+            extentOffset: end + marker.length,
+          );
+    setState(() {
+      _input.value = TextEditingValue(text: newText, selection: newSel);
+    });
+    context.read<AppState>().setDraft(widget.chatId, _input.text);
+    _inputFocus.requestFocus();
+  }
+
+  /// Long-pressed send → pick a date + time and schedule the current text.
+  Future<void> _scheduleCurrentMessage() async {
+    final text = _input.text.trim();
+    if (text.isEmpty) return;
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now.add(const Duration(hours: 1)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      helpText: 'Sendedatum wählen',
+    );
+    if (date == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+      helpText: 'Sendezeit wählen',
+    );
+    if (time == null || !mounted) return;
+    final when = DateTime(
+        date.year, date.month, date.day, time.hour, time.minute);
+    if (when.isBefore(now.add(const Duration(seconds: 10)))) {
+      _showError('Bitte einen Zeitpunkt in der Zukunft wählen.');
+      return;
+    }
+    final reply = _replyTo;
+    try {
+      await context.read<AppState>().scheduleMessage(
+            widget.chatId,
+            body: text,
+            replyTo: reply?.id,
+            sendAt: when.millisecondsSinceEpoch,
+          );
+      if (!mounted) return;
+      _input.clear();
+      setState(() => _replyTo = null);
+      context.read<AppState>().setDraft(widget.chatId, '');
+      _showError('Geplant für ${TimeFormat.dateTime(when)}');
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  void _showScheduledSheet(List<ScheduledMessage> items) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, size: 20),
+                  const SizedBox(width: 10),
+                  Text('Geplante Nachrichten',
+                      style: Theme.of(ctx).textTheme.titleMedium),
+                ],
+              ),
+            ),
+            for (final s in items)
+              ListTile(
+                title: Text(s.preview, maxLines: 2, overflow: TextOverflow.ellipsis),
+                subtitle: Text(TimeFormat.dateTime(s.sendTime)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Abbrechen',
+                  onPressed: () async {
+                    try {
+                      await context
+                          .read<AppState>()
+                          .cancelScheduled(widget.chatId, s.id);
+                    } on ApiException catch (e) {
+                      _showError(e.message);
+                    }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFormatSheet() {
+    const options = <(String, String, IconData)>[
+      ('Fett', '*', Icons.format_bold_rounded),
+      ('Kursiv', '_', Icons.format_italic_rounded),
+      ('Durchgestrichen', '~', Icons.format_strikethrough_rounded),
+      ('Monospace', '`', Icons.code_rounded),
+      ('Spoiler', '||', Icons.visibility_off_rounded),
+    ];
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (label, marker, icon) in options)
+              ListTile(
+                leading: Icon(icon),
+                title: Text(label),
+                trailing: Text('$marker…$marker',
+                    style: const TextStyle(fontFamily: 'monospace')),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _applyFormat(marker);
+                },
+              ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildComposer() {
     final scheme = Theme.of(context).colorScheme;
     final enterToSend = context.read<AppState>().settings.enterToSend;
@@ -1495,6 +1671,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               icon: const Icon(Icons.add_circle_outline_rounded),
               tooltip: 'Anhang',
               onPressed: _uploading ? null : _openAttachmentSheet,
+            ),
+            IconButton(
+              icon: const Icon(Icons.text_format_rounded),
+              tooltip: 'Formatierung',
+              visualDensity: VisualDensity.compact,
+              onPressed: _showFormatSheet,
             ),
             Expanded(
               child: TextField(
@@ -1533,6 +1715,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: InkWell(
                 customBorder: const CircleBorder(),
                 onTap: _uploading ? null : (showSend ? _send : _startRecording),
+                // Hold the send button to schedule the message for later.
+                onLongPress: (!_uploading && canSend && _editing == null)
+                    ? _scheduleCurrentMessage
+                    : null,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Icon(
@@ -1839,6 +2025,51 @@ class _BlockedBar extends StatelessWidget {
 /// Shown instead of the composer in a read-only channel (an official "Ping
 /// Team" broadcast): you receive messages here but can't reply. Styled to read
 /// as a trusted, official surface rather than just a greyed-out bar.
+/// A thin tappable bar above the composer summarising "send later" messages
+/// queued for this chat. Tapping it opens the management sheet.
+class _ScheduledBar extends StatelessWidget {
+  final List<ScheduledMessage> items;
+  final VoidCallback onTap;
+  const _ScheduledBar({required this.items, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final next = items.first;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+          child: Row(
+            children: [
+              Icon(Icons.schedule_rounded,
+                  size: 18, color: scheme.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  items.length == 1
+                      ? 'Geplant für ${TimeFormat.dateTime(next.sendTime)}'
+                      : '${items.length} geplante Nachrichten · nächste ${TimeFormat.dateTime(next.sendTime)}',
+                  style: TextStyle(
+                      fontSize: 12.8,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSecondaryContainer),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.expand_less_rounded,
+                  size: 20, color: scheme.onSecondaryContainer),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ReadOnlyBar extends StatelessWidget {
   const _ReadOnlyBar();
 
