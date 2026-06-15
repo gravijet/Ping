@@ -1,9 +1,24 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     // Applies the Firebase configuration from android/app/google-services.json.
     id("com.google.gms.google-services")
+}
+
+// Load the release signing credentials from android/key.properties when present.
+// Keeping a single, stable keystore is what makes in-app updates install over an
+// existing build — Android refuses an update signed with a different key. Without
+// the file (e.g. a fresh clone) we fall back to debug signing so the app still
+// builds out of the box.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -27,11 +42,26 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // Ships signed with the debug key so `flutter build apk` runs out of
-            // the box. Swap in a real keystore before publishing to the Play Store.
-            signingConfig = signingConfigs.getByName("debug")
+            // Sign with the stable release keystore so updates install over an
+            // existing install; fall back to the debug key on a fresh clone.
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

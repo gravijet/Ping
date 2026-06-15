@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/message.dart';
 import '../services/audio_player_service.dart';
 import '../theme.dart';
+import '../utils/emoji.dart';
 import '../utils/format.dart';
 import '../utils/message_format.dart';
 import 'receipt_ticks.dart';
@@ -52,6 +53,21 @@ class MessageBubble extends StatelessWidget {
   final void Function(Attachment att)? onOpenVideo;
   final double textScale;
 
+  /// Multiplier (≈0.4–1.6) for the chat-bubble corner radius, from settings.
+  final double cornerScale;
+
+  /// When false, emoji-only messages render at normal size instead of jumbo
+  /// (Einstellungen → Chats → „Große Emojis").
+  final bool bigEmoji;
+
+  /// When false, inline `*bold*`/`_italic_`/… markers are shown verbatim instead
+  /// of being styled (Einstellungen → Chats → „Text-Formatierung").
+  final bool formatting;
+
+  /// Tint my own bubbles toward the accent for a bolder, more colourful look
+  /// (Einstellungen → Chats → „Farbige Sprechblasen").
+  final bool accentBubbles;
+
   /// Tapped an existing reaction chip → toggle that emoji for me.
   final void Function(String emoji)? onToggleReaction;
 
@@ -83,6 +99,10 @@ class MessageBubble extends StatelessWidget {
     this.onPlayAudio,
     this.onOpenVideo,
     this.textScale = 1.0,
+    this.cornerScale = 1.0,
+    this.bigEmoji = true,
+    this.formatting = true,
+    this.accentBubbles = false,
     this.onToggleReaction,
     this.onVotePoll,
   });
@@ -93,23 +113,43 @@ class MessageBubble extends StatelessWidget {
 
     final palette = context.ping;
     final scheme = Theme.of(context).colorScheme;
-    final bg = isMine ? palette.bubbleOut : palette.bubbleIn;
+    // "Farbige Sprechblasen" nudges my own bubbles toward the accent — a bolder,
+    // more colourful look while keeping the text contrast that the palette
+    // guarantees.
+    final bg = isMine
+        ? (accentBubbles
+            ? (Color.lerp(palette.bubbleOut, scheme.secondary, 0.22) ??
+                palette.bubbleOut)
+            : palette.bubbleOut)
+        : palette.bubbleIn;
     final fg = isMine ? palette.bubbleOutText : palette.bubbleInText;
-    const radius = Radius.circular(18);
+    // Corner roundness is user-tunable (Chats → Sprechblasen-Form); the tail
+    // corner stays tight so the painted flick still reads as a tail.
+    final radius = Radius.circular((18.0 * cornerScale).clamp(4.0, 30.0));
     const tailRadius = Radius.circular(3);
 
     final hasMedia = message.attachment != null && !message.deleted;
     final hasPoll = message.poll != null && !message.deleted;
     final hasText = message.body.trim().isNotEmpty;
-    // Emoji-only messages render large and bubble-less, like a sticker.
-    final jumbo = !hasMedia && message.isEmojiOnly && repliedTo == null;
+    // Emoji-only messages render large and bubble-less, like a sticker. Size
+    // tapers as the emoji count grows so a single 😀 is big and a row stays sane.
+    final jumbo =
+        bigEmoji && !hasMedia && message.isEmojiOnly && repliedTo == null;
+    final jumboSize = switch (EmojiText.count(message.body)) {
+      <= 1 => 52.0,
+      2 => 44.0,
+      3 => 38.0,
+      _ => 30.0,
+    };
     // An incoming official "Ping Team" broadcast → branded, trustworthy bubble.
     final officialIn = official && !isMine && !jumbo;
 
     // A whisper of the accent at the tail corner gives my own bubbles depth —
-    // the difference between a flat box and something that feels designed.
-    final tailColor =
-        isMine ? (Color.lerp(bg, scheme.secondary, 0.16) ?? bg) : bg;
+    // the difference between a flat box and something that feels designed. With
+    // "Farbige Sprechblasen" the gradient leans further into the accent.
+    final tailColor = isMine
+        ? (Color.lerp(bg, scheme.secondary, accentBubbles ? 0.42 : 0.16) ?? bg)
+        : bg;
     final gradient = (isMine && !jumbo)
         ? LinearGradient(
             begin: Alignment.topLeft,
@@ -244,13 +284,23 @@ class MessageBubble extends StatelessWidget {
                   ? Text(
                       message.body,
                       style: TextStyle(
-                          color: fg, fontSize: 44 * textScale, height: 1.1),
+                          color: fg, fontSize: jumboSize * textScale, height: 1.1),
                     )
-                  : FormattedMessageText(
-                      text: message.body,
-                      style: TextStyle(
-                          color: fg, fontSize: 15.5 * textScale, height: 1.3),
-                    ),
+                  : formatting
+                      ? FormattedMessageText(
+                          text: message.body,
+                          style: TextStyle(
+                              color: fg,
+                              fontSize: 15.5 * textScale,
+                              height: 1.3),
+                        )
+                      : Text(
+                          message.body,
+                          style: TextStyle(
+                              color: fg,
+                              fontSize: 15.5 * textScale,
+                              height: 1.3),
+                        ),
             ),
           Padding(
             padding:
@@ -413,6 +463,10 @@ class _ImageAttachment extends StatelessWidget {
                   url!,
                   headers: headers,
                   fit: BoxFit.cover,
+                  // Decode to roughly the on-screen size (bubble caps at 260px,
+                  // ×2 for hi-dpi) instead of full resolution — big savings in
+                  // memory and in the decoded-image cache for photo-heavy chats.
+                  cacheWidth: 520,
                   loadingBuilder: (ctx, child, progress) =>
                       progress == null ? child : _placeholder(ctx),
                   errorBuilder: (ctx, _, _) => _placeholder(ctx, error: true),

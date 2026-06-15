@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'screens/call_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/lock_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'services/app_state.dart';
@@ -21,14 +22,24 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('de');
+
+  // Locale data for date/time formatting. A failure here must never block the
+  // first frame — fall back to the default locale rather than hang on the
+  // native launch screen (the "stuck on a grey screen after install" report).
+  try {
+    await initializeDateFormatting('de').timeout(const Duration(seconds: 5));
+  } catch (_) {
+    /* dates fall back to the default locale; the app still renders */
+  }
 
   // Firebase backs push notifications (and, on older builds, phone verify). Only
   // Android is configured (via android/app/google-services.json); on other
-  // platforms we just skip it and everything else still works.
+  // platforms we just skip it and everything else still works. A cold device
+  // without Google Play Services can make this hang, so it's time-boxed — we'd
+  // rather start without push than never paint a frame.
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     try {
-      await Firebase.initializeApp();
+      await Firebase.initializeApp().timeout(const Duration(seconds: 8));
       // Handle push messages that arrive while the app is in the background or
       // terminated (the OS shows the notification; this keeps FCM delivering).
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -37,13 +48,54 @@ Future<void> main() async {
     }
   }
 
+  // In release builds an uncaught widget error renders a bare grey screen with
+  // no way out. Show a branded, actionable fallback instead so a first-launch
+  // glitch is recoverable rather than a dead end.
+  ErrorWidget.builder = (details) => const _FatalErrorScreen();
+
   final state = AppState();
-  // Kick off bootstrap; the UI shows a splash until it resolves.
-  state.init();
+  // Kick off bootstrap; the UI shows a splash until it resolves. Guarded so a
+  // bootstrap exception can't leave the app stranded on the splash forever.
+  state.init().catchError((Object e) => state.failBootstrap(e));
 
   runApp(
     ChangeNotifierProvider.value(value: state, child: PingApp(state: state)),
   );
+}
+
+/// Last-resort UI shown when a widget subtree throws during build. Replaces
+/// Flutter's default grey error box with something a user can act on.
+class _FatalErrorScreen extends StatelessWidget {
+  const _FatalErrorScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Container(
+        color: const Color(0xFF0A84FF),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(28),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.refresh_rounded, color: Colors.white, size: 48),
+            SizedBox(height: 16),
+            Text(
+              'Etwas ist schiefgelaufen.\nBitte starte Ping neu.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class PingApp extends StatefulWidget {
@@ -102,19 +154,51 @@ class _PingAppState extends State<PingApp> with WidgetsBindingObserver {
     final themeMode = context.select<AppState, ThemeMode>((s) => s.themeMode);
     // Rebuild themes whenever the chosen design (preset or custom seed) changes.
     final design = context.select<AppState, PingDesign>((s) => s.design);
+    final amoled = context.select<AppState, bool>((s) => s.settings.amoledDark);
+    final boldText =
+        context.select<AppState, bool>((s) => s.settings.boldText);
+    final highContrast =
+        context.select<AppState, bool>((s) => s.settings.highContrast);
     return MaterialApp(
       title: 'Ping',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: scaffoldMessengerKey,
-      theme: PingTheme.light(design),
-      darkTheme: PingTheme.dark(design),
+      theme: PingTheme.light(design,
+          boldText: boldText, highContrast: highContrast),
+      darkTheme: PingTheme.dark(design,
+          amoled: amoled, boldText: boldText, highContrast: highContrast),
       themeMode: themeMode,
       // The call overlay floats above every screen so an incoming call rings
-      // wherever the user is.
-      builder: (context, child) =>
-          CallOverlay(child: child ?? const SizedBox.shrink()),
+      // wherever the user is. The app-lock gate sits above even that, so a
+      // locked phone reveals nothing — not even an incoming call's details.
+      builder: (context, child) => _AppLockGate(
+        child: CallOverlay(child: child ?? const SizedBox.shrink()),
+      ),
       home: const _Root(),
+    );
+  }
+}
+
+/// Overlays the PIN [LockScreen] above everything whenever the local app-lock is
+/// engaged and the user is signed in. Rendered from `MaterialApp.builder` so it
+/// covers the call overlay too.
+class _AppLockGate extends StatelessWidget {
+  final Widget child;
+  const _AppLockGate({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = context.select<AppState, bool>(
+        (s) => s.appLocked && s.status == AuthStatus.signedIn);
+    return Stack(
+      children: [
+        child,
+        if (locked)
+          const Positioned.fill(
+            child: LockScreen(),
+          ),
+      ],
     );
   }
 }
@@ -126,13 +210,15 @@ class _Root extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = context.select<AppState, AuthStatus>((s) => s.status);
+    final reduceMotion =
+        context.select<AppState, bool>((s) => s.settings.reduceMotion);
     final (key, child) = switch (status) {
       AuthStatus.unknown => ('splash', const SplashScreen()),
       AuthStatus.signedOut => ('login', const LoginScreen()),
       AuthStatus.signedIn => ('home', const HomeScreen()),
     };
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 350),
+      duration: Duration(milliseconds: reduceMotion ? 0 : 350),
       child: KeyedSubtree(key: ValueKey(key), child: child),
     );
   }

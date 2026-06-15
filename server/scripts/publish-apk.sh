@@ -9,6 +9,13 @@
 # Publishing the splits lets the in-app updater download only the slice for the
 # user's CPU (~40% smaller). Skip the split build and only the universal APK is
 # published — everything still works, just with the larger download.
+#
+# Every APK is verified against the version we are publishing using `aapt`: a
+# split whose embedded versionName doesn't match the universal build is skipped
+# rather than published. That guards against the classic mistake of leaving a
+# previous release's split files in the build output and shipping them under the
+# new version's name — which traps split-installed users in an endless
+# "update available" loop because the "new" download is actually the old build.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -22,10 +29,29 @@ if [ ! -f "$UNIVERSAL_SRC" ]; then
   exit 1
 fi
 
-# Read the version (e.g. 2.7.0+10) from pubspec.yaml.
+# Read the version (e.g. 0.8.1+12) from pubspec.yaml.
 VERSION="$(grep -E '^version:' "$ROOT/app/pubspec.yaml" | head -1 | awk '{print $2}' | tr -d '\r')"
-VERSION="${VERSION:-2.0.0}"
+VERSION="${VERSION:-0.0.0}"
 NAME="${VERSION%%+*}"
+
+# Locate aapt so we can read the real version metadata baked into each APK.
+AAPT=""
+for cand in aapt aapt2; do command -v "$cand" >/dev/null 2>&1 && { AAPT="$cand"; break; }; done
+if [ -z "$AAPT" ] && [ -n "${ANDROID_HOME:-}" ]; then
+  AAPT="$(ls "$ANDROID_HOME"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1 || true)"
+fi
+if [ -z "$AAPT" ] && [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+  AAPT="$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt 2>/dev/null | sort -V | tail -1 || true)"
+fi
+[ -n "$AAPT" ] || echo "⚠️  aapt nicht gefunden — Splits werden ohne Versionsprüfung übernommen." >&2
+
+# Echo "<versionCode> <versionName>" for an APK (empty if aapt is unavailable).
+apk_badging() {
+  [ -n "$AAPT" ] || return 0
+  "$AAPT" dump badging "$1" 2>/dev/null \
+    | grep -oE "versionCode='[0-9]+' versionName='[^']+'" \
+    | sed -E "s/versionCode='([0-9]+)' versionName='([^']+)'/\1 \2/" | head -1
+}
 
 mkdir -p "$DEST_DIR"
 # Remove older published APKs so only the newest is offered.
@@ -36,16 +62,38 @@ cp "$UNIVERSAL_SRC" "$DEST_DIR/ping-${NAME}.apk"
 SIZE="$(stat -c%s "$UNIVERSAL_SRC")"
 SHA="$(sha256sum "$UNIVERSAL_SRC" | awk '{print $1}')"
 
-# Per-ABI splits (optional): publish whichever ones were built.
+# Prefer the version code aapt reads from the universal APK over parsing the
+# pubspec — it's the source of truth the device actually compares against.
+U_CODE=""; U_NAME=""
+read -r U_CODE U_NAME <<<"$(apk_badging "$UNIVERSAL_SRC")" || true
+if [ -n "$U_NAME" ] && [ "$U_NAME" != "$NAME" ]; then
+  echo "❌ Universelles APK ist v$U_NAME, pubspec sagt v$NAME — Build passt nicht zur Version." >&2
+  exit 1
+fi
+CODE="${U_CODE:-${VERSION##*+}}"
+if ! [[ "$CODE" =~ ^[0-9]+$ ]]; then CODE="null"; fi
+
+# Per-ABI splits (optional): publish whichever ones were built *and verified*.
 VARIANTS_JSON=""
 SPLIT_COUNT=0
+SKIPPED=0
 for ABI in arm64-v8a armeabi-v7a x86_64; do
   SPLIT_SRC="$APK_SRC_DIR/app-${ABI}-release.apk"
   [ -f "$SPLIT_SRC" ] || continue
+  VCODE=""; VNAME=""
+  read -r VCODE VNAME <<<"$(apk_badging "$SPLIT_SRC")" || true
+  # Refuse a split whose marketing version doesn't match what we're publishing.
+  if [ -n "$VNAME" ] && [ "$VNAME" != "$NAME" ]; then
+    echo "⚠️  Überspringe $ABI: APK ist v$VNAME, veröffentlicht wird v$NAME (veralteter Split)." >&2
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
   cp "$SPLIT_SRC" "$DEST_DIR/ping-${NAME}-${ABI}.apk"
   VSIZE="$(stat -c%s "$SPLIT_SRC")"
   VSHA="$(sha256sum "$SPLIT_SRC" | awk '{print $1}')"
-  ENTRY="\"${ABI}\": { \"file\": \"ping-${NAME}-${ABI}.apk\", \"size\": ${VSIZE}, \"sha256\": \"${VSHA}\" }"
+  CODE_FIELD=""
+  [[ "$VCODE" =~ ^[0-9]+$ ]] && CODE_FIELD=", \"versionCode\": ${VCODE}"
+  ENTRY="\"${ABI}\": { \"file\": \"ping-${NAME}-${ABI}.apk\", \"size\": ${VSIZE}, \"sha256\": \"${VSHA}\"${CODE_FIELD}, \"version\": \"${VNAME:-$NAME}\" }"
   if [ -z "$VARIANTS_JSON" ]; then
     VARIANTS_JSON="    $ENTRY"
   else
@@ -54,10 +102,6 @@ for ABI in arm64-v8a armeabi-v7a x86_64; do
   fi
   SPLIT_COUNT=$((SPLIT_COUNT + 1))
 done
-
-# versionCode = the integer after "+" in "<name>+<code>" (else null).
-CODE="${VERSION##*+}"
-if ! [[ "$CODE" =~ ^[0-9]+$ ]]; then CODE="null"; fi
 
 cat > "$DEST_DIR/version.json" <<EOF
 {
@@ -76,8 +120,9 @@ EOF
 
 echo "✅ Veröffentlicht: $DEST_DIR/ping-${NAME}.apk ($((SIZE/1024/1024)) MB universal)"
 if [ "$SPLIT_COUNT" -gt 0 ]; then
-  echo "   + $SPLIT_COUNT per-ABI Split(s)"
+  echo "   + $SPLIT_COUNT geprüfte(r) per-ABI Split(s)"
 else
-  echo "   (keine Splits gebaut — nur universal; für kleinere Updates: flutter build apk --split-per-abi --release)"
+  echo "   (keine Splits veröffentlicht — nur universal; für kleinere Updates: flutter build apk --split-per-abi --release)"
 fi
+[ "$SKIPPED" -gt 0 ] && echo "   ⚠️  $SKIPPED Split(s) wegen Versions-Mismatch übersprungen — bitte neu bauen."
 echo "   Version $VERSION · versionCode $CODE · sha256 ${SHA:0:16}…"

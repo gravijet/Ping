@@ -24,22 +24,24 @@ function writeApk(name, contents) {
 // A universal APK + one per-ABI split, plus the manifest publish-apk.sh writes.
 // The split is written last on purpose, so "newest by mtime" is the split — this
 // verifies the universal is still chosen correctly via version.json's `file`.
-const uni = writeApk('ping-2.7.0.apk', 'UNIVERSAL-APK-BYTES');
-const arm = writeApk('ping-2.7.0-arm64-v8a.apk', 'ARM64-APK-BYTES-XYZ');
+const uni = writeApk('ping-0.7.0.apk', 'UNIVERSAL-APK-BYTES');
+const arm = writeApk('ping-0.7.0-arm64-v8a.apk', 'ARM64-APK-BYTES-XYZ');
 fs.writeFileSync(
   path.join(dir, 'version.json'),
   JSON.stringify({
-    version: '2.7.0',
-    build: '2.7.0+10',
+    version: '0.7.0',
+    build: '0.7.0+10',
     versionCode: 10,
-    file: 'ping-2.7.0.apk',
+    file: 'ping-0.7.0.apk',
     size: uni.size,
     sha256: uni.sha256,
     variants: {
       'arm64-v8a': {
-        file: 'ping-2.7.0-arm64-v8a.apk',
+        file: 'ping-0.7.0-arm64-v8a.apk',
         size: arm.size,
         sha256: arm.sha256,
+        versionCode: 2010,
+        version: '0.7.0',
       },
     },
   })
@@ -59,13 +61,17 @@ test('download info lists the universal build and per-ABI variants', async () =>
   const res = await fetch(base + '/download/info');
   assert.equal(res.status, 200);
   const json = await res.json();
-  assert.equal(json.version, '2.7.0');
+  assert.equal(json.version, '0.7.0');
   assert.equal(json.versionCode, 10);
   assert.equal(json.sha256, uni.sha256); // universal, not the (newer mtime) split
   assert.equal(json.url, '/download');
   assert.ok(json.variants['arm64-v8a']);
   assert.equal(json.variants['arm64-v8a'].url, '/download/abi/arm64-v8a');
   assert.equal(json.variants['arm64-v8a'].sha256, arm.sha256);
+  // The split's own ABI-offset version code is surfaced so the in-app updater
+  // can compare like-for-like against a split install (same-version hotfixes).
+  assert.equal(json.variants['arm64-v8a'].versionCode, 2010);
+  assert.equal(json.variants['arm64-v8a'].version, '0.7.0');
 });
 
 test('the default download serves the universal apk', async () => {

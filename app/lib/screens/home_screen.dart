@@ -9,6 +9,7 @@ import '../models/remote_config.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../services/notification_target.dart';
+import '../utils/chat_filter.dart';
 import '../widgets/brand.dart';
 import '../widgets/changelog_view.dart';
 import '../widgets/chat_tile.dart';
@@ -32,11 +33,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
   late final AppState _state = context.read<AppState>();
+  late final TabController _tabs = TabController(
+    length: 3,
+    vsync: this,
+    // Open on the user's preferred start tab (Chats/Status/Anrufe).
+    initialIndex: _state.settings.startTab.clamp(0, 2),
+  );
   bool _loading = true;
   String? _error;
   String _chatQuery = '';
+  ChatFilter _filter = ChatFilter.all;
 
   // Global message search (server-side, across the full history).
   Timer? _searchDebounce;
@@ -64,6 +71,8 @@ class _HomeScreenState extends State<HomeScreen>
       // Opening the Anrufe tab clears its missed-call badge.
       if (_tabs.index == 2) _state.markCallsSeen();
     });
+    // Starting directly on the Anrufe tab should clear its badge too.
+    if (_tabs.index == 2) state.markCallsSeen();
   }
 
   @override
@@ -315,6 +324,14 @@ class _HomeScreenState extends State<HomeScreen>
         MaterialPageRoute(builder: (_) => const SettingsScreen()),
       );
 
+  String _emptyFilterText() => switch (_filter) {
+        ChatFilter.unread => 'Keine ungelesenen Chats',
+        ChatFilter.favorites => 'Noch keine Favoriten — tippe einen Chat lang '
+            'an und wähle „Favorit".',
+        ChatFilter.groups => 'Keine Gruppen',
+        ChatFilter.all => 'Keine Chats gefunden',
+      };
+
   Widget _chatsBody(AppState state, ColorScheme scheme) {
     if (_loading && state.chats.isEmpty) {
       return const Center(child: CircularProgressIndicator());
@@ -332,9 +349,14 @@ class _HomeScreenState extends State<HomeScreen>
     // into the "Archiviert" entry below the search field.
     final source =
         searching ? state.chats : state.chats.where((c) => !c.archived).toList();
-    final chats = !searching
+    // The quick filter (Alle/Ungelesen/Favoriten/Gruppen) only applies when not
+    // searching — a search always looks across everything.
+    final filtered = (searching || _filter == ChatFilter.all)
         ? source
-        : source
+        : applyChatFilter(source, _filter, isFavorite: state.isFavorite);
+    final chats = !searching
+        ? filtered
+        : filtered
             .where((c) =>
                 c.displayTitle.toLowerCase().contains(q) ||
                 (c.lastMessage?.body.toLowerCase().contains(q) ?? false))
@@ -356,10 +378,22 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
         ),
+        if (!searching)
+          _FilterBar(
+            current: _filter,
+            unreadCount: state.chats
+                .where((c) => !c.archived && c.unread > 0)
+                .length,
+            favoriteCount: state.favoriteCount,
+            onSelect: (f) {
+              state.feedback.tap();
+              setState(() => _filter = f);
+            },
+          ),
         Expanded(
           child: (chats.isEmpty && !searching)
               ? Center(
-                  child: Text('Keine Chats gefunden',
+                  child: Text(_emptyFilterText(),
                       style: TextStyle(color: scheme.onSurfaceVariant)),
                 )
               : ListView(
@@ -466,17 +500,46 @@ class _HomeScreenState extends State<HomeScreen>
   /// nothing is removed destructively.
   Widget _swipeableTile(AppState state, ColorScheme scheme, Chat chat) {
     final pinned = state.isPinned(chat.id);
+    final canArchive = !chat.self;
+    // The right-swipe action is user-configurable. "Stummschalten" makes no
+    // sense for the note-to-self chat, so it falls back to "Anheften" there.
+    var rightAction = state.settings.swipeRightAction;
+    if (chat.self && rightAction == 'mute') rightAction = 'pin';
+
+    final DismissDirection direction;
+    if (rightAction == 'none') {
+      direction =
+          canArchive ? DismissDirection.endToStart : DismissDirection.none;
+    } else {
+      direction = canArchive
+          ? DismissDirection.horizontal
+          : DismissDirection.startToEnd;
+    }
+
+    final ({Color color, IconData icon, String label}) right = switch (rightAction) {
+      'mute' => (
+          color: scheme.secondary,
+          icon: chat.muted
+              ? Icons.notifications_active_rounded
+              : Icons.notifications_off_rounded,
+          label: chat.muted ? 'Lauf' : 'Stumm',
+        ),
+      _ => (
+          color: scheme.primary,
+          icon: pinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
+          label: pinned ? 'Lösen' : 'Anheften',
+        ),
+    };
+
     return Dismissible(
       key: ValueKey('chat-${chat.id}'),
-      direction: chat.self
-          ? DismissDirection.startToEnd
-          : DismissDirection.horizontal,
+      direction: direction,
       background: _swipeBackground(
         scheme,
         alignment: Alignment.centerLeft,
-        color: scheme.primary,
-        icon: pinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-        label: pinned ? 'Lösen' : 'Anheften',
+        color: right.color,
+        icon: right.icon,
+        label: right.label,
       ),
       secondaryBackground: _swipeBackground(
         scheme,
@@ -485,9 +548,21 @@ class _HomeScreenState extends State<HomeScreen>
         icon: chat.archived ? Icons.unarchive_rounded : Icons.archive_rounded,
         label: chat.archived ? 'Zurückholen' : 'Archivieren',
       ),
-      confirmDismiss: (direction) async {
-        if (direction == DismissDirection.startToEnd) {
-          state.togglePin(chat.id);
+      confirmDismiss: (dir) async {
+        state.feedback.impact();
+        if (dir == DismissDirection.startToEnd) {
+          if (rightAction == 'mute') {
+            try {
+              await state.toggleMute(chat.id, !chat.muted);
+            } on ApiException catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(SnackBar(content: Text(e.message)));
+              }
+            }
+          } else {
+            state.togglePin(chat.id);
+          }
         } else {
           try {
             await state.toggleArchive(chat.id, !chat.archived);
@@ -535,7 +610,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _showChatMenu(Chat chat) {
     final state = context.read<AppState>();
+    state.feedback.impact();
     final pinned = state.isPinned(chat.id);
+    final favorite = state.isFavorite(chat.id);
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -551,6 +628,16 @@ class _HomeScreenState extends State<HomeScreen>
               onTap: () {
                 Navigator.pop(ctx);
                 state.togglePin(chat.id);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                  favorite ? Icons.star_rounded : Icons.star_border_rounded,
+                  color: favorite ? const Color(0xFFFFB300) : null),
+              title: Text(favorite ? 'Aus Favoriten entfernen' : 'Favorit'),
+              onTap: () {
+                Navigator.pop(ctx);
+                state.toggleFavorite(chat.id);
               },
             ),
             if (!chat.self)
@@ -602,6 +689,72 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The quick-filter chip row above the chat list (Alle/Ungelesen/Favoriten/
+/// Gruppen). Horizontally scrollable so it never overflows on small screens.
+class _FilterBar extends StatelessWidget {
+  final ChatFilter current;
+  final int unreadCount;
+  final int favoriteCount;
+  final ValueChanged<ChatFilter> onSelect;
+  const _FilterBar({
+    required this.current,
+    required this.unreadCount,
+    required this.favoriteCount,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    int? badgeFor(ChatFilter f) => switch (f) {
+          ChatFilter.unread => unreadCount > 0 ? unreadCount : null,
+          ChatFilter.favorites => favoriteCount > 0 ? favoriteCount : null,
+          _ => null,
+        };
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final f in ChatFilter.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(f.label),
+                    if (badgeFor(f) != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text('${badgeFor(f)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: scheme.onPrimary,
+                            )),
+                      ),
+                    ],
+                  ],
+                ),
+                selected: current == f,
+                showCheckmark: false,
+                onSelected: (_) => onSelect(f),
+              ),
+            ),
+        ],
       ),
     );
   }

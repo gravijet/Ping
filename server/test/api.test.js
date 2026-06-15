@@ -619,6 +619,35 @@ test('a signed-in admin user can use the admin API without the token', async () 
   assert.equal(typeof bc.json.delivered, 'number');
 });
 
+test('the /api/console bridge reaches the admin API for the native app', async () => {
+  // The native app can't carry a Cloudflare Access session, so it talks to the
+  // admin handlers through /api/console/* instead. It must behave exactly like
+  // /api/admin/*: still admin-gated, just reachable without the CF Access login.
+  const u = await register('+491700000241', 'consoleadmin@example.com', 'ConsoleAdmin');
+
+  // A non-admin signed-in user is rejected, same as on /api/admin.
+  const denied = await api('/api/console/stats', { token: u.token });
+  assert.equal(denied.status, 401);
+
+  // Unauthenticated traffic is rejected too.
+  const anon = await api('/api/console/stats');
+  assert.equal(anon.status, 401);
+
+  await api(`/api/admin/users/${u.user.id}`, {
+    method: 'PATCH', admin: ADMIN, body: { isAdmin: true },
+  });
+
+  // Now the same admin reaches stats through the bridge.
+  const ok = await api('/api/console/stats', { token: u.token });
+  assert.equal(ok.status, 200);
+  assert.equal(typeof ok.json.messages, 'number');
+
+  // The shared admin token works through the bridge as well.
+  const withToken = await api('/api/console/users', { admin: ADMIN });
+  assert.equal(withToken.status, 200);
+  assert.ok(Array.isArray(withToken.json.users));
+});
+
 test('group owner can rename, set a picture and remove members; others cannot', async () => {
   const owner = await register('+431700000300', 'gowner@example.com', 'GOwner');
   const m1 = await register('+431700000301', 'gm1@example.com', 'GM1');
@@ -1494,7 +1523,7 @@ test('the official Ping Team account is protected from admin edits/deletion', as
   assert.equal(del.status, 403);
 });
 
-// ---- v2.3.0: password reset, archive, search, privacy, hardening ------------
+// ---- v0.3.0: password reset, archive, search, privacy, hardening ------------
 
 test('forgot-password: SMS code flow resets the password', async () => {
   await register('0699 5000001', 'reset-me@example.com', 'ResetMe', 'oldpass1');
@@ -1669,7 +1698,7 @@ test('a disabled admin loses admin API access immediately', async () => {
   assert.equal(me.status, 403);
 });
 
-// ---- v2.4.0: Umfragen (Polls) ----------------------------------------------
+// ---- v0.4.0: Umfragen (Polls) ----------------------------------------------
 
 test('polls: create, vote, multi-toggle and single-choice move', async () => {
   const a = await register('+431780000001', 'poll-a@example.com', 'PollA');
@@ -1745,7 +1774,7 @@ test('polls: create, vote, multi-toggle and single-choice move', async () => {
   wsB.close();
 });
 
-// ---- v2.4.0: Selbstlöschende Nachrichten ------------------------------------
+// ---- v0.4.0: Selbstlöschende Nachrichten ------------------------------------
 
 test('disappearing messages: timer set, ttl applied, purge removes + notifies', async () => {
   const { db } = await import('../src/db.js');
@@ -1813,7 +1842,7 @@ test('disappearing messages: only the owner may set a group timer', async () => 
   assert.equal(ok.json.chat.expireSeconds, 86400);
 });
 
-// ---- v2.4.0: Für mich löschen ------------------------------------------------
+// ---- v0.4.0: Für mich löschen ------------------------------------------------
 
 test('hide for me: message disappears for one user only', async () => {
   const a = await register('+431780000021', 'hide-a@example.com', 'HideA');
@@ -1848,7 +1877,7 @@ test('hide for me: message disappears for one user only', async () => {
   assert.ok(searchA.json.messages.some((m) => m.id === msgId));
 });
 
-// ---- v2.6.0: Newsroom, Changelog & public stats -----------------------------
+// ---- v0.6.0: Newsroom, Changelog & public stats -----------------------------
 
 test('admin can create/list/update/delete posts; public only sees published', async () => {
   // Create a published news article + a draft.
@@ -1904,12 +1933,12 @@ test('admin can create/list/update/delete posts; public only sees published', as
 test('changelog posts are a separate kind and not mixed into news', async () => {
   await api('/api/admin/posts', {
     method: 'POST', admin: ADMIN,
-    body: { kind: 'changelog', title: 'v2.6.0', version: '2.6.0', tag: 'feature', body: 'Newsroom + Changelog' },
+    body: { kind: 'changelog', title: 'v0.6.0', version: '0.6.0', tag: 'feature', body: 'Newsroom + Changelog' },
   });
   const log = await api('/api/changelog');
-  assert.ok(log.json.posts.some((p) => p.version === '2.6.0' && p.tag === 'feature'));
+  assert.ok(log.json.posts.some((p) => p.version === '0.6.0' && p.tag === 'feature'));
   const news = await api('/api/news');
-  assert.ok(!news.json.posts.some((p) => p.version === '2.6.0'));
+  assert.ok(!news.json.posts.some((p) => p.version === '0.6.0'));
 });
 
 test('posts require the admin token', async () => {

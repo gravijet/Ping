@@ -103,7 +103,7 @@ function apkInfo() {
   let build = (meta && meta.build) || null;
   if (!version) {
     const m = universal.f.match(/(\d+\.\d+\.\d+(?:\+\d+)?)/);
-    version = m ? m[1].split('+')[0] : '2.0.0';
+    version = m ? m[1].split('+')[0] : '0.0.0';
     if (m && m[1].includes('+')) build = m[1];
   }
   // The Android version code (build number) is the part after "+" in
@@ -123,7 +123,16 @@ function apkInfo() {
       const full = path.join(dir, v.file);
       try {
         const st = fs.statSync(full);
-        variants[abi] = { full, size: v.size || st.size, sha256: v.sha256 || '' };
+        variants[abi] = {
+          full,
+          size: v.size || st.size,
+          sha256: v.sha256 || '',
+          // Per-split version metadata (written by publish-apk.sh from aapt).
+          // The split's own ABI-offset version code lets the in-app updater
+          // compare like-for-like against a split install.
+          versionCode: Number.isInteger(v.versionCode) ? v.versionCode : null,
+          version: v.version || version,
+        };
       } catch {
         /* split missing on disk — skip it */
       }
@@ -189,6 +198,8 @@ export function mountDownloads(app, publicDir) {
         url: `/download/abi/${abi}`,
         size: v.size,
         sha256: v.sha256,
+        versionCode: v.versionCode,
+        version: v.version,
       };
     }
     res.json({

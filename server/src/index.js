@@ -52,6 +52,23 @@ export function createApp() {
     })
   );
 
+  // --- In-app admin console bridge -----------------------------------------
+  // The native app authenticates with a normal user JWT and can't carry a
+  // Cloudflare Access session (that login only lives in the browser). So a
+  // signed-in admin reaches the admin API through a parallel /api/console/*
+  // path that sits *outside* the Cloudflare-Access-protected surface. We rewrite
+  // it onto the exact same /api/admin/* handlers — still locked down by
+  // requireAdmin (a real admin account) and recorded in the audit log — and flag
+  // the request so the Cloudflare Access gate below skips it. Cloudflare Access
+  // keeps guarding the human web portal (/admin) and its /api/admin/* traffic.
+  app.use((req, _res, next) => {
+    if (req.url === '/api/console' || req.url.startsWith('/api/console/')) {
+      req.url = '/api/admin' + req.url.slice('/api/console'.length);
+      req.appConsole = true;
+    }
+    next();
+  });
+
   // The admin portal (served before the JSON body parser; it has no API body).
   // Lives at config.adminPath (set ADMIN_PATH to hide it) and, when Cloudflare
   // Access is configured, is gated by a verified Access JWT.
@@ -101,8 +118,12 @@ export function createApp() {
   });
   // Cloudflare Access gate (no-op unless configured) runs before the admin
   // limiter + token check, so unauthenticated traffic is rejected at the edge of
-  // the API too — not just on the portal page.
-  app.use('/api/admin', requireCfAccess);
+  // the API too — not just on the portal page. Requests that arrived via the
+  // /api/console bridge (the native app) are exempt: they can't carry a CF
+  // Access session and are already gated by requireAdmin + the audit log.
+  app.use('/api/admin', (req, res, next) =>
+    req.appConsole ? next() : requireCfAccess(req, res, next)
+  );
   app.use('/api/admin', adminLimiter);
 
   // General API rate limit.

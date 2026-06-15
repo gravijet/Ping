@@ -80,6 +80,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_messages_chat
     ON messages(chat_id, created_at);
+  -- The admin dashboard counts messages/users in time windows (created_at only,
+  -- no chat). The composite index above is keyed on chat_id first, so it can't
+  -- serve those scans — give each a dedicated created_at index.
+  CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+  CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at);
 
   -- Polls: one row per poll message ("type = 'poll'"); the option texts live
   -- here as JSON, the votes in poll_votes (one row per user + option).
@@ -224,7 +229,7 @@ db.exec(`
     body         TEXT NOT NULL DEFAULT '',
     -- Newsroom: an editorial category ("Produkt", "Unternehmen" …).
     category     TEXT NOT NULL DEFAULT '',
-    -- Changelog: the release version this entry documents (e.g. "2.6.0").
+    -- Changelog: the release version this entry documents (e.g. "0.6.0").
     version      TEXT NOT NULL DEFAULT '',
     -- Changelog: the kind of change — 'feature' | 'improvement' | 'fix' | 'security'.
     tag          TEXT NOT NULL DEFAULT '',

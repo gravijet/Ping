@@ -192,7 +192,7 @@
             <a href="/status">System-Status</a><a href="/#how">Installation</a></div>
           <div><h4>Ressourcen</h4>
             <a href="/news">Newsroom</a><a href="/changelog">Changelog</a>
-            <a href="/#faq">FAQ</a><a href="/download/info">Build-Info</a></div>
+            <a href="/#faq">Häufige Fragen</a><a href="/#how">So funktioniert's</a></div>
           <div><h4>Rechtliches</h4>
             <a href="/legal#impressum">Impressum</a><a href="/legal#datenschutz">Datenschutz</a>
             <a href="mailto:user@example.invalid">Kontakt</a></div>
@@ -327,7 +327,7 @@
         <div class="cell"><div class="n" data-stat="users">–</div><div class="k">Nutzer</div></div>
         <div class="cell"><div class="n" data-stat="messages">–</div><div class="k">Nachrichten</div></div>
         <div class="cell"><div class="n" data-stat="online">–</div><div class="k">Gerade online</div></div>
-        <div class="cell"><div class="n">99,9%</div><div class="k">Verfügbarkeit</div></div>
+        <div class="cell"><div class="n">0 €</div><div class="k">Für immer kostenlos</div></div>
       </div>
       <div class="trust reveal">
         ${[['bolt', 'Echtzeit-WebSocket'], ['bell', 'Push-Benachrichtigungen'], ['palette', '14+ Themes'], ['lock', 'Privat by default'], ['shield', 'Keine Werbung']]
@@ -370,22 +370,32 @@
 
       <section class="section" id="download">
         <div class="section-head reveal"><span class="kicker"><span class="idx">03</span> Download</span>
-          <h2 class="h2">Hol dir Ping.</h2></div>
+          <h2 class="h2">Hol dir Ping.</h2>
+          <p class="lead">Direkt für Android — kostenlos, werbefrei und ohne Konto-Zwang. Ein Tipp genügt, die passende Version wählen wir automatisch.</p></div>
         <div class="dl-card reveal">
           <div class="dl-top">
             <div>
               <h2 id="dlTitle">Ping für Android</h2>
-              <p class="lead" style="margin-bottom:22px">Lade die universelle APK oder die schlankere Variante für deinen Prozessor. Werbefrei, ohne Konto-Zwang für den Download.</p>
-              <a class="btn big" href="/download">${P.icon('download')}Universelle APK laden</a>
+              <p class="lead" style="margin-bottom:22px">Am Handy? Tippe auf „Herunterladen“ und folge der kurzen Anleitung. Am Computer? Öffne diese Seite einfach auf deinem Handy.</p>
+              <a class="btn big" href="/download">${P.icon('download')}Herunterladen</a>
+              <div class="dl-assure">${[['shield', 'Auf Viren geprüft'], ['lock', 'Ohne Konto-Zwang'], ['refresh', 'Updates direkt in der App']]
+                .map(([ic, t]) => `<span>${P.icon(ic)}${t}</span>`).join('')}</div>
             </div>
             <div class="dl-meta" id="dlMeta">
-              <div class="kv"><span>Version</span><b id="dlVer">…</b></div>
-              <div class="kv"><span>Größe</span><b id="dlSize">…</b></div>
-              <div class="kv"><span>Build</span><b id="dlBuild">…</b></div>
-              <div class="kv"><span>SHA-256</span><b class="hash" id="dlHash" title="Zum Kopieren tippen">…</b></div>
+              <div class="kv"><span>Aktuelle Version</span><b id="dlVer">…</b></div>
+              <div class="kv"><span>Download-Größe</span><b id="dlSize">…</b></div>
+              <div class="kv"><span>Voraussetzung</span><b>Android 6 +</b></div>
+              <div class="kv"><span>Preis</span><b>Kostenlos</b></div>
             </div>
           </div>
-          <div class="variants" id="dlVariants"></div>
+          <details class="dl-tech" id="dlTech">
+            <summary>${P.icon('sparkles')}Erweiterte Optionen &amp; Prüfsumme</summary>
+            <div class="dl-tech-in">
+              <p class="muted" style="font-size:13.5px;margin:0 0 14px">Brauchst du eine kleinere, auf deinen Prozessor zugeschnittene Datei? Wähle hier. Im Zweifel reicht der normale Download oben — er läuft auf jedem Android-Gerät.</p>
+              <div class="variants" id="dlVariants"></div>
+              <div class="dl-checksum" id="dlChecksum"></div>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -413,6 +423,7 @@
             ['Ist Ping kostenlos?', 'Ja. Ping ist komplett kostenlos, werbefrei und ohne versteckte Käufe.'],
             ['Warum kommt die App als APK und nicht aus dem Play Store?', 'Die Veröffentlichung im Play Store ist mit Gebühren und Provisionen an Google verbunden. Damit Ping für dich kostenfrei und ohne Plattform-Gebühren bleibt, vertreiben wir die App direkt als APK. Updates kommen so sofort und direkt von uns.'],
             ['Bekomme ich automatisch Updates?', 'Ja. Sobald eine neue Version verfügbar ist, bietet die App das Update direkt an und installiert es auf Wunsch mit einem Tipp.'],
+            ['Android sagt „App nicht installiert" beim Update — was tun?', 'Das kann beim Umstieg auf eine neu signierte Version einmalig vorkommen. Deinstalliere die alte App einfach einmal und installiere die neue über den Download-Button. Danach laufen alle weiteren Updates wieder automatisch und mit einem Tipp.'],
             ['Wie privat ist Ping?', 'Du wirst nur über deine Telefonnummer gefunden — nie über Namens- oder E-Mail-Suche. Dein Adressbuch bleibt auf deinem Gerät und wird nie gespeichert.'],
             ['Welche Android-Version brauche ich?', 'Android 6.0 oder neuer. Die App ist schlank und läuft auch auf älteren Geräten flüssig.'],
             ['Unter welcher Adresse läuft Ping?', 'Ping läuft unter <b>example.invalid</b>.'],
@@ -444,20 +455,40 @@
     return out;
   }
 
+  // Friendly, non-technical names for the per-CPU build splits. Most visitors
+  // never need these — the default download works everywhere — so the raw ABI
+  // codes stay tucked away behind the "advanced" disclosure.
+  const ABI_INFO = {
+    'arm64-v8a': { name: 'Moderne Geräte', note: 'Die meisten Handys ab 2017 (64-Bit)', rec: true },
+    'armeabi-v7a': { name: 'Ältere Geräte', note: 'Sehr alte oder günstige Handys (32-Bit)' },
+    'x86_64': { name: 'Emulator & Intel', note: 'Android-Emulatoren und Intel-Tablets' },
+  };
   function loadBuild() {
     fetch('/download/info').then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (!d) return;
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('specVer', 'v' + d.version); set('specSize', P.human(d.size));
-      set('dlVer', 'v' + d.version); set('dlSize', P.human(d.size)); set('dlBuild', d.build || d.version);
-      const hash = document.getElementById('dlHash');
-      if (hash && d.sha256) { hash.textContent = d.sha256.slice(0, 18) + '…'; hash.onclick = () => P.copy(d.sha256, 'SHA-256 kopiert.'); }
+      set('dlVer', 'v' + d.version); set('dlSize', P.human(d.size));
       const vbox = document.getElementById('dlVariants');
       if (vbox) {
-        const vs = Object.entries(d.variants || {});
+        const order = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
+        const vs = Object.entries(d.variants || {})
+          .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
         vbox.innerHTML = vs.length
-          ? vs.map(([abi, v]) => `<div class="variant"><div><div class="abi">${P.esc(abi)}</div><div class="sz">${P.human(v.size)}</div></div><a class="btn subtle sm" href="${P.esc(v.url)}">${P.icon('download')}</a></div>`).join('')
-          : `<div class="muted mono" style="font-size:13px">Nur die universelle APK ist veröffentlicht.</div>`;
+          ? vs.map(([abi, v]) => {
+              const info = ABI_INFO[abi] || { name: abi, note: '' };
+              return `<a class="variant${info.rec ? ' rec' : ''}" href="${P.esc(v.url)}">
+                <div><div class="abi">${P.esc(info.name)}${info.rec ? '<span class="rec-tag">Empfohlen</span>' : ''}</div>
+                <div class="sz">${P.esc(info.note)} · ${P.human(v.size)}</div></div>${P.icon('download')}</a>`;
+            }).join('')
+          : `<div class="muted" style="font-size:13.5px">Aktuell ist nur die universelle Version verfügbar — sie läuft auf jedem Gerät.</div>`;
+      }
+      const cs = document.getElementById('dlChecksum');
+      if (cs) {
+        cs.innerHTML = `<div class="kv"><span>Build</span><b>${P.esc(d.build || d.version)}</b></div>
+          <div class="kv"><span>SHA-256 (zum Prüfen)</span><b class="hash" id="dlHash" title="Zum Kopieren tippen">${d.sha256 ? P.esc(d.sha256.slice(0, 24)) + '…' : '—'}</b></div>`;
+        const hash = document.getElementById('dlHash');
+        if (hash && d.sha256) hash.onclick = () => P.copy(d.sha256, 'Prüfsumme kopiert.');
       }
     }).catch(() => {});
   }

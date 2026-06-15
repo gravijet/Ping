@@ -13,6 +13,8 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- On-brand background behind the Flutter UI until its first frame, so
+             a slow cold start shows Ping blue instead of a bare grey window. -->
+        <item name="android:windowBackground">@color/ping_blue</item>
     </style>
 </resources>

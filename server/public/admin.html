@@ -389,7 +389,7 @@
             <div class="grid2">
               <div style="grid-column:1/-1"><label>Titel</label><input id="p_title" placeholder="z. B. Ping 2.8 ist da" /></div>
               <div data-news><label>Kategorie</label><input id="p_category" placeholder="Produkt · Unternehmen" /></div>
-              <div data-log class="hidden"><label>Version</label><input id="p_version" placeholder="2.8.0" /></div>
+              <div data-log class="hidden"><label>Version</label><input id="p_version" placeholder="0.8.0" /></div>
               <div data-log class="hidden"><label>Art</label><select id="p_tag"><option value="feature">Neu</option><option value="improvement">Verbessert</option><option value="fix">Behoben</option><option value="security">Sicherheit</option></select></div>
               <div><label>Autor</label><input id="p_author" placeholder="Ping Team" /></div>
               <div><label>Slug (optional)</label><input id="p_slug" placeholder="aus Titel erzeugt" /></div>
@@ -755,7 +755,30 @@
         stat(s.rssMb+' MB','Speicher (RSS)',IC.system)+stat(s.heapMb+' MB','Heap',IC.system)+stat(s.freeMemMb+'/'+s.totalMemMb,'RAM frei/ges. (MB)',IC.system)+
         stat((s.loadAvg&&s.loadAvg[0]!=null?s.loadAvg[0]:'–'),'Last 1m',IC.config)+stat(s.smsProvider,'SMS-Anbieter',IC.broadcast)+
         stat(s.pushEnabled?'aktiv':'aus','Push (FCM)',IC.broadcast,s.pushEnabled?'on':'')+stat(s.requirePhoneVerification?'an':'aus','Nummer-Pflicht',IC.config)+stat(o.backups,'Backups',IC.audit);
-      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{$('dlInfo').innerHTML=d?('Aktuelle APK: <b>v'+d.version+'</b> ('+(d.build||d.version)+') · '+human(d.size)+'<br><span class="muted mono" style="font-size:12px">sha256 '+(d.sha256||'').slice(0,18)+'…</span>'):'Noch kein Build veröffentlicht.';}).catch(()=>{});
+      fetch('/download/info').then(r=>r.ok?r.json():null).then(d=>{
+        if(!d){$('dlInfo').innerHTML='Noch kein Build veröffentlicht.';return;}
+        const variants=Object.entries(d.variants||{});
+        // Flag any per-CPU split whose embedded version doesn't match the
+        // universal build — that's the stale-split bug that traps split users
+        // in an endless update loop. Publishing verifies this now, but surfacing
+        // it here gives an at-a-glance health check after every release.
+        const stale=variants.filter(([,v])=>v.version&&v.version!==d.version);
+        const abiName={'arm64-v8a':'64-Bit (modern)','armeabi-v7a':'32-Bit (alt)','x86_64':'Intel/Emulator'};
+        let html='Aktuelle APK: <b>v'+esc(d.version)+'</b> ('+esc(d.build||d.version)+') · '+human(d.size)+
+          '<br><span class="muted mono" style="font-size:12px">sha256 '+esc((d.sha256||'').slice(0,18))+'…</span>';
+        if(variants.length){
+          html+='<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">'+variants.map(([abi,v])=>{
+            const ok=!v.version||v.version===d.version;
+            return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px">'+
+              '<span>'+esc(abiName[abi]||abi)+' <span class="muted mono" style="font-size:11px">'+human(v.size)+'</span></span>'+
+              (ok?'<span class="pill on">v'+esc(v.version||d.version)+'</span>':'<span class="pill ban">veraltet · v'+esc(v.version)+'</span>')+'</div>';
+          }).join('')+'</div>';
+        } else {
+          html+='<div class="hint" style="margin-top:10px">Keine per-CPU Splits veröffentlicht — alle laden die universelle APK ('+human(d.size)+').</div>';
+        }
+        if(stale.length)html+='<div class="hint" style="margin-top:10px;color:var(--danger)">⚠ '+stale.length+' Split(s) tragen eine andere Version als der Hauptbuild. Bitte neu bauen &amp; veröffentlichen — sonst hängen Nutzer in der Update-Schleife.</div>';
+        $('dlInfo').innerHTML=html;
+      }).catch(()=>{$('dlInfo').innerHTML='Build-Info nicht erreichbar.';});
       loadBackups(); }
     async function loadBackups(){ const {backups}=await api('/admin/backups'); const rows=$('backupRows'); rows.innerHTML=''; $('backupEmpty').classList.toggle('hidden',backups.length>0);
       for(const b of backups){const tr=document.createElement('tr');tr.innerHTML=`<td class="mono" style="font-size:12px">${esc(b.name||'')}</td><td class="mono">${human(b.size)}</td><td class="mono" style="font-size:12px">${fmtDateTime(b.createdAt)}</td><td style="text-align:right"><button class="btn sec sm" data-dl="${esc(b.name||'')}">Laden</button></td>`;

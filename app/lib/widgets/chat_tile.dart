@@ -27,6 +27,7 @@ class ChatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final state = context.watch<AppState>();
+    final compact = state.settings.compactChats;
     final last = chat.lastMessage;
     final typing = chat.isGroup
         ? state.typingIn(chat.id).isNotEmpty
@@ -42,7 +43,7 @@ class ChatTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 6 : 10),
         child: Row(
           children: [
             PingAvatar(
@@ -50,7 +51,7 @@ class ChatTile extends StatelessWidget {
                   ? chat.initials
                   : (chat.otherUser?.initials ?? chat.initials),
               color: chat.color,
-              size: 54,
+              size: compact ? 44 : 54,
               online: chat.isGroup ? null : online,
               icon: chat.isGroup
                   ? Icons.groups_rounded
@@ -93,12 +94,12 @@ class ChatTile extends StatelessWidget {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: compact ? 2 : 4),
                   Row(
                     children: [
                       Expanded(child: _preview(context, state, last, typing)),
                       const SizedBox(width: 8),
-                      _trailing(context, scheme),
+                      _trailing(context, scheme, state.isFavorite(chat.id)),
                     ],
                   ),
                 ],
@@ -156,6 +157,20 @@ class ChatTile extends StatelessWidget {
       );
     }
 
+    // Privacy: optionally hide the last-message text in the chat list while
+    // still hinting that something is there.
+    if (state.settings.hideListPreview && !last.isSystem && !last.deleted) {
+      return Text(
+        chat.unread > 0 ? 'Neue Nachricht' : 'Nachricht',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 14,
+            fontStyle: FontStyle.italic),
+      );
+    }
+
     String text;
     if (last.isSystem) {
       text = last.body;
@@ -198,10 +213,15 @@ class ChatTile extends StatelessWidget {
     );
   }
 
-  Widget _trailing(BuildContext context, ColorScheme scheme) {
+  Widget _trailing(BuildContext context, ColorScheme scheme, bool favorite) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (favorite)
+          const Padding(
+            padding: EdgeInsets.only(right: 6),
+            child: Icon(Icons.star_rounded, size: 15, color: Color(0xFFFFB300)),
+          ),
         if (pinned)
           Padding(
             padding: const EdgeInsets.only(right: 6),

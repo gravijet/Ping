@@ -64,6 +64,69 @@ class DesignScreen extends StatelessWidget {
                 ),
             ],
           ),
+          const SizedBox(height: 28),
+          Text('Darstellung', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.contrast_rounded),
+            title: const Text('AMOLED-Schwarz'),
+            subtitle: const Text(
+                'Tiefschwarzer Hintergrund im dunklen Modus — schont den Akku '
+                'von OLED-Displays.'),
+            value: state.settings.amoledDark,
+            onChanged: (v) =>
+                state.updateSettings(state.settings.copyWith(amoledDark: v)),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.animation_rounded),
+            title: const Text('Animationen reduzieren'),
+            subtitle: const Text(
+                'Blendet Übergänge und Bewegung weitgehend aus — ruhiger und '
+                'etwas schneller.'),
+            value: state.settings.reduceMotion,
+            onChanged: (v) =>
+                state.updateSettings(state.settings.copyWith(reduceMotion: v)),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.format_bold_rounded),
+            title: const Text('Fetter Text'),
+            subtitle: const Text(
+                'Kräftigere Schrift in der ganzen App — besser lesbar.'),
+            value: state.settings.boldText,
+            onChanged: (v) =>
+                state.updateSettings(state.settings.copyWith(boldText: v)),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.contrast_rounded),
+            title: const Text('Hoher Kontrast'),
+            subtitle: const Text(
+                'Deutlichere Ränder und Trennlinien für mehr Klarheit.'),
+            value: state.settings.highContrast,
+            onChanged: (v) =>
+                state.updateSettings(state.settings.copyWith(highContrast: v)),
+          ),
+          const SizedBox(height: 12),
+          Text('Sprechblasen-Form',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          _BubblePreview(corners: state.settings.bubbleCorners),
+          Slider(
+            value: state.settings.bubbleCorners,
+            min: 0.4,
+            max: 1.6,
+            divisions: 12,
+            label: state.settings.bubbleCorners < 0.7
+                ? 'Eckig'
+                : state.settings.bubbleCorners > 1.3
+                    ? 'Sehr rund'
+                    : 'Rund',
+            onChanged: (v) =>
+                state.updateSettings(state.settings.copyWith(bubbleCorners: v)),
+          ),
         ],
       ),
     );
@@ -166,6 +229,50 @@ class _DesignCard extends StatelessWidget {
           color: color,
           borderRadius: BorderRadius.circular(7),
         ),
+      ),
+    );
+  }
+}
+
+/// A tiny two-bubble preview that reacts live to the corner-radius slider.
+class _BubblePreview extends StatelessWidget {
+  final double corners;
+  const _BubblePreview({required this.corners});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.ping;
+    final radius = (18.0 * corners).clamp(4.0, 30.0);
+    Widget bubble(Color color, Color text, String label, bool mine) => Align(
+          alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(radius),
+                topRight: Radius.circular(radius),
+                bottomLeft: Radius.circular(mine ? radius : 3),
+                bottomRight: Radius.circular(mine ? 3 : radius),
+              ),
+            ),
+            child: Text(label,
+                style: TextStyle(color: text, fontWeight: FontWeight.w500)),
+          ),
+        );
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: palette.wallpaper,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          bubble(palette.bubbleIn, palette.bubbleInText, 'So sehen Chats aus', false),
+          bubble(palette.bubbleOut, palette.bubbleOutText, 'Und so deine', true),
+        ],
       ),
     );
   }

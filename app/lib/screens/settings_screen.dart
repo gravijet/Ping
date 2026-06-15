@@ -127,6 +127,9 @@ class SettingsScreen extends StatelessWidget {
           _navTile(context, Icons.record_voice_over_outlined, 'Vorlesen',
               'Text-to-Speech, Sprache, Geschwindigkeit',
               () => const ReadAloudSettingsScreen()),
+          _navTile(context, Icons.sd_storage_outlined, 'Speicher & Daten',
+              'Datensparmodus & Zwischenspeicher',
+              () => const StorageSettingsScreen()),
           _navTile(context, Icons.backup_outlined, 'Backup',
               'Tägliche Server-Sicherung & eigener Export',
               () => const BackupScreen()),
@@ -148,7 +151,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 2.5.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 0.11.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(
@@ -185,7 +188,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '2.4.0',
+              applicationVersion: '0.11.0',
             ),
           ),
           const SizedBox(height: 8),

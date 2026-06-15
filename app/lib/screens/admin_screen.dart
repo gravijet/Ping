@@ -8,7 +8,8 @@ import '../widgets/verified_badge.dart';
 import 'status_tab.dart';
 
 /// In-app admin panel, available to accounts with the admin flag. Talks to the
-/// same /api/admin/* endpoints as the web portal, authorised by the user's JWT.
+/// same admin handlers as the web portal — through the Cloudflare-Access-free
+/// `/api/console/*` bridge (see [ApiClient]) — authorised by the user's JWT.
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
 
@@ -18,6 +19,9 @@ class AdminScreen extends StatefulWidget {
 
 class _AdminScreenState extends State<AdminScreen> {
   Map<String, dynamic>? _stats;
+  // The richer dashboard payload (growth + live system health). Optional: if it
+  // fails we still render the headline stats from /admin/stats.
+  Map<String, dynamic>? _overview;
   List<dynamic> _users = [];
   String _query = '';
   bool _loading = true;
@@ -49,9 +53,16 @@ class _AdminScreenState extends State<AdminScreen> {
         return;
       }
       final users = await _api.get('/admin/users', {if (_query.isNotEmpty) 'q': _query});
+      // Best-effort richer dashboard (growth + system health). Never fatal.
+      Map<String, dynamic>? overview;
+      try {
+        final o = await _api.get('/admin/overview');
+        if (o is Map) overview = o.cast<String, dynamic>();
+      } catch (_) {/* fall back to the headline stats */}
       if (!mounted) return;
       setState(() {
         _stats = stats.cast<String, dynamic>();
+        _overview = overview;
         _users = (users is Map ? users['users'] : null) as List? ?? const [];
       });
     } on ApiException catch (e) {
@@ -385,6 +396,10 @@ class _AdminScreenState extends State<AdminScreen> {
                   child: ListView(
                     children: [
                       _statsGrid(),
+                      if (_overview != null) ...[
+                        _growthSection(),
+                        _systemSection(),
+                      ],
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                         child: TextField(
@@ -488,6 +503,97 @@ class _AdminScreenState extends State<AdminScreen> {
         ],
       ),
     );
+  }
+
+  /// New-user and message counts over 24h / 7d, plus storage usage — the
+  /// "is Ping growing?" panel, from /admin/overview.
+  Widget _growthSection() {
+    final s = (_overview?['stats'] as Map?) ?? const {};
+    String n(Object? v) => v == null ? '–' : '$v';
+    return _infoCard('Wachstum', Icons.trending_up_rounded, [
+      ('Neue Nutzer · 24 h', n(s['newUsers24h'])),
+      ('Neue Nutzer · 7 Tage', n(s['newUsers7d'])),
+      ('Nachrichten · 24 h', n(s['messages24h'])),
+      ('Nachrichten · 7 Tage', n(s['messages7d'])),
+      ('Push-Tokens', n(s['pushTokens'])),
+      ('Uploads', '${n(s['uploads'])} · ${_mb(s['uploadBytes'])}'),
+    ]);
+  }
+
+  /// Live server health (version, uptime, memory, push) from /admin/overview.
+  Widget _systemSection() {
+    final sys = (_overview?['system'] as Map?) ?? const {};
+    String n(Object? v) => v == null ? '–' : '$v';
+    return _infoCard('System', Icons.dns_rounded, [
+      ('Version', n(sys['version'])),
+      ('Node', n(sys['node'])),
+      ('Plattform', n(sys['platform'])),
+      ('Laufzeit', _uptime(sys['uptimeSec'])),
+      ('Arbeitsspeicher', sys['rssMb'] == null ? '–' : '${sys['rssMb']} MB'),
+      ('Push', sys['pushEnabled'] == true ? 'aktiv' : 'aus'),
+    ]);
+  }
+
+  Widget _infoCard(String title, IconData icon, List<(String, String)> rows) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w800)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final r in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(r.$1,
+                        style: TextStyle(color: scheme.onSurfaceVariant)),
+                    Flexible(
+                      child: Text(r.$2,
+                          textAlign: TextAlign.right,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _mb(Object? bytes) {
+    final b = bytes is num ? bytes.toDouble() : 0.0;
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
+    if (b < 1024 * 1024 * 1024) return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+
+  static String _uptime(Object? seconds) {
+    final s = seconds is num ? seconds.toInt() : 0;
+    if (s <= 0) return '–';
+    final d = s ~/ 86400, h = (s % 86400) ~/ 3600, m = (s % 3600) ~/ 60;
+    if (d > 0) return '${d}d ${h}h';
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
   }
 
   Widget _userTile(Map u) {

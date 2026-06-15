@@ -202,6 +202,31 @@ const kPingDesigns = <PingDesign>[
       name: 'Schiefer',
       seed: Color(0xFF455A64),
       accent: Color(0xFF90A4AE)),
+  PingDesign(
+      id: 'cobalt',
+      name: 'Kobalt',
+      seed: Color(0xFF2962FF),
+      accent: Color(0xFF448AFF)),
+  PingDesign(
+      id: 'mint',
+      name: 'Minze',
+      seed: Color(0xFF10B981),
+      accent: Color(0xFF34D399)),
+  PingDesign(
+      id: 'plum',
+      name: 'Pflaume',
+      seed: Color(0xFF7B1FA2),
+      accent: Color(0xFFBA68C8)),
+  PingDesign(
+      id: 'sand',
+      name: 'Sand',
+      seed: Color(0xFFB07A4F),
+      accent: Color(0xFFD4A373)),
+  PingDesign(
+      id: 'flamingo',
+      name: 'Flamingo',
+      seed: Color(0xFFFF6F91),
+      accent: Color(0xFFFF9EB5)),
 ];
 
 PingDesign designById(String? id, {int? customColor}) {
@@ -223,10 +248,21 @@ class PingTheme {
   /// lifts Ping out of the default-Roboto "0815" look.
   static const fontFamily = 'PlusJakartaSans';
 
-  static ThemeData light([PingDesign? design]) =>
-      _build(Brightness.light, design ?? kPingDesigns.first);
-  static ThemeData dark([PingDesign? design]) =>
-      _build(Brightness.dark, design ?? kPingDesigns.first);
+  static ThemeData light(
+    PingDesign? design, {
+    bool boldText = false,
+    bool highContrast = false,
+  }) =>
+      _build(Brightness.light, design ?? kPingDesigns.first,
+          boldText: boldText, highContrast: highContrast);
+  static ThemeData dark(
+    PingDesign? design, {
+    bool amoled = false,
+    bool boldText = false,
+    bool highContrast = false,
+  }) =>
+      _build(Brightness.dark, design ?? kPingDesigns.first,
+          amoled: amoled, boldText: boldText, highContrast: highContrast);
 
   /// Derive the chat-surface palette (bubbles, wallpaper, app-bar) from a design
   /// seed so every design has a distinct, cohesive look.
@@ -261,11 +297,17 @@ class PingTheme {
     );
   }
 
-  static ThemeData _build(Brightness brightness, PingDesign design) {
+  static ThemeData _build(
+    Brightness brightness,
+    PingDesign design, {
+    bool amoled = false,
+    bool boldText = false,
+    bool highContrast = false,
+  }) {
     final isLight = brightness == Brightness.light;
     final palette = _paletteFor(design, brightness);
 
-    final scheme = ColorScheme.fromSeed(
+    var scheme = ColorScheme.fromSeed(
       seedColor: design.seed,
       brightness: brightness,
       primary: isLight
@@ -274,6 +316,31 @@ class PingTheme {
       secondary: design.accent,
       tertiary: design.tertiary,
     );
+
+    // AMOLED dark: collapse the surface ramp toward true black so unlit OLED
+    // pixels stay off. Containers keep a faint lift so cards remain legible.
+    if (amoled && !isLight) {
+      scheme = scheme.copyWith(
+        surface: Colors.black,
+        surfaceContainerLowest: Colors.black,
+        surfaceContainerLow: const Color(0xFF0A0A0A),
+        surfaceContainer: const Color(0xFF101012),
+        surfaceContainerHigh: const Color(0xFF161618),
+        surfaceContainerHighest: const Color(0xFF1C1C1F),
+      );
+    }
+
+    // High contrast: darken outlines and lift on-surface text so borders,
+    // dividers and secondary labels stand out — an accessibility aid.
+    if (highContrast) {
+      scheme = scheme.copyWith(
+        outline: isLight ? const Color(0xFF3A4753) : const Color(0xFFB9C6D2),
+        outlineVariant:
+            isLight ? const Color(0xFF6B7884) : const Color(0xFF8A98A4),
+        onSurfaceVariant:
+            isLight ? const Color(0xFF2B3640) : const Color(0xFFD4DEE7),
+      );
+    }
 
     final base = ThemeData(
       useMaterial3: true,
@@ -285,7 +352,7 @@ class PingTheme {
 
     return base.copyWith(
       extensions: [palette],
-      textTheme: _textTheme(base.textTheme, scheme),
+      textTheme: _textTheme(base.textTheme, scheme, boldText),
       appBarTheme: AppBarTheme(
         backgroundColor: palette.brand,
         foregroundColor: Colors.white,
@@ -369,9 +436,9 @@ class PingTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant.withValues(alpha: 0.4),
+        color: scheme.outlineVariant.withValues(alpha: highContrast ? 0.9 : 0.4),
         space: 1,
-        thickness: 1,
+        thickness: highContrast ? 1.2 : 1,
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         elevation: 3,
@@ -385,7 +452,11 @@ class PingTheme {
     );
   }
 
-  static TextTheme _textTheme(TextTheme base, ColorScheme scheme) {
+  static TextTheme _textTheme(TextTheme base, ColorScheme scheme,
+      [bool bold = false]) {
+    // "Bold text" nudges body and label weights up a step for legibility,
+    // without touching the already-heavy display/title styles.
+    final body = bold ? FontWeight.w600 : null;
     return base.copyWith(
       headlineMedium: base.headlineMedium?.copyWith(
         fontWeight: FontWeight.w800,
@@ -403,8 +474,11 @@ class PingTheme {
         fontWeight: FontWeight.w700,
         letterSpacing: -0.2,
       ),
-      bodyLarge: base.bodyLarge?.copyWith(height: 1.35, letterSpacing: -0.1),
-      bodyMedium: base.bodyMedium?.copyWith(height: 1.35, letterSpacing: -0.1),
+      bodyLarge: base.bodyLarge
+          ?.copyWith(height: 1.35, letterSpacing: -0.1, fontWeight: body),
+      bodyMedium: base.bodyMedium
+          ?.copyWith(height: 1.35, letterSpacing: -0.1, fontWeight: body),
+      bodySmall: bold ? base.bodySmall?.copyWith(fontWeight: body) : base.bodySmall,
       labelLarge: base.labelLarge?.copyWith(fontWeight: FontWeight.w700),
     );
   }

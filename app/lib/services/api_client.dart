@@ -31,10 +31,20 @@ class ApiClient {
     final root = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
-    return Uri.parse('$root/api$path').replace(
+    return Uri.parse('$root/api${_route(path)}').replace(
       queryParameters: query?.map((k, v) => MapEntry(k, v.toString())),
     );
   }
+
+  /// Admin endpoints are reached through the Cloudflare-Access-free `/console`
+  /// bridge. The native client can't carry the browser's Cloudflare Access
+  /// login, so the server exposes the very same `/admin/*` handlers under
+  /// `/api/console/*` (gated by the user's admin JWT instead). Call sites still
+  /// use the readable `/admin/...` paths; this maps them transparently.
+  static String _route(String path) =>
+      (path == '/admin' || path.startsWith('/admin/'))
+          ? '/console${path.substring('/admin'.length)}'
+          : path;
 
   Future<dynamic> get(String path, [Map<String, dynamic>? query]) =>
       _send(() => _http.get(_uri(path, query), headers: _headers));

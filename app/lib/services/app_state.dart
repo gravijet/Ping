@@ -14,10 +14,14 @@ import '../models/scheduled_message.dart';
 import '../models/settings.dart';
 import '../models/status.dart';
 import '../models/user.dart';
+import '../utils/chat_sort.dart';
+import '../utils/format.dart';
 import 'api_client.dart';
+import 'app_lock_service.dart';
 import 'audio_player_service.dart';
 import 'call_service.dart';
 import 'chat_cache_store.dart';
+import 'feedback_service.dart';
 import 'media_service.dart';
 import 'local_message_store.dart';
 import 'outbox_store.dart';
@@ -36,6 +40,7 @@ const _kThemeMode = 'ping_theme_mode';
 const _kSettings = 'ping_settings';
 const _kChatWallpapers = 'ping_chat_wallpapers';
 const _kPinnedChats = 'ping_pinned_chats';
+const _kFavoriteChats = 'ping_favorite_chats';
 const _kUpdatePrompted = 'ping_update_prompted_build';
 const _kLastSeenVersion = 'ping_last_seen_version';
 const _kDrafts = 'ping_drafts';
@@ -114,6 +119,9 @@ class AppState extends ChangeNotifier {
   final TtsController tts = TtsController();
   final AudioController audio = AudioController();
   final MediaService media = MediaService();
+
+  /// Asset-free haptic + sound cues, gated by the user's settings.
+  late final FeedbackService feedback = FeedbackService(() => settings);
   final LocalMessageStore localStore = LocalMessageStore();
   final StarredStore starredStore = StarredStore();
   final ChatCacheStore chatCache = ChatCacheStore();
@@ -136,8 +144,18 @@ class AppState extends ChangeNotifier {
   RemoteConfig remoteConfig = RemoteConfig.empty;
   int _runningBuild = 0;
 
-  /// Drives 1:1 WebRTC calls. Created in [init]; signaling rides the socket.
-  late final CallController callController;
+  /// Drives 1:1 WebRTC calls. Built lazily on first access rather than in
+  /// [init], because the call overlay (mounted from `MaterialApp.builder`)
+  /// reads it on the very first frame — before [init]'s async work has run. A
+  /// plain `late` field assigned in [init] threw a LateInitializationError on
+  /// that first frame, which surfaced as the "Etwas ist schiefgelaufen" screen
+  /// right after a fresh install. The socket it signals through is created in
+  /// [init] and only touched lazily (when a call actually happens), so it's
+  /// safe for this to exist before the socket does.
+  late final CallController callController = CallController(
+    sendSignal: (type, payload) => _socket.send(type, payload),
+    fetchIce: fetchIceServers,
+  )..onLogged = _recordCall;
 
   /// ICE servers (STUN/TURN) for a call, from `/api/ice`.
   Future<List<Map<String, dynamic>>> fetchIceServers() async {
@@ -294,12 +312,37 @@ class AppState extends ChangeNotifier {
   /// Chats the user has pinned to the top of the list (device-local).
   final Set<String> _pinnedChats = {};
 
+  /// Chats the user has marked as favourites (device-local). Drives the
+  /// "Favoriten" quick-filter on the chat list.
+  final Set<String> _favoriteChats = {};
+
+  // ---- App lock (local PIN gate) -------------------------------------------
+  /// Whether the PIN screen is currently covering the app.
+  bool appLocked = false;
+  /// Wall-clock millis when the app last went to the background (for auto-lock).
+  int? _backgroundedAtMs;
+  /// True once the gate has been evaluated at least once after launch, so a
+  /// configured lock engages on cold start.
+  bool _lockArmed = false;
+
   /// Unsent composer drafts per chat (device-local). The chat list shows a
   /// "Entwurf: …" preview, and reopening the chat restores the text.
   final Map<String, String> _drafts = {};
 
   AuthStatus status = AuthStatus.unknown;
   PingUser? me;
+
+  /// Called when [init] throws before it could decide an auth status, so the
+  /// app advances to the login screen instead of being stranded on the splash
+  /// (a hung bootstrap was a cause of the "stuck after install" report).
+  void failBootstrap(Object error) {
+    debugPrint('Ping bootstrap failed: $error');
+    if (status == AuthStatus.unknown) {
+      status = AuthStatus.signedOut;
+      notifyListeners();
+    }
+  }
+
   String baseUrl = defaultBaseUrl;
   bool socketConnected = false;
   ThemeMode themeMode = ThemeMode.system;
@@ -412,6 +455,11 @@ class AppState extends ChangeNotifier {
     final token = prefs.getString(_kToken);
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
     settings = PingSettings.decode(prefs.getString(_kSettings));
+    TimeFormat.clock24h = settings.clock24h;
+    _applyPerformanceSettings();
+    // Engage the app lock immediately on a cold start so a configured PIN
+    // guards the very first frame (the gate watches [appLocked]).
+    if (appLockConfigured) appLocked = true;
     remoteConfig = RemoteConfig.decode(prefs.getString(_kRemoteConfig));
     _callsSeenAt = prefs.getInt(_kCallsSeen) ?? 0;
     if (updater.supported) {
@@ -419,6 +467,7 @@ class AppState extends ChangeNotifier {
     }
     _loadChatWallpapers(prefs);
     _loadPinnedChats(prefs);
+    _loadFavoriteChats(prefs);
     _loadDrafts(prefs);
     starredStore.ids().then((ids) {
       starredIds
@@ -426,18 +475,19 @@ class AppState extends ChangeNotifier {
         ..addAll(ids);
       notifyListeners();
     });
-    await tts.configure(
-      language: settings.ttsLanguage,
-      rate: settings.ttsRate,
-      pitch: settings.ttsPitch,
-    );
+    try {
+      await tts
+          .configure(
+            language: settings.ttsLanguage,
+            rate: settings.ttsRate,
+            pitch: settings.ttsPitch,
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      /* TTS stays at defaults; not worth blocking startup for */
+    }
 
     _api = ApiClient(baseUrl: baseUrl, token: token);
-    callController = CallController(
-      sendSignal: (type, payload) => _socket.send(type, payload),
-      fetchIce: fetchIceServers,
-    );
-    callController.onLogged = _recordCall;
     _socket = SocketService(
       onEvent: _onSocketEvent,
       onConnectionChange: (c) {
@@ -462,14 +512,24 @@ class AppState extends ChangeNotifier {
       },
     );
 
-    await notifications.init();
+    try {
+      await notifications.init().timeout(const Duration(seconds: 8));
+    } catch (_) {
+      /* local notifications unavailable; messaging still works */
+    }
     notifications.onTap = dispatchNotificationTarget;
     notifications.onCallAction = _onCallAction;
     push.onToken = _onPushToken;
     push.onOpen = dispatchNotificationTarget;
     push.onIncomingCall = _onIncomingCallPush;
     push.onCallCanceled = _onCallCanceledPush;
-    await push.start(notifications: notifications);
+    try {
+      await push
+          .start(notifications: notifications)
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      /* push registration can hang without Play Services — never block boot */
+    }
     // If the app was cold-launched by tapping a local notification, route to it
     // once the UI is ready.
     final launch = await notifications.launchTarget();
@@ -780,12 +840,14 @@ class AppState extends ChangeNotifier {
   /// what makes notifications arrive reliably whether the app is open or not.
   void appPaused() {
     _paused = true;
+    _backgroundedAtMs = DateTime.now().millisecondsSinceEpoch;
     if (status == AuthStatus.signedIn) _socket.disconnect();
   }
 
   /// Reconnect and refresh when the app returns to the foreground.
   void appResumed() {
     _paused = false;
+    _evaluateAppLock();
     if (status != AuthStatus.signedIn || _api.token == null) return;
     if (!_socket.isConnected) _socket.connect(baseUrl, _api.token!);
     // Best-effort refresh; a transient network error here shouldn't surface.
@@ -923,6 +985,7 @@ class AppState extends ChangeNotifier {
     await outboxStore.clear();
     starredIds.clear();
     _pinnedChats.clear();
+    _favoriteChats.clear();
     _loadedChats.clear();
     _drafts.clear();
     _outbox.clear();
@@ -989,9 +1052,14 @@ class AppState extends ChangeNotifier {
   /// Persist the on-device [PingSettings] and apply anything that takes effect
   /// immediately (e.g. the text-to-speech voice configuration).
   Future<void> updateSettings(PingSettings next) async {
+    final sortChanged = next.chatSort != settings.chatSort;
     settings = next;
+    TimeFormat.clock24h = next.clock24h;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSettings, next.encode());
+    _applyPerformanceSettings();
+    // Re-order the list immediately when the sort mode changes.
+    if (sortChanged) _sortChats();
     await tts.configure(
       language: next.ttsLanguage,
       rate: next.ttsRate,
@@ -999,6 +1067,71 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
   }
+
+  // ---- Quick replies --------------------------------------------------------
+
+  /// The user's canned messages, ready to insert from the composer.
+  List<String> get quickReplies => settings.quickReplies;
+
+  /// Add a canned reply (trimmed, de-duplicated). No-op for blank text.
+  Future<void> addQuickReply(String text) async {
+    final t = text.trim();
+    if (t.isEmpty || settings.quickReplies.contains(t)) return;
+    await updateSettings(
+        settings.copyWith(quickReplies: [...settings.quickReplies, t]));
+  }
+
+  /// Replace the reply at [index] with [text] (trimmed). No-op for blank text or
+  /// an out-of-range index.
+  Future<void> editQuickReply(int index, String text) async {
+    final t = text.trim();
+    if (t.isEmpty || index < 0 || index >= settings.quickReplies.length) return;
+    final next = [...settings.quickReplies]..[index] = t;
+    await updateSettings(settings.copyWith(quickReplies: next));
+  }
+
+  /// Remove the canned reply at [index].
+  Future<void> removeQuickReply(int index) async {
+    if (index < 0 || index >= settings.quickReplies.length) return;
+    final next = [...settings.quickReplies]..removeAt(index);
+    await updateSettings(settings.copyWith(quickReplies: next));
+  }
+
+  /// Restore the built-in starter set of quick replies.
+  Future<void> resetQuickReplies() =>
+      updateSettings(settings.copyWith(quickReplies: kDefaultQuickReplies));
+
+  /// Size the in-memory image cache from the current settings. Data-saver mode
+  /// keeps a small cache (less RAM, fewer decoded images held); otherwise a
+  /// sensible cap below Flutter's 100 MB default still trims memory use.
+  void _applyPerformanceSettings() {
+    final cache = PaintingBinding.instance.imageCache;
+    if (settings.dataSaver) {
+      cache.maximumSize = 200;
+      cache.maximumSizeBytes = 24 << 20; // 24 MB
+    } else {
+      cache.maximumSize = 600;
+      cache.maximumSizeBytes = 64 << 20; // 64 MB
+    }
+  }
+
+  /// Drop everything Flutter is holding in the image cache and return how many
+  /// bytes were freed — backs the "Cache leeren" action in Speicher & Daten.
+  int clearImageCache() {
+    final cache = PaintingBinding.instance.imageCache;
+    final freed = cache.currentSizeBytes;
+    cache.clear();
+    cache.clearLiveImages();
+    return freed;
+  }
+
+  /// Bytes currently held by the in-memory image cache (for the storage screen).
+  int get imageCacheBytes => PaintingBinding.instance.imageCache.currentSizeBytes;
+
+  /// Whether a message notification may be shown right now: respects the global
+  /// toggle and the quiet-hours window. Admin announcements bypass this.
+  bool get messageAlertsAllowed =>
+      settings.notificationsEnabled && !settings.isQuietNow();
 
   // ---- Chat wallpapers -----------------------------------------------------
 
@@ -1058,6 +1191,108 @@ class AppState extends ChangeNotifier {
     await prefs.setStringList(_kPinnedChats, _pinnedChats.toList());
     _sortChats();
     notifyListeners();
+  }
+
+  // ---- Favourite chats ------------------------------------------------------
+
+  void _loadFavoriteChats(SharedPreferences prefs) {
+    _favoriteChats.clear();
+    final raw = prefs.getStringList(_kFavoriteChats);
+    if (raw != null) _favoriteChats.addAll(raw);
+  }
+
+  bool isFavorite(String chatId) => _favoriteChats.contains(chatId);
+
+  /// How many chats are currently favourited (drives the filter-chip badge).
+  int get favoriteCount =>
+      chats.where((c) => _favoriteChats.contains(c.id)).length;
+
+  /// Mark/unmark a chat as a favourite (device-local; powers the quick-filter).
+  Future<void> toggleFavorite(String chatId) async {
+    if (!_favoriteChats.remove(chatId)) _favoriteChats.add(chatId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kFavoriteChats, _favoriteChats.toList());
+    notifyListeners();
+  }
+
+  // ---- App lock (local PIN gate) -------------------------------------------
+
+  /// Whether an app-lock PIN is configured (the gate is usable).
+  bool get appLockConfigured =>
+      settings.appLockEnabled && settings.appLockPinHash.isNotEmpty;
+
+  /// Turn the lock on with a fresh PIN. Returns false for an invalid PIN.
+  Future<bool> setAppLockPin(String pin, {int? graceSeconds}) async {
+    if (!AppLock.isValidPin(pin)) return false;
+    await updateSettings(settings.copyWith(
+      appLockEnabled: true,
+      appLockPinHash: AppLock.hashPin(pin),
+      appLockGraceSeconds: graceSeconds ?? settings.appLockGraceSeconds,
+    ));
+    return true;
+  }
+
+  /// Remove the lock entirely (requires the current PIN to be verified by the
+  /// caller first).
+  Future<void> disableAppLock() async {
+    appLocked = false;
+    await updateSettings(settings.copyWith(
+      appLockEnabled: false,
+      appLockPinHash: '',
+    ));
+  }
+
+  /// Update only the auto-lock grace period.
+  Future<void> setAppLockGrace(int seconds) =>
+      updateSettings(settings.copyWith(appLockGraceSeconds: seconds));
+
+  /// Engage the lock screen immediately (e.g. from a "lock now" action).
+  void lockNow() {
+    if (appLockConfigured) {
+      appLocked = true;
+      notifyListeners();
+    }
+  }
+
+  /// Try to unlock with [pin]; returns whether it matched.
+  bool tryUnlock(String pin) {
+    if (AppLock.verify(pin, settings.appLockPinHash)) {
+      appLocked = false;
+      _backgroundedAtMs = null;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Decide whether the lock should be engaged given how long the app spent in
+  /// the background. Called on resume and once on first foreground after launch.
+  void _evaluateAppLock() {
+    if (!appLockConfigured) {
+      if (appLocked) {
+        appLocked = false;
+        notifyListeners();
+      }
+      return;
+    }
+    // Cold start: always lock. Resume from background: honour the grace period.
+    final backgrounded = _backgroundedAtMs == null
+        ? const Duration(days: 1)
+        : Duration(
+            milliseconds:
+                DateTime.now().millisecondsSinceEpoch - _backgroundedAtMs!);
+    final shouldLock = !_lockArmed ||
+        AppLock.shouldLock(
+          enabled: settings.appLockEnabled,
+          pinHash: settings.appLockPinHash,
+          graceSeconds: settings.appLockGraceSeconds,
+          backgrounded: backgrounded,
+        );
+    _lockArmed = true;
+    if (shouldLock && !appLocked) {
+      appLocked = true;
+      notifyListeners();
+    }
   }
 
   // ---- Drafts ---------------------------------------------------------------
@@ -2464,6 +2699,7 @@ class AppState extends ChangeNotifier {
       if (isActive) {
         // We're looking at it — mark read (silently if receipts are off).
         _socket.markRead(msg.chatId, silent: !settings.readReceipts);
+        feedback.messageReceived();
         _maybeReadAloud(msg);
       } else {
         // Bump unread and raise a notification (unless muted / disabled).
@@ -2471,7 +2707,7 @@ class AppState extends ChangeNotifier {
         if (i != -1) {
           final chat = chats[i];
           chats[i] = chat.copyWith(unread: chat.unread + 1);
-          if (!chat.muted && settings.notificationsEnabled) {
+          if (!chat.muted && messageAlertsAllowed) {
             final sender = _userCache[msg.senderId]?.displayName ?? chat.title;
             final title = chat.isGroup ? chat.title : sender;
             final preview =
@@ -2587,17 +2823,8 @@ class AppState extends ChangeNotifier {
   }
 
   void _sortChats() {
-    chats.sort((a, b) {
-      // The "note to self" chat sits at the very top.
-      if (a.self != b.self) return a.self ? -1 : 1;
-      // Then pinned chats, above everything else.
-      final ap = isPinned(a.id);
-      final bp = isPinned(b.id);
-      if (ap != bp) return ap ? -1 : 1;
-      final at = a.lastMessage?.createdAt ?? a.updatedAt;
-      final bt = b.lastMessage?.createdAt ?? b.updatedAt;
-      return bt.compareTo(at);
-    });
+    final mode = ChatSortId.fromId(settings.chatSort);
+    chats.sort((a, b) => compareChats(a, b, mode, isPinned: isPinned));
   }
 
   /// Open (or create) the "note to self" chat — a direct chat with yourself.

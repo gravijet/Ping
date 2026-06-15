@@ -12,8 +12,8 @@ import 'package:path_provider/path_provider.dart';
 /// Metadata for the newest published Android build, as returned by the server's
 /// `/download/info` endpoint.
 class UpdateInfo {
-  final String version; // marketing version, e.g. "2.2.0"
-  final String build; // full build string, e.g. "2.2.0+5"
+  final String version; // marketing version, e.g. "0.2.0"
+  final String build; // full build string, e.g. "0.2.0+5"
   final int? versionCode; // android version code (build number), e.g. 5
   final int size; // apk size in bytes
   final String sha256;
@@ -71,7 +71,7 @@ class UpdateService {
     return _abi!;
   }
 
-  /// The running app's version name, e.g. "2.1.0".
+  /// The running app's version name, e.g. "0.1.0".
   Future<String> currentVersion() async => (await _info()).version;
 
   /// The running app's build number (android versionCode), e.g. 4.
@@ -100,10 +100,18 @@ class UpdateService {
         final v = abi.isNotEmpty ? variants[abi] : null;
         if (v is Map && v['url'] != null) {
           final rel = v['url'].toString();
+          // A per-ABI split carries its own (ABI-offset) version code. Comparing
+          // *that* against the installed build number is what keeps same-version
+          // hotfixes working for split-installed users — the universal build's
+          // code would never look newer to them. Falls back to the universal
+          // code when the server doesn't advertise a per-variant one.
+          final vCode = v['versionCode'] is int
+              ? v['versionCode'] as int
+              : int.tryParse('${v['versionCode'] ?? ''}');
           return UpdateInfo(
-            version: info.version,
+            version: (v['version'] ?? info.version).toString(),
             build: info.build,
-            versionCode: info.versionCode,
+            versionCode: vCode ?? info.versionCode,
             size: (v['size'] as num?)?.toInt() ?? info.size,
             sha256: (v['sha256'] ?? info.sha256).toString(),
             downloadUrl: rel.startsWith('http') ? rel : '$root$rel',
@@ -200,7 +208,7 @@ Map<String, dynamic>? jsonDecodeSafe(String body) {
   }
 }
 
-/// Returns true when semver [a] > [b] (e.g. "2.2.0" > "2.1.9").
+/// Returns true when semver [a] > [b] (e.g. "0.2.0" > "0.1.9").
 bool _semverGreater(String a, String b) {
   List<int> parts(String v) => v
       .split('+')

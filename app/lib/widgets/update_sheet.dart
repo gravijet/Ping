@@ -220,10 +220,37 @@ class _UpdateSheetState extends State<_UpdateSheet> {
                   color: scheme.error)),
           const SizedBox(height: 8),
           Text(
-            'Der Download oder die Installation hat nicht geklappt. Du kannst '
-            'die neueste Version auch direkt aus der App-Quelle laden.',
+            'Der Download oder die Installation hat nicht geklappt. '
+            'Prüfe deine Internetverbindung und versuche es erneut.',
             textAlign: TextAlign.center,
             style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline_rounded,
+                    size: 18, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Meldet Android „App nicht installiert“? Deinstalliere die '
+                    'alte Version einmalig und installiere die neue danach – '
+                    'künftige Updates laufen dann automatisch.',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 18),
           Row(

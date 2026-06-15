@@ -146,7 +146,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onInputChanged(String text) {
     final state = context.read<AppState>();
-    if (text.trim().isNotEmpty && !_isTyping) {
+    if (text.trim().isNotEmpty &&
+        !_isTyping &&
+        state.settings.sendTypingIndicators) {
       _isTyping = true;
       state.socket.setTyping(widget.chatId, true);
     }
@@ -194,6 +196,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _replyTo = null);
     _draftTimer?.cancel();
     state.setDraft(widget.chatId, '');
+    state.feedback.messageSent();
     try {
       await state.sendMessage(widget.chatId, text, replyTo: reply?.id);
       _scrollToBottom();
@@ -330,6 +333,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: ChatWallpaper(
                     spec: state.wallpaperFor(widget.chatId),
                     fallback: context.ping.wallpaper,
+                    dim: state.settings.wallpaperDim,
                   ),
                 ),
                 if (_searching)
@@ -734,6 +738,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onPlayAudio: _playAudio,
       onOpenVideo: _openVideo,
       textScale: state.settings.fontScale,
+      cornerScale: state.settings.bubbleCorners,
+      bigEmoji: state.settings.bigEmoji,
+      formatting: state.settings.messageFormatting,
+      accentBubbles: state.settings.accentBubbles,
       onToggleReaction: interactive
           ? (emoji) => state.toggleReaction(widget.chatId, m.id, emoji)
           : null,
@@ -911,25 +919,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// "Für mich löschen": removes the message on this account only — the rest
   /// of the chat keeps it. Used for tidying up your own view.
   Future<void> _hideForMe(Message m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Für mich löschen?'),
-        content: const Text(
-            'Die Nachricht verschwindet nur bei dir. Alle anderen im Chat '
-            'sehen sie weiterhin.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Abbrechen')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Für mich löschen'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+    // The "Vor dem Löschen nachfragen" privacy toggle controls the safety
+    // prompt; with it off, power users delete in one tap.
+    if (context.read<AppState>().settings.confirmBeforeDelete) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Für mich löschen?'),
+          content: const Text(
+              'Die Nachricht verschwindet nur bei dir. Alle anderen im Chat '
+              'sehen sie weiterhin.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Für mich löschen'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     try {
       await context.read<AppState>().hideMessageForMe(widget.chatId, m.id);
     } on ApiException catch (e) {
@@ -938,33 +950,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _confirmDelete(Message m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nachricht löschen?'),
-        content: const Text(
-            'Die Nachricht wird für alle in diesem Chat entfernt. Das lässt '
-            'sich nicht rückgängig machen.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Abbrechen')),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Löschen'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      if (!mounted) return;
-      try {
-        await context.read<AppState>().deleteMessage(widget.chatId, m.id);
-      } on ApiException catch (e) {
-        _showError(e.message);
-      }
+    if (context.read<AppState>().settings.confirmBeforeDelete) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nachricht löschen?'),
+          content: const Text(
+              'Die Nachricht wird für alle in diesem Chat entfernt. Das lässt '
+              'sich nicht rückgängig machen.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Abbrechen')),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Löschen'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    if (!mounted) return;
+    try {
+      await context.read<AppState>().deleteMessage(widget.chatId, m.id);
+    } on ApiException catch (e) {
+      _showError(e.message);
     }
   }
 
@@ -1061,6 +1074,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 },
               ),
               _AttachOption(
+                icon: Icons.bolt_rounded,
+                color: const Color(0xFFFFB300),
+                label: 'Schnellantwort',
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showQuickReplies();
+                },
+              ),
+              _AttachOption(
                 icon: Icons.mic_rounded,
                 color: const Color(0xFFFF7043),
                 label: 'Sprache',
@@ -1074,6 +1096,66 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  /// Pick a canned message and drop it into the composer (appending to whatever
+  /// is already there). Editable in Einstellungen → Chats → Schnellantworten.
+  Future<void> _showQuickReplies() async {
+    final state = context.read<AppState>();
+    final replies = state.quickReplies;
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: replies.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.fromLTRB(24, 8, 24, 32),
+                child: Text(
+                  'Noch keine Schnellantworten. Lege welche in den Einstellungen '
+                  '→ Chats → Schnellantworten an.',
+                  textAlign: TextAlign.center,
+                ),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.bolt_rounded, size: 20),
+                        const SizedBox(width: 8),
+                        Text('Schnellantworten',
+                            style: Theme.of(ctx).textTheme.titleMedium),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final r in replies)
+                          ListTile(
+                            dense: true,
+                            title: Text(r,
+                                maxLines: 2, overflow: TextOverflow.ellipsis),
+                            onTap: () => Navigator.pop(ctx, r),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    final existing = _input.text;
+    final needsSpace = existing.isNotEmpty && !existing.endsWith(' ');
+    _input.text = needsSpace ? '$existing $chosen' : '$existing$chosen';
+    _input.selection =
+        TextSelection.collapsed(offset: _input.text.length);
+    _onInputChanged(_input.text);
+    _inputFocus.requestFocus();
   }
 
   Future<void> _openPollComposer() async {
@@ -1651,7 +1733,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildComposer() {
     final scheme = Theme.of(context).colorScheme;
-    final enterToSend = context.read<AppState>().settings.enterToSend;
+    final settings = context.read<AppState>().settings;
+    final enterToSend = settings.enterToSend;
     final canSend = _input.text.trim().isNotEmpty;
     final showSend = canSend || _editing != null;
     return SafeArea(
@@ -1686,6 +1769,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 minLines: 1,
                 maxLines: 5,
                 textCapitalization: TextCapitalization.sentences,
+                // Honour the "Inkognito-Tastatur" privacy toggle by asking the
+                // keyboard not to learn from (or autocomplete) what's typed here.
+                enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
                 keyboardType: enterToSend
                     ? TextInputType.text
                     : TextInputType.multiline,

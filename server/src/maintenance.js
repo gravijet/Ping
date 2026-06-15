@@ -55,8 +55,26 @@ export function runMaintenance() {
   return { purgedMessages: purged.length, deliveredScheduled: delivered };
 }
 
-/** Start the recurring sweep (every minute). Returns a stop function. */
-export function startMaintenance(intervalMs = 60_000) {
+/**
+ * Keep the on-disk database tidy: refresh SQLite's query-planner statistics and
+ * fold the write-ahead log back into the main file so it can't grow unbounded
+ * between backups. Cheap enough to run on a slow cadence; never throws.
+ */
+export function optimizeDatabase() {
+  try {
+    db.exec('PRAGMA optimize;');
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  } catch (e) {
+    console.error('[maintenance] DB-Optimierung fehlgeschlagen:', e.message);
+  }
+}
+
+/**
+ * Start the recurring sweeps. The frequent one (every minute) handles
+ * disappearing/scheduled messages; a slower one keeps the database lean.
+ * Returns a stop function.
+ */
+export function startMaintenance(intervalMs = 60_000, optimizeMs = 60 * 60_000) {
   const timer = setInterval(() => {
     try {
       runMaintenance();
@@ -65,5 +83,12 @@ export function startMaintenance(intervalMs = 60_000) {
     }
   }, intervalMs);
   timer.unref();
-  return () => clearInterval(timer);
+
+  const optimizeTimer = setInterval(optimizeDatabase, optimizeMs);
+  optimizeTimer.unref();
+
+  return () => {
+    clearInterval(timer);
+    clearInterval(optimizeTimer);
+  };
 }

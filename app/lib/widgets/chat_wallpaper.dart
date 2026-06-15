@@ -12,10 +12,32 @@ import '../services/wallpaper_service.dart';
 class ChatWallpaper extends StatelessWidget {
   final WallpaperSpec spec;
   final Color fallback; // theme default wallpaper colour
-  const ChatWallpaper({super.key, required this.spec, required this.fallback});
+
+  /// Extra darkening (0.0 .. 0.6) laid over the wallpaper so message bubbles
+  /// stay readable on bright backgrounds (Einstellungen → Chats → Abdunkeln).
+  final double dim;
+
+  const ChatWallpaper({
+    super.key,
+    required this.spec,
+    required this.fallback,
+    this.dim = 0.0,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final base = _base(context);
+    if (dim <= 0) return base;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        base,
+        ColoredBox(color: Colors.black.withValues(alpha: dim.clamp(0.0, 0.6))),
+      ],
+    );
+  }
+
+  Widget _base(BuildContext context) {
     switch (spec.kind) {
       case WallpaperKind.defaultBg:
         return Container(color: fallback);
