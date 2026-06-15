@@ -6,6 +6,7 @@ import 'package:ping/utils/chat_filter.dart';
 import 'package:ping/utils/chat_sort.dart';
 import 'package:ping/utils/emoji.dart';
 import 'package:ping/utils/format.dart';
+import 'package:ping/models/user.dart';
 
 Chat _chat(
   String id, {
@@ -49,6 +50,8 @@ void main() {
       expect(s.incognitoKeyboard, false);
       expect(s.confirmBeforeDelete, true);
       expect(s.quickReplies, isNotEmpty);
+      expect(s.showContactMood, true);
+      expect(s.chatListMoodEmoji, true);
     });
 
     test('round-trips through encode/decode', () {
@@ -91,6 +94,12 @@ void main() {
       expect(back.incognitoKeyboard, true);
       expect(back.confirmBeforeDelete, false);
       expect(back.quickReplies, ['Hi', 'Bye']);
+
+      final moods = PingSettings.decode(
+          const PingSettings(showContactMood: false, chatListMoodEmoji: false)
+              .encode());
+      expect(moods.showContactMood, false);
+      expect(moods.chatListMoodEmoji, false);
     });
 
     test('older settings JSON (missing new keys) falls back to defaults', () {
@@ -118,6 +127,69 @@ void main() {
     test('blank quick replies are dropped on decode', () {
       final back = PingSettings.decode('{"quickReplies":["ok","  ",""]}');
       expect(back.quickReplies, ['ok']);
+    });
+  });
+
+  group('PingUser profile', () {
+    PingUser user(Map<String, dynamic> extra) => PingUser.fromJson({
+          'id': 'u1',
+          'phone': '+431234',
+          'displayName': 'Alex Muster',
+          'avatarColor': '#42A5F5',
+          ...extra,
+        });
+
+    test('rich profile fields round-trip through json', () {
+      final u = user({
+        'accentColor': '#EC407A',
+        'pronouns': 'they/them',
+        'city': 'Wien',
+        'birthday': '1990-05-01',
+        'hasBanner': true,
+        'bannerVersion': 3,
+        'links': [
+          {'label': 'Web', 'url': 'https://example.com'},
+          {'label': '', 'url': 'https://blog.example.com'},
+        ],
+        'moodEmoji': '🎧',
+        'moodText': 'fokussiert',
+      });
+      final back = PingUser.fromJson(u.toJson());
+      expect(back.accentColor, '#EC407A');
+      expect(back.pronouns, 'they/them');
+      expect(back.city, 'Wien');
+      expect(back.birthday, '1990-05-01');
+      expect(back.hasBanner, true);
+      expect(back.bannerVersion, 3);
+      expect(back.links.length, 2);
+      expect(back.links.first.url, 'https://example.com');
+      expect(back.hasProfileExtras, true);
+    });
+
+    test('accent falls back to the avatar colour when unset', () {
+      final u = user({});
+      expect(u.accentColor, isNull);
+      expect(u.accent, u.color);
+    });
+
+    test('ProfileLink display uses the label, else the host', () {
+      const labelled = ProfileLink(label: 'My Site', url: 'https://x.example.com');
+      const bare = ProfileLink(label: '', url: 'https://www.foo.org/path');
+      expect(labelled.display, 'My Site');
+      expect(bare.display, 'foo.org');
+    });
+
+    test('hasMood respects the expiry timestamp', () {
+      final past = DateTime.now()
+          .subtract(const Duration(minutes: 1))
+          .millisecondsSinceEpoch;
+      final future = DateTime.now()
+          .add(const Duration(hours: 1))
+          .millisecondsSinceEpoch;
+      expect(user({'moodText': 'hi', 'moodUntil': future}).hasMood, true);
+      expect(user({'moodText': 'hi', 'moodUntil': past}).hasMood, false);
+      expect(user({'moodText': 'hi'}).hasMood, true); // no expiry → persists
+      expect(user({}).hasMood, false);
     });
   });
 

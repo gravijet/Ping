@@ -12,7 +12,7 @@ import '../widgets/verified_badge.dart';
 import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
-import 'profile_edit_screen.dart';
+import 'profile_view_screen.dart';
 import 'saved_messages_screen.dart';
 import 'security_screen.dart';
 import 'settings_sections.dart';
@@ -33,7 +33,10 @@ class SettingsScreen extends StatelessWidget {
           if (me != null)
             InkWell(
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ProfileEditScreen()),
+                MaterialPageRoute(
+                  builder: (_) =>
+                      ProfileViewScreen(userId: me.id, isMe: true),
+                ),
               ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -57,8 +60,24 @@ class SettingsScreen extends StatelessWidget {
                             badgeSize: 20,
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
-                          Text(me.phone,
-                              style: TextStyle(color: scheme.onSurfaceVariant)),
+                          if (me.hasMood)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                me.moodLine,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: me.accent,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            )
+                          else
+                            Text(me.phone,
+                                style:
+                                    TextStyle(color: scheme.onSurfaceVariant)),
                           if (me.premium)
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
@@ -86,7 +105,8 @@ class SettingsScreen extends StatelessWidget {
                         ],
                       ),
                     ),
-                    Icon(Icons.edit_outlined, color: scheme.primary),
+                    Icon(Icons.chevron_right_rounded,
+                        color: scheme.onSurfaceVariant),
                   ],
                 ),
               ),
@@ -151,7 +171,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 0.11.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 0.12.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(
@@ -188,7 +208,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '0.11.0',
+              applicationVersion: '0.12.0',
             ),
           ),
           const SizedBox(height: 8),

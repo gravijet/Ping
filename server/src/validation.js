@@ -12,7 +12,7 @@ export const displayNameSchema = z
 export const aboutSchema = z
   .string()
   .trim()
-  .max(140, 'Über mich darf höchstens 140 Zeichen haben.');
+  .max(300, 'Über mich darf höchstens 300 Zeichen haben.');
 
 export const avatarColorSchema = z
   .string()
@@ -71,10 +71,40 @@ export const resetPasswordSchema = z.object({
   password: passwordSchema,
 });
 
+// An accent colour or "" (the empty string clears it, reverting to the
+// auto-assigned avatar colour).
+const accentColorSchema = avatarColorSchema.or(z.literal(''));
+
+// A profile link chip: a short label plus an http(s) URL.
+export const profileLinkSchema = z.object({
+  label: z.string().trim().max(30, 'Das Link-Label ist zu lang.').optional().default(''),
+  url: z
+    .string()
+    .trim()
+    .min(1, 'Der Link darf nicht leer sein.')
+    .max(200, 'Der Link ist zu lang.')
+    .regex(/^https?:\/\/.+/i, 'Links müssen mit http:// oder https:// beginnen.'),
+});
+
 export const updateProfileSchema = z.object({
   displayName: displayNameSchema.optional(),
   about: aboutSchema.optional(),
   avatarColor: avatarColorSchema.optional(),
+  accentColor: accentColorSchema.optional(),
+  pronouns: z.string().trim().max(40, 'Die Pronomen sind zu lang.').optional(),
+  // 'YYYY-MM-DD', 'MM-DD' or '' (cleared).
+  birthday: z
+    .string()
+    .trim()
+    .regex(/^(\d{4}-)?\d{2}-\d{2}$/, 'Ungültiges Datum.')
+    .or(z.literal(''))
+    .optional(),
+  city: z.string().trim().max(60, 'Der Ort ist zu lang.').optional(),
+  links: z.array(profileLinkSchema).max(6, 'Höchstens 6 Links.').optional(),
+  moodEmoji: z.string().trim().max(16, 'Ungültiges Emoji.').optional(),
+  moodText: z.string().trim().max(80, 'Der Status ist zu lang.').optional(),
+  // Epoch-ms expiry for the mood, or null to keep it until cleared.
+  moodUntil: z.number().int().nonnegative().max(4102444800000).nullable().optional(),
 });
 
 export const securitySchema = z

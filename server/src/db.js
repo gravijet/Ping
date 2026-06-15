@@ -389,6 +389,45 @@ function ensureColumns() {
     // the user's name everywhere. Cosmetic today; the hook for paid perks later.
     db.exec('ALTER TABLE users ADD COLUMN premium INTEGER NOT NULL DEFAULT 0');
   }
+  // ---- Rich profile customization -----------------------------------------
+  // A profile background ("banner") behind the avatar on the profile page.
+  if (!userCols.includes('banner_mime')) {
+    db.exec('ALTER TABLE users ADD COLUMN banner_mime TEXT');
+  }
+  if (!userCols.includes('banner_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN banner_version INTEGER NOT NULL DEFAULT 0');
+  }
+  // A personal accent colour used to theme the user's profile page + name ring.
+  // Null/empty means "fall back to the auto-assigned avatar colour".
+  if (!userCols.includes('accent_color')) {
+    db.exec('ALTER TABLE users ADD COLUMN accent_color TEXT');
+  }
+  if (!userCols.includes('pronouns')) {
+    db.exec("ALTER TABLE users ADD COLUMN pronouns TEXT NOT NULL DEFAULT ''");
+  }
+  // JSON array of { label, url } shown as tappable chips on the profile page.
+  if (!userCols.includes('links')) {
+    db.exec("ALTER TABLE users ADD COLUMN links TEXT NOT NULL DEFAULT ''");
+  }
+  // 'YYYY-MM-DD' or 'MM-DD' (year optional, for people who only share the day).
+  if (!userCols.includes('birthday')) {
+    db.exec("ALTER TABLE users ADD COLUMN birthday TEXT NOT NULL DEFAULT ''");
+  }
+  if (!userCols.includes('city')) {
+    db.exec("ALTER TABLE users ADD COLUMN city TEXT NOT NULL DEFAULT ''");
+  }
+  // A temporary "mood"/status line (emoji + short text). mood_until is an
+  // optional epoch-ms expiry after which it is treated as cleared (lazily, on
+  // read — no sweep needed).
+  if (!userCols.includes('mood_emoji')) {
+    db.exec("ALTER TABLE users ADD COLUMN mood_emoji TEXT NOT NULL DEFAULT ''");
+  }
+  if (!userCols.includes('mood_text')) {
+    db.exec("ALTER TABLE users ADD COLUMN mood_text TEXT NOT NULL DEFAULT ''");
+  }
+  if (!userCols.includes('mood_until')) {
+    db.exec('ALTER TABLE users ADD COLUMN mood_until INTEGER');
+  }
   const memberCols = db.prepare('PRAGMA table_info(chat_members)').all().map((c) => c.name);
   if (!memberCols.includes('archived')) {
     // Per-user chat archiving: the chat moves into a collapsed "Archiviert"

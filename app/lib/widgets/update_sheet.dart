@@ -32,6 +32,7 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   UpdateInfo? _info;
   double _progress = 0;
   String _current = '';
+  bool _downloaded = false; // a verified APK for this build is already cached
   List<Map<String, dynamic>> _changelog = const [];
 
   @override
@@ -63,6 +64,10 @@ class _UpdateSheetState extends State<_UpdateSheet> {
     });
     // Show what's new for the offered version, if the changelog has an entry.
     if (info != null) {
+      // If the user already pulled this build down (and just cancelled the
+      // install), we can offer to install it straight away — no re-download.
+      final cached = await state.updater.cachedApk(info);
+      if (mounted) setState(() => _downloaded = cached != null);
       final cl = await state.changelogFor(info.version);
       if (mounted) setState(() => _changelog = cl);
     }
@@ -73,7 +78,9 @@ class _UpdateSheetState extends State<_UpdateSheet> {
     final info = _info;
     if (info == null) return;
     setState(() {
-      _phase = _Phase.downloading;
+      // A cached build installs immediately; only show the progress bar when we
+      // actually have to fetch bytes.
+      _phase = _downloaded ? _Phase.installing : _Phase.downloading;
       _progress = 0;
     });
     final File? file = await state.updater.download(
@@ -174,13 +181,44 @@ class _UpdateSheetState extends State<_UpdateSheet> {
               ),
             ),
           ],
+          if (_downloaded) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.primaryContainer.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle_rounded,
+                      size: 18, color: scheme.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Bereits heruntergeladen – du kannst direkt installieren, '
+                      'ohne erneut zu laden.',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.35,
+                          color: scheme.onSurface),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
               onPressed: _downloadAndInstall,
-              icon: const Icon(Icons.download_rounded),
-              label: const Text('Herunterladen & installieren'),
+              icon: Icon(_downloaded
+                  ? Icons.install_mobile_rounded
+                  : Icons.download_rounded),
+              label: Text(_downloaded
+                  ? 'Jetzt installieren'
+                  : 'Herunterladen & installieren'),
             ),
           ),
           const SizedBox(height: 6),

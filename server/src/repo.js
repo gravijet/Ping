@@ -126,20 +126,54 @@ export const getUserByEmail = (email) =>
 export const getUserById = (id) => stmts.userById.get(id);
 export const touchLastSeen = (id) => stmts.touchSeen.run(now(), id);
 
-export function updateProfile(id, { displayName, about, avatarColor }) {
+// Maps a camelCase profile field to its users-table column. Only keys listed
+// here can be written through updateProfile, so a client can never set columns
+// like is_admin or password_hash by smuggling extra keys past validation.
+const PROFILE_COLUMNS = {
+  displayName: 'display_name',
+  about: 'about',
+  avatarColor: 'avatar_color',
+  accentColor: 'accent_color',
+  pronouns: 'pronouns',
+  birthday: 'birthday',
+  city: 'city',
+  moodEmoji: 'mood_emoji',
+  moodText: 'mood_text',
+  moodUntil: 'mood_until',
+};
+
+export function updateProfile(id, patch = {}) {
   const u = stmts.userById.get(id);
   if (!u) return null;
-  stmts.updateProfile.run(
-    displayName ?? u.display_name,
-    about ?? u.about,
-    avatarColor ?? u.avatar_color,
-    id
-  );
+  const sets = [];
+  const params = [];
+  for (const [key, column] of Object.entries(PROFILE_COLUMNS)) {
+    if (patch[key] === undefined) continue;
+    sets.push(`${column} = ?`);
+    // accent_color and mood_until are nullable; everything else is text.
+    params.push(patch[key] === null ? null : patch[key]);
+  }
+  // Links arrive as an array of { label, url } and are stored as JSON text.
+  if (patch.links !== undefined) {
+    sets.push('links = ?');
+    params.push(Array.isArray(patch.links) ? JSON.stringify(patch.links) : '');
+  }
+  if (sets.length === 0) return u;
+  params.push(id);
+  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   return stmts.userById.get(id);
 }
 
 export function setAvatar(id, mime) {
   stmts.setAvatar.run(mime, id);
+  return stmts.userById.get(id);
+}
+
+// Set/clear the profile background image; bumps banner_version to bust caches.
+export function setBanner(id, mime) {
+  db.prepare(
+    'UPDATE users SET banner_mime = ?, banner_version = banner_version + 1 WHERE id = ?'
+  ).run(mime, id);
   return stmts.userById.get(id);
 }
 
@@ -332,18 +366,61 @@ export function matchContacts(phones, emails, exceptId) {
 
 // ---- Serialisation ---------------------------------------------------------
 
+// Parse the stored links JSON into a clean array of { label, url }. Tolerates
+// legacy/empty/garbage values (returns []).
+export function parseLinks(raw) {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((l) => l && typeof l.url === 'string' && l.url.trim())
+      .slice(0, 6)
+      .map((l) => ({ label: (l.label || '').toString(), url: l.url.toString() }));
+  } catch {
+    return [];
+  }
+}
+
+// The mood is temporary: once mood_until has passed it reads as cleared. Done
+// lazily here so there's no background sweep to keep moods fresh.
+function liveMood(u) {
+  const expired = u.mood_until && u.mood_until <= now();
+  if (expired || (!u.mood_emoji && !u.mood_text)) {
+    return { emoji: '', text: '', until: null };
+  }
+  return {
+    emoji: u.mood_emoji || '',
+    text: u.mood_text || '',
+    until: u.mood_until || null,
+  };
+}
+
 // What anyone may see: name, avatar, presence. Never the phone or email — you
 // can only reach people you already know (via contacts or exact lookup).
 export function publicUser(u) {
   if (!u) return null;
   const official = u.id === OFFICIAL_USER_ID;
+  const mood = liveMood(u);
   return {
     id: u.id,
     displayName: u.display_name,
     avatarColor: u.avatar_color,
+    // A personal accent colour (null when the user hasn't picked one).
+    accentColor: u.accent_color || null,
     about: u.about,
     hasAvatar: !!u.avatar_mime,
     avatarVersion: u.avatar_version,
+    // Rich profile fields shown on the profile page.
+    hasBanner: !!u.banner_mime,
+    bannerVersion: u.banner_version || 0,
+    pronouns: u.pronouns || '',
+    birthday: u.birthday || '',
+    city: u.city || '',
+    links: parseLinks(u.links),
+    moodEmoji: mood.emoji,
+    moodText: mood.text,
+    moodUntil: mood.until,
     // Trust badges, surfaced next to the name across the app:
     //  • official → the unmistakable "Ping Team" seal (system account),
     //  • verified → a blue check for Ping staff/admins,

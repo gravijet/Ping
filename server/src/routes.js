@@ -14,7 +14,15 @@ import { config } from './config.js';
 import { normalizePhone } from './phone.js';
 import { verifyFirebaseIdToken } from './firebaseAuth.js';
 import { requestCode, verifyCode } from './otp.js';
-import { detectImageMime, saveAvatar, readAvatar, deleteAvatar } from './avatars.js';
+import {
+  detectImageMime,
+  saveAvatar,
+  readAvatar,
+  deleteAvatar,
+  saveBanner,
+  readBanner,
+  deleteBanner,
+} from './avatars.js';
 import {
   parse,
   registerSchema,
@@ -69,6 +77,7 @@ import {
   getUserById,
   updateProfile,
   setAvatar,
+  setBanner,
   setEmail,
   setPassword,
   setName,
@@ -664,6 +673,40 @@ router.delete(
   })
 );
 
+// Upload a profile background ("banner"); raw image bytes in the request body.
+router.post(
+  '/me/banner',
+  requireAuth,
+  express.raw({ type: () => true, limit: config.maxAvatarBytes }),
+  h(async (req, res) => {
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return res.status(400).json({ error: 'Kein Bild empfangen.' });
+    }
+    const mime = detectImageMime(buf);
+    if (!mime) {
+      return res
+        .status(400)
+        .json({ error: 'Nur JPG-, PNG-, WebP- oder GIF-Bilder werden unterstützt.' });
+    }
+    saveBanner(req.user.id, buf);
+    const updated = setBanner(req.user.id, mime);
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
+router.delete(
+  '/me/banner',
+  requireAuth,
+  h(async (req, res) => {
+    deleteBanner(req.user.id);
+    const updated = setBanner(req.user.id, null);
+    broadcastProfile(updated);
+    res.json({ user: privateUser(updated) });
+  })
+);
+
 // Self-service account deletion. Irreversible, so we require the account
 // password as confirmation. Cascades remove memberships and receipts; the
 // user's messages stay (sender becomes null) so other people's chats aren't
@@ -763,6 +806,23 @@ router.get(
     const buf = readAvatar(user.id);
     if (!buf) return res.status(404).json({ error: 'Kein Bild vorhanden.' });
     res.set('Content-Type', user.avatar_mime);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.send(buf);
+  })
+);
+
+// Serve a user's profile background image (auth-gated, like avatars).
+router.get(
+  '/users/:id/banner',
+  requireAuth,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user || !user.banner_mime) {
+      return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    }
+    const buf = readBanner(user.id);
+    if (!buf) return res.status(404).json({ error: 'Kein Bild vorhanden.' });
+    res.set('Content-Type', user.banner_mime);
     res.set('Cache-Control', 'private, max-age=86400');
     res.send(buf);
   })

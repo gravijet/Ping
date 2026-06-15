@@ -307,6 +307,75 @@ test('profile picture upload, fetch and delete', async () => {
   assert.equal(del.json.user.hasAvatar, false);
 });
 
+test('rich profile fields (pronouns, links, mood, birthday) round-trip', async () => {
+  const u = await register('+491700000071', 'rio@example.com', 'Rio');
+  const patch = await api('/api/me', {
+    method: 'PATCH',
+    token: u.token,
+    body: {
+      pronouns: 'sie/ihr',
+      city: 'Wien',
+      birthday: '1995-04-12',
+      accentColor: '#EC407A',
+      moodEmoji: '🎧',
+      moodText: 'fokussiert',
+      links: [
+        { label: 'Website', url: 'https://example.com' },
+        { label: '', url: 'http://blog.example.com' },
+      ],
+    },
+  });
+  assert.equal(patch.status, 200, JSON.stringify(patch.json));
+  const me = patch.json.user;
+  assert.equal(me.pronouns, 'sie/ihr');
+  assert.equal(me.city, 'Wien');
+  assert.equal(me.birthday, '1995-04-12');
+  assert.equal(me.accentColor, '#EC407A');
+  assert.equal(me.moodEmoji, '🎧');
+  assert.equal(me.links.length, 2);
+  assert.equal(me.links[0].url, 'https://example.com');
+
+  // A non-http link is rejected.
+  const bad = await api('/api/me', {
+    method: 'PATCH',
+    token: u.token,
+    body: { links: [{ label: 'x', url: 'javascript:alert(1)' }] },
+  });
+  assert.equal(bad.status, 400);
+
+  // An expired mood reads back as cleared.
+  await api('/api/me', {
+    method: 'PATCH',
+    token: u.token,
+    body: { moodEmoji: '😴', moodText: 'weg', moodUntil: 1 },
+  });
+  const after = await api('/api/me', { token: u.token });
+  assert.equal(after.json.user.moodText, '');
+  assert.equal(after.json.user.moodEmoji, '');
+});
+
+test('profile banner upload, fetch and delete', async () => {
+  const u = await register('+491700000072', 'ben@example.com', 'Ben');
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const up = await fetch(base + '/api/me/banner', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${u.token}`, 'content-type': 'image/png' },
+    body: png,
+  });
+  const upJson = await up.json();
+  assert.equal(up.status, 200, JSON.stringify(upJson));
+  assert.equal(upJson.user.hasBanner, true);
+
+  const img = await fetch(base + `/api/users/${u.user.id}/banner`, {
+    headers: { authorization: `Bearer ${u.token}` },
+  });
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+
+  const del = await api('/api/me/banner', { method: 'DELETE', token: u.token });
+  assert.equal(del.json.user.hasBanner, false);
+});
+
 test('changing the password requires the current one', async () => {
   const u = await register('+491700000080', 'pat@example.com', 'Pat', 'oldpass1');
   const noCurrent = await api('/api/me/security', {

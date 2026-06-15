@@ -428,6 +428,15 @@ class AppState extends ChangeNotifier {
     return '$root/api/users/${user.id}/avatar?v=${user.avatarVersion}';
   }
 
+  /// URL of a user's profile background image, or null if they have none.
+  String? bannerUrl(PingUser? user) {
+    if (user == null || !user.hasBanner) return null;
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$root/api/users/${user.id}/banner?v=${user.bannerVersion}';
+  }
+
   /// URL of a group's uploaded picture, or null if it has none.
   String? groupAvatarUrl(Chat chat) {
     if (!chat.isGroup || !chat.hasAvatar) return null;
@@ -1696,16 +1705,49 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> updateProfile(
-      {String? displayName, String? about, String? avatarColor}) async {
+  Future<void> updateProfile({
+    String? displayName,
+    String? about,
+    String? avatarColor,
+    String? accentColor,
+    String? pronouns,
+    String? birthday,
+    String? city,
+    List<ProfileLink>? links,
+    String? moodEmoji,
+    String? moodText,
+    int? moodUntil,
+    bool clearMoodUntil = false,
+  }) async {
     final res = await _api.patch('/me', {
       if (displayName != null) 'displayName': displayName,
       if (about != null) 'about': about,
       if (avatarColor != null) 'avatarColor': avatarColor,
+      if (accentColor != null) 'accentColor': accentColor,
+      if (pronouns != null) 'pronouns': pronouns,
+      if (birthday != null) 'birthday': birthday,
+      if (city != null) 'city': city,
+      if (links != null) 'links': links.map((l) => l.toJson()).toList(),
+      if (moodEmoji != null) 'moodEmoji': moodEmoji,
+      if (moodText != null) 'moodText': moodText,
+      if (clearMoodUntil)
+        'moodUntil': null
+      else if (moodUntil != null)
+        'moodUntil': moodUntil,
     });
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
     _cacheMe();
     notifyListeners();
+  }
+
+  /// Set or clear the temporary mood/status line (with an optional expiry).
+  Future<void> setMood(String emoji, String text, {int? until}) async {
+    await updateProfile(
+      moodEmoji: emoji,
+      moodText: text,
+      moodUntil: until,
+      clearMoodUntil: until == null,
+    );
   }
 
   /// Add or change the backup email / password used for password login.
@@ -1731,6 +1773,21 @@ class AppState extends ChangeNotifier {
 
   Future<void> removeAvatar() async {
     final res = await _api.delete('/me/avatar');
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
+    notifyListeners();
+  }
+
+  /// Upload a profile background image (raw bytes + content type).
+  Future<void> uploadBanner(List<int> bytes, String contentType) async {
+    final res = await _api.postBytes('/me/banner', bytes, contentType);
+    me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
+    _cacheMe();
+    notifyListeners();
+  }
+
+  Future<void> removeBanner() async {
+    final res = await _api.delete('/me/banner');
     me = PingUser.fromJson(res['user'] as Map<String, dynamic>);
     _cacheMe();
     notifyListeners();

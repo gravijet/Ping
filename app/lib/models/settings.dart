@@ -72,6 +72,10 @@ class PingSettings {
   // Quick replies — canned messages insertable from the composer
   final List<String> quickReplies;
 
+  // Profile / social
+  final bool showContactMood; // show a contact's status/mood in the chat header
+  final bool chatListMoodEmoji; // show a contact's mood emoji in the chat list
+
   const PingSettings({
     this.readReceipts = true,
     this.sendTypingIndicators = true,
@@ -116,6 +120,8 @@ class PingSettings {
     this.incognitoKeyboard = false,
     this.confirmBeforeDelete = true,
     this.quickReplies = kDefaultQuickReplies,
+    this.showContactMood = true,
+    this.chatListMoodEmoji = true,
   });
 
   PingSettings copyWith({
@@ -163,6 +169,8 @@ class PingSettings {
     bool? incognitoKeyboard,
     bool? confirmBeforeDelete,
     List<String>? quickReplies,
+    bool? showContactMood,
+    bool? chatListMoodEmoji,
   }) =>
       PingSettings(
         readReceipts: readReceipts ?? this.readReceipts,
@@ -210,6 +218,8 @@ class PingSettings {
         incognitoKeyboard: incognitoKeyboard ?? this.incognitoKeyboard,
         confirmBeforeDelete: confirmBeforeDelete ?? this.confirmBeforeDelete,
         quickReplies: quickReplies ?? this.quickReplies,
+        showContactMood: showContactMood ?? this.showContactMood,
+        chatListMoodEmoji: chatListMoodEmoji ?? this.chatListMoodEmoji,
       );
 
   Map<String, dynamic> toJson() => {
@@ -256,6 +266,8 @@ class PingSettings {
         'incognitoKeyboard': incognitoKeyboard,
         'confirmBeforeDelete': confirmBeforeDelete,
         'quickReplies': quickReplies,
+        'showContactMood': showContactMood,
+        'chatListMoodEmoji': chatListMoodEmoji,
       };
 
   factory PingSettings.fromJson(Map<String, dynamic> j) => PingSettings(
@@ -311,6 +323,8 @@ class PingSettings {
                 .where((e) => e.trim().isNotEmpty)
                 .toList() ??
             kDefaultQuickReplies,
+        showContactMood: j['showContactMood'] ?? true,
+        chatListMoodEmoji: j['chatListMoodEmoji'] ?? true,
       );
 
   static PingSettings decode(String? raw) {

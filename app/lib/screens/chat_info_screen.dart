@@ -10,6 +10,7 @@ import '../services/app_state.dart';
 import '../services/wallpaper_service.dart';
 import '../widgets/avatar.dart';
 import '../widgets/verified_badge.dart';
+import 'profile_view_screen.dart';
 import '../widgets/wallpaper_picker.dart';
 import '../utils/format.dart';
 import 'add_members_screen.dart';
@@ -85,17 +86,27 @@ class ChatInfoScreen extends StatelessWidget {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                PingAvatar(
-                  initials: chat.isGroup
-                      ? chat.initials
-                      : (chat.otherUser?.initials ?? chat.initials),
-                  color: chat.color,
-                  size: 104,
-                  icon: chat.isGroup ? Icons.groups_rounded : null,
-                  imageUrl: chat.isGroup
-                      ? state.groupAvatarUrl(chat)
-                      : state.avatarUrl(chat.otherUser),
-                  imageHeaders: state.authHeaders,
+                GestureDetector(
+                  onTap: (chat.isGroup || chat.otherUser == null)
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ProfileViewScreen(
+                                  userId: chat.otherUser!.id),
+                            ),
+                          ),
+                  child: PingAvatar(
+                    initials: chat.isGroup
+                        ? chat.initials
+                        : (chat.otherUser?.initials ?? chat.initials),
+                    color: chat.color,
+                    size: 104,
+                    icon: chat.isGroup ? Icons.groups_rounded : null,
+                    imageUrl: chat.isGroup
+                        ? state.groupAvatarUrl(chat)
+                        : state.avatarUrl(chat.otherUser),
+                    imageHeaders: state.authHeaders,
+                  ),
                 ),
                 if (isOwner)
                   Positioned(

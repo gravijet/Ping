@@ -1,5 +1,27 @@
 import 'package:flutter/material.dart';
 
+/// A tappable link chip on a profile (e.g. a website or social handle).
+class ProfileLink {
+  final String label;
+  final String url;
+  const ProfileLink({required this.label, required this.url});
+
+  /// A human label for the chip — the explicit label, or the URL's host.
+  String get display {
+    if (label.trim().isNotEmpty) return label.trim();
+    final uri = Uri.tryParse(url);
+    final host = uri?.host ?? '';
+    return host.isNotEmpty ? host.replaceFirst('www.', '') : url;
+  }
+
+  Map<String, dynamic> toJson() => {'label': label, 'url': url};
+
+  factory ProfileLink.fromJson(Map<String, dynamic> j) => ProfileLink(
+        label: (j['label'] ?? '').toString(),
+        url: (j['url'] ?? '').toString(),
+      );
+}
+
 /// A person on Ping. Identity is the phone number; the colour is server-assigned
 /// so avatars stay consistent across every device. [email]/[hasPassword] are
 /// only populated for the signed-in user (the backup-login info).
@@ -18,6 +40,18 @@ class PingUser {
   final bool isAdmin;
   final String messageStorage; // 'server' (default) | 'local'
   final bool showLastSeen; // privacy: share "zuletzt online" (own account only)
+
+  // ---- Rich profile customization ----
+  final String? accentColor; // personal accent (hex) or null → use avatarColor
+  final bool hasBanner; // a profile background image is set
+  final int bannerVersion; // cache-buster for the banner
+  final String pronouns;
+  final String birthday; // 'YYYY-MM-DD' or 'MM-DD' or ''
+  final String city;
+  final List<ProfileLink> links;
+  final String moodEmoji; // temporary status emoji
+  final String moodText; // temporary status text
+  final int? moodUntil; // epoch ms the mood expires (null = until cleared)
 
   /// Trust badges shown next to the name everywhere. [official] is the system
   /// "Ping Team" account; [verified] is a Ping staff/admin check; [premium] is a
@@ -41,6 +75,16 @@ class PingUser {
     this.isAdmin = false,
     this.messageStorage = 'server',
     this.showLastSeen = true,
+    this.accentColor,
+    this.hasBanner = false,
+    this.bannerVersion = 0,
+    this.pronouns = '',
+    this.birthday = '',
+    this.city = '',
+    this.links = const [],
+    this.moodEmoji = '',
+    this.moodText = '',
+    this.moodUntil,
     this.official = false,
     this.verified = false,
     this.premium = false,
@@ -53,6 +97,31 @@ class PingUser {
     final hex = avatarColor.replaceFirst('#', '');
     return Color(int.parse('FF$hex', radix: 16));
   }
+
+  /// The colour used to theme this user's profile — their chosen accent, or the
+  /// auto-assigned avatar colour as a fallback.
+  Color get accent {
+    final hex = (accentColor ?? avatarColor).replaceFirst('#', '');
+    if (hex.length != 6) return color;
+    return Color(int.parse('FF$hex', radix: 16));
+  }
+
+  /// Whether a (still-valid) temporary mood/status is set.
+  bool get hasMood =>
+      (moodEmoji.isNotEmpty || moodText.isNotEmpty) &&
+      (moodUntil == null || moodUntil! > DateTime.now().millisecondsSinceEpoch);
+
+  /// One-line mood string for compact display, e.g. "🎧 fokussiert".
+  String get moodLine =>
+      [moodEmoji, moodText].where((s) => s.isNotEmpty).join(' ').trim();
+
+  /// Whether the profile carries any extra info worth showing a section for.
+  bool get hasProfileExtras =>
+      about.trim().isNotEmpty ||
+      pronouns.trim().isNotEmpty ||
+      city.trim().isNotEmpty ||
+      birthday.trim().isNotEmpty ||
+      links.isNotEmpty;
 
   /// Whether the user has set a real name (rather than defaulting to the number).
   bool get hasName =>
@@ -88,6 +157,16 @@ class PingUser {
     bool? isAdmin,
     String? messageStorage,
     bool? showLastSeen,
+    String? accentColor,
+    bool? hasBanner,
+    int? bannerVersion,
+    String? pronouns,
+    String? birthday,
+    String? city,
+    List<ProfileLink>? links,
+    String? moodEmoji,
+    String? moodText,
+    int? moodUntil,
     bool? official,
     bool? verified,
     bool? premium,
@@ -107,6 +186,16 @@ class PingUser {
         isAdmin: isAdmin ?? this.isAdmin,
         messageStorage: messageStorage ?? this.messageStorage,
         showLastSeen: showLastSeen ?? this.showLastSeen,
+        accentColor: accentColor ?? this.accentColor,
+        hasBanner: hasBanner ?? this.hasBanner,
+        bannerVersion: bannerVersion ?? this.bannerVersion,
+        pronouns: pronouns ?? this.pronouns,
+        birthday: birthday ?? this.birthday,
+        city: city ?? this.city,
+        links: links ?? this.links,
+        moodEmoji: moodEmoji ?? this.moodEmoji,
+        moodText: moodText ?? this.moodText,
+        moodUntil: moodUntil ?? this.moodUntil,
         official: official ?? this.official,
         verified: verified ?? this.verified,
         premium: premium ?? this.premium,
@@ -129,6 +218,16 @@ class PingUser {
         'isAdmin': isAdmin,
         'messageStorage': messageStorage,
         'showLastSeen': showLastSeen,
+        if (accentColor != null) 'accentColor': accentColor,
+        'hasBanner': hasBanner,
+        'bannerVersion': bannerVersion,
+        'pronouns': pronouns,
+        'birthday': birthday,
+        'city': city,
+        'links': links.map((l) => l.toJson()).toList(),
+        'moodEmoji': moodEmoji,
+        'moodText': moodText,
+        if (moodUntil != null) 'moodUntil': moodUntil,
         'official': official,
         'verified': verified,
         'premium': premium,
@@ -149,6 +248,21 @@ class PingUser {
         isAdmin: (json['isAdmin'] ?? false) as bool,
         messageStorage: (json['messageStorage'] ?? 'server') as String,
         showLastSeen: (json['showLastSeen'] ?? true) as bool,
+        accentColor: json['accentColor'] as String?,
+        hasBanner: (json['hasBanner'] ?? false) as bool,
+        bannerVersion: (json['bannerVersion'] ?? 0) as int,
+        pronouns: (json['pronouns'] ?? '') as String,
+        birthday: (json['birthday'] ?? '') as String,
+        city: (json['city'] ?? '') as String,
+        links: (json['links'] as List?)
+                ?.whereType<Map>()
+                .map((e) => ProfileLink.fromJson(e.cast<String, dynamic>()))
+                .where((l) => l.url.isNotEmpty)
+                .toList() ??
+            const [],
+        moodEmoji: (json['moodEmoji'] ?? '') as String,
+        moodText: (json['moodText'] ?? '') as String,
+        moodUntil: json['moodUntil'] as int?,
         official: (json['official'] ?? false) as bool,
         verified: (json['verified'] ?? false) as bool,
         premium: (json['premium'] ?? false) as bool,

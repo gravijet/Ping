@@ -402,6 +402,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       subtitle = '${chat.memberIds.length} Mitglieder';
     } else if (online) {
       subtitle = 'online';
+    } else if (state.settings.showContactMood &&
+        chat.otherUser?.hasMood == true) {
+      // When a contact has a status/mood set, surface it instead of a stale
+      // "last seen" — a livelier, more personal header.
+      subtitle = chat.otherUser!.moodLine;
     } else {
       subtitle = TimeFormat.lastSeen(chat.otherUser?.lastSeen);
     }

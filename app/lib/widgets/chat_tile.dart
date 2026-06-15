@@ -79,6 +79,16 @@ class ChatTile extends StatelessWidget {
                           ),
                         ),
                       ),
+                      // A contact's mood emoji, shown right after the name.
+                      if (state.settings.chatListMoodEmoji &&
+                          !chat.isGroup &&
+                          chat.otherUser?.hasMood == true &&
+                          chat.otherUser!.moodEmoji.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text(chat.otherUser!.moodEmoji,
+                              style: const TextStyle(fontSize: 15)),
+                        ),
                       if (last != null)
                         Text(
                           TimeFormat.chatStamp(last.time),

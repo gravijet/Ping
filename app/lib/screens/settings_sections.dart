@@ -423,6 +423,22 @@ class ChatSettingsScreen extends StatelessWidget {
             value: s.accentBubbles,
             onChanged: (v) => update(s.copyWith(accentBubbles: v)),
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.mood_rounded),
+            title: const Text('Status im Chat-Titel'),
+            subtitle: const Text(
+                'Die Stimmung eines Kontakts statt „zuletzt online“ zeigen.'),
+            value: s.showContactMood,
+            onChanged: (v) => update(s.copyWith(showContactMood: v)),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.emoji_emotions_rounded),
+            title: const Text('Stimmungs-Emoji in der Liste'),
+            subtitle: const Text(
+                'Das Status-Emoji eines Kontakts neben dem Namen anzeigen.'),
+            value: s.chatListMoodEmoji,
+            onChanged: (v) => update(s.copyWith(chatListMoodEmoji: v)),
+          ),
           const Divider(),
           _SettingsGroupLabel('Liste & Verhalten'),
           ListTile(

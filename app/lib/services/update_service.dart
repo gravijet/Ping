@@ -136,16 +136,90 @@ class UpdateService {
     return byCode || byName;
   }
 
+  /// The stable on-disk path an APK for [info] downloads to. The same build
+  /// always maps to the same filename, so a download that finished but whose
+  /// install the user cancelled can be reused instead of fetched again.
+  Future<File> _apkFile(UpdateInfo info) async {
+    final dir = await getTemporaryDirectory();
+    return File('${dir.path}/ping-${info.build.replaceAll('+', '-')}.apk');
+  }
+
+  /// Whether [file]'s bytes match [sha]. Returns false when there's no hash to
+  /// check against — we'd rather re-download than install something unverified.
+  Future<bool> _matchesHash(File file, String sha) async {
+    if (sha.isEmpty) return false;
+    try {
+      final digest = await sha256.bind(file.openRead()).first;
+      return digest.toString().toLowerCase() == sha.toLowerCase();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns an already-downloaded, integrity-checked APK for [info] sitting in
+  /// the cache — e.g. the user downloaded it earlier but dismissed Android's
+  /// install prompt. Null when there's nothing valid to reuse. Lets callers
+  /// offer "install" without paying for the download a second time.
+  Future<File?> cachedApk(UpdateInfo info) async {
+    if (!supported) return null;
+    try {
+      final file = await _apkFile(info);
+      if (!await file.exists()) return null;
+      // Size is the cheap pre-check; the sha256 (when advertised) is the
+      // authoritative one. A half-written file from an aborted download fails
+      // both and is treated as "not cached".
+      final len = await file.length();
+      if (info.size > 0 && len != info.size) return null;
+      if (info.sha256.isNotEmpty && !await _matchesHash(file, info.sha256)) {
+        return null;
+      }
+      if (info.sha256.isEmpty && info.size <= 0) return null;
+      return file;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Delete every cached `ping-*.apk` except [keep], so a stale download from a
+  /// previous version doesn't sit around eating storage forever.
+  Future<void> _pruneOldApks(File keep) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (name.startsWith('ping-') &&
+            name.endsWith('.apk') &&
+            entity.path != keep.path) {
+          try {
+            await entity.delete();
+          } catch (_) {
+            /* best effort */
+          }
+        }
+      }
+    } catch (_) {
+      /* best effort */
+    }
+  }
+
   /// Download the APK to a temp file, reporting progress in 0..1. Returns the
-  /// file, or null on failure.
+  /// file, or null on failure. If a verified copy of this exact build is already
+  /// cached (a previously interrupted install), it's reused instantly — no
+  /// second download.
   Future<File?> download(
     UpdateInfo info, {
     void Function(double progress)? onProgress,
   }) async {
     if (!supported) return null;
+    // Resume: reuse a complete, integrity-checked download if we have one.
+    final cached = await cachedApk(info);
+    if (cached != null) {
+      onProgress?.call(1.0);
+      return cached;
+    }
     try {
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/ping-${info.build.replaceAll('+', '-')}.apk');
+      final file = await _apkFile(info);
       final client = http.Client();
       try {
         final req = http.Request('GET', Uri.parse(info.downloadUrl));
@@ -164,8 +238,7 @@ class UpdateService {
         // Integrity check: the downloaded APK must match the server's sha256.
         // Protects against a corrupted or tampered download before we install.
         if (info.sha256.isNotEmpty) {
-          final digest = await sha256.bind(file.openRead()).first;
-          if (digest.toString().toLowerCase() != info.sha256.toLowerCase()) {
+          if (!await _matchesHash(file, info.sha256)) {
             try {
               await file.delete();
             } catch (_) {
@@ -174,6 +247,8 @@ class UpdateService {
             return null;
           }
         }
+        // Free the storage taken by any older build's cached APK.
+        await _pruneOldApks(file);
         return file;
       } finally {
         client.close();

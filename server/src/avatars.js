@@ -53,3 +53,29 @@ export function deleteAvatar(userId) {
     /* already gone */
   }
 }
+
+// Profile backgrounds ("banners") live in the same store under a distinct key
+// so they can never collide with the round avatar.
+function bannerPath(userId) {
+  return path.join(dir, `${userId}.banner.bin`);
+}
+
+export function saveBanner(userId, buf) {
+  fs.writeFileSync(bannerPath(userId), buf);
+}
+
+export function readBanner(userId) {
+  try {
+    return fs.readFileSync(bannerPath(userId));
+  } catch {
+    return null;
+  }
+}
+
+export function deleteBanner(userId) {
+  try {
+    fs.unlinkSync(bannerPath(userId));
+  } catch {
+    /* already gone */
+  }
+}
