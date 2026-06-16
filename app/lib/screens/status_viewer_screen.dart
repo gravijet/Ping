@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../platform.dart';
 import '../models/status.dart';
 import '../services/app_state.dart';
 import '../utils/format.dart';
@@ -39,6 +40,11 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
   bool _isVideo(PingStatus s) => s.isVideo || s.attachment?.kind == 'video';
 
+  // video_player has no Windows implementation, so on desktop a video status is
+  // shown as a placeholder and advanced by the normal 5s timer (like an image)
+  // rather than driving its own playback-based progress.
+  bool _playableVideo(PingStatus s) => _isVideo(s) && !isDesktopPlatform;
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +60,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _replyFocus.addListener(() {
       if (_replyFocus.hasFocus) {
         _progress.stop();
-      } else if (mounted && !_isVideo(_current)) {
+      } else if (mounted && !_playableVideo(_current)) {
         _progress.forward();
       }
     });
@@ -72,7 +78,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
     _progress.reset();
     // Videos drive their own progress bar and advance when they finish; only
     // text/image use the fixed 5-second timer.
-    if (!_isVideo(_current)) _progress.forward();
+    if (!_playableVideo(_current)) _progress.forward();
   }
 
   void _next() {
@@ -95,7 +101,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
   // Resume the timed progress after a sheet/dialog (no-op for videos).
   void _resume() {
-    if (!_isVideo(_current)) _progress.forward();
+    if (!_playableVideo(_current)) _progress.forward();
   }
 
   Future<void> _showViewers() async {
@@ -389,7 +395,27 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
   }
 
   Widget _content(AppState state, PingStatus status) {
-    if (_isVideo(status) && status.attachment != null) {
+    // Desktop can't play video (no Windows video_player) — show a placeholder
+    // and let the 5s timer carry on to the next status.
+    if (_isVideo(status) && !_playableVideo(status)) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.movie_outlined, color: Colors.white54, size: 72),
+          const SizedBox(height: 14),
+          const Text('Video-Status',
+              style: TextStyle(color: Colors.white70, fontSize: 16)),
+          if (status.body.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+              child: Text(status.body,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 16)),
+            ),
+        ],
+      );
+    }
+    if (_playableVideo(status) && status.attachment != null) {
       return Column(
         children: [
           Expanded(
@@ -464,7 +490,7 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
             ? Container(color: Colors.white)
             : i > _item
                 ? Container(color: Colors.white30)
-                : _isVideo(_current)
+                : _playableVideo(_current)
                     ? LinearProgressIndicator(
                         value: _videoProgress,
                         backgroundColor: Colors.white30,

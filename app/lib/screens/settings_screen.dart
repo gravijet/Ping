@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../platform.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../widgets/avatar.dart';
@@ -12,6 +13,7 @@ import '../widgets/verified_badge.dart';
 import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
+import 'link_device_screen.dart';
 import 'profile_view_screen.dart';
 import 'saved_messages_screen.dart';
 import 'security_screen.dart';
@@ -135,6 +137,11 @@ class SettingsScreen extends StatelessWidget {
           _SectionHeader('Konto & Sicherheit'),
           _navTile(context, Icons.shield_outlined, 'Sicherung & Login',
               'E-Mail und Passwort ändern', () => const SecurityScreen()),
+          // Linking a desktop needs the phone camera, so it's only offered on
+          // the mobile build.
+          if (isMobilePlatform)
+            _navTile(context, Icons.devices_rounded, 'Ping für Windows',
+                'Gerät per QR-Code verknüpfen', () => const LinkDeviceScreen()),
           _navTile(context, Icons.lock_outline_rounded, 'Datenschutz',
               'Lesebestätigungen, Online-Status, Blockierte',
               () => const PrivacySettingsScreen()),
@@ -171,7 +178,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 0.12.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 0.13.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(
@@ -208,7 +215,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '0.12.0',
+              applicationVersion: '0.13.0',
             ),
           ),
           const SizedBox(height: 8),

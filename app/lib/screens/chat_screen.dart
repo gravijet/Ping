@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../platform.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../models/scheduled_message.dart';
@@ -1496,6 +1497,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _openVideo(Attachment att) {
+    // video_player has no Windows implementation yet, so the desktop build can't
+    // play inline video. Tell the user rather than crash on an unsupported call.
+    if (isDesktopPlatform) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Videos lassen sich in der Windows-App noch nicht abspielen.')),
+      );
+      return;
+    }
     final state = context.read<AppState>();
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => VideoPlayerScreen(

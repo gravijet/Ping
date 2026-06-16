@@ -167,6 +167,13 @@ export const config = {
   // Primary domain is ping.example.invalid.
   publicUrl: (process.env.PUBLIC_URL || 'https://example.invalid').replace(/\/$/, ''),
 
+  // Windows desktop build. The .exe is produced by the GitHub Actions workflow
+  // (this Linux host can't compile it) and published as a release asset, so we
+  // just point the website at that stable URL. Leave WINDOWS_DOWNLOAD_URL empty
+  // and the "Für Windows" card simply doesn't appear.
+  windowsDownloadUrl: (process.env.WINDOWS_DOWNLOAD_URL || '').trim(),
+  windowsVersion: (process.env.WINDOWS_VERSION || '').trim(),
+
   // ---- SMS phone verification (server-side OTP) ----------------------------
   // Ping can verify a phone number itself by texting a one-time code, instead of
   // relying on Firebase. Pick a provider via SMS_PROVIDER:

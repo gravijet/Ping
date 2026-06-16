@@ -49,6 +49,13 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Bitte gib dein Passwort ein.'),
 });
 
+// Desktop device-linking: the phone approves a QR-shown `code`. The optional
+// label lets the phone name the device ("Windows-PC") for the approval prompt.
+export const linkApproveSchema = z.object({
+  code: z.string().trim().min(8, 'Ungültiger Verknüpfungscode.').max(200),
+  deviceLabel: z.string().trim().max(60).optional(),
+});
+
 // SMS one-time-code verification. The purpose decides which accounts may
 // request a code: 'register' (default) needs a *free* number, 'reset' needs an
 // *existing* account (password reset).

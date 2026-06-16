@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.gravijet" "\0"
-            VALUE "FileDescription", "ping" "\0"
+            VALUE "CompanyName", "Ping" "\0"
+            VALUE "FileDescription", "Ping" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "ping" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.gravijet. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Ping. All rights reserved." "\0"
             VALUE "OriginalFilename", "ping.exe" "\0"
-            VALUE "ProductName", "ping" "\0"
+            VALUE "ProductName", "Ping" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -298,7 +298,8 @@
           <div class="status-line"><span class="led" id="heroLed"></span><span id="heroState">Server online · jetzt verfügbar</span></div>
           <h1 class="display reveal in">Chatten,<br>wie es <span class="accent-text">sein soll.</span></h1>
           <p class="lead reveal in">Ping ist ein blitzschneller, moderner Messenger — Echtzeit-Chats, Gruppen, Status,
-            Reaktionen, Sticker und Sprachnachrichten. Keine Werbung, kein Tracking, kein Schnickschnack.</p>
+            Reaktionen, Sticker und Sprachnachrichten. Auf Android und Windows, am PC per QR-Code angemeldet.
+            Keine Werbung, kein Tracking, kein Schnickschnack.</p>
           <div class="cta reveal in">
             <a class="btn big" href="/download">${P.icon('download')}Für Android laden</a>
             <a class="btn ghost big" href="/#how">So funktioniert's ${P.icon('arrowRight')}</a>
@@ -371,7 +372,7 @@
       <section class="section" id="download">
         <div class="section-head reveal"><span class="kicker"><span class="idx">03</span> Download</span>
           <h2 class="h2">Hol dir Ping.</h2>
-          <p class="lead">Direkt für Android — kostenlos, werbefrei und ohne Konto-Zwang. Ein Tipp genügt, die passende Version wählen wir automatisch.</p></div>
+          <p class="lead">Direkt für Android — und jetzt auch für Windows. Kostenlos, werbefrei und ohne Konto-Zwang. Ein Tipp genügt, die passende Version wählen wir automatisch.</p></div>
         <div class="dl-card reveal">
           <div class="dl-top">
             <div>
@@ -396,6 +397,28 @@
               <div class="dl-checksum" id="dlChecksum"></div>
             </div>
           </details>
+        </div>
+        <div class="dl-card reveal" id="dlWindows" style="display:none">
+          <div class="dl-top">
+            <div>
+              <h2>Ping für Windows</h2>
+              <p class="lead" style="margin-bottom:22px">Wie WhatsApp Desktop: Installier Ping auf deinem PC und melde dich per QR-Code an — ganz ohne Passwort.</p>
+              <a class="btn big" href="/download/windows">${P.icon('download')}Für Windows laden</a>
+              <ol class="dl-steps">
+                <li><b>Installieren</b> — lade die Datei und folge dem Setup.</li>
+                <li><b>Am Handy verknüpfen</b> — Ping öffnen → Einstellungen → „Ping für Windows“.</li>
+                <li><b>QR-Code scannen</b> — den am PC gezeigten Code abscannen, fertig.</li>
+              </ol>
+              <div class="dl-assure">${[['shield', 'Auf Viren geprüft'], ['lock', 'Anmeldung per QR'], ['refresh', 'Synchron mit dem Handy']]
+                .map(([ic, t]) => `<span>${P.icon(ic)}${t}</span>`).join('')}</div>
+            </div>
+            <div class="dl-meta">
+              <div class="kv"><span>Aktuelle Version</span><b id="dlWinVer">…</b></div>
+              <div class="kv"><span>Voraussetzung</span><b>Windows 10 +</b></div>
+              <div class="kv"><span>Anmeldung</span><b>QR-Code</b></div>
+              <div class="kv"><span>Preis</span><b>Kostenlos</b></div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -426,6 +449,8 @@
             ['Android sagt „App nicht installiert" beim Update — was tun?', 'Das kann beim Umstieg auf eine neu signierte Version einmalig vorkommen. Deinstalliere die alte App einfach einmal und installiere die neue über den Download-Button. Danach laufen alle weiteren Updates wieder automatisch und mit einem Tipp.'],
             ['Wie privat ist Ping?', 'Du wirst nur über deine Telefonnummer gefunden — nie über Namens- oder E-Mail-Suche. Dein Adressbuch bleibt auf deinem Gerät und wird nie gespeichert.'],
             ['Welche Android-Version brauche ich?', 'Android 6.0 oder neuer. Die App ist schlank und läuft auch auf älteren Geräten flüssig.'],
+            ['Wie melde ich mich auf dem Windows-PC an?', 'Wie bei WhatsApp Desktop: Installiere Ping für Windows, öffne die Handy-App unter Einstellungen → „Ping für Windows“ und scanne den am PC angezeigten QR-Code. Dein PC ist danach mit deinem Konto verbunden — ohne separates Passwort.'],
+            ['Brauche ich für Windows ein eigenes Konto?', 'Nein. Die Windows-App nutzt dein bestehendes Ping-Konto vom Handy. Die Anmeldung läuft komplett über den QR-Code, deine Chats sind sofort da.'],
             ['Unter welcher Adresse läuft Ping?', 'Ping läuft unter <b>example.invalid</b>.'],
           ].map(([q, a]) => `<details><summary>${q}</summary><div class="ans">${a}</div></details>`).join('')}
         </div>
@@ -489,6 +514,13 @@
           <div class="kv"><span>SHA-256 (zum Prüfen)</span><b class="hash" id="dlHash" title="Zum Kopieren tippen">${d.sha256 ? P.esc(d.sha256.slice(0, 24)) + '…' : '—'}</b></div>`;
         const hash = document.getElementById('dlHash');
         if (hash && d.sha256) hash.onclick = () => P.copy(d.sha256, 'Prüfsumme kopiert.');
+      }
+      // Reveal the Windows card only once a desktop build is published
+      // (WINDOWS_DOWNLOAD_URL is set on the server).
+      const win = document.getElementById('dlWindows');
+      if (win && d.windows && d.windows.url) {
+        win.style.display = '';
+        set('dlWinVer', d.windows.version ? 'v' + d.windows.version : '—');
       }
     }).catch(() => {});
   }

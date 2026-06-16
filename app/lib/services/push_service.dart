@@ -35,7 +35,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 /// routes notification taps to the right chat or screen. Android-only for now;
 /// silently does nothing elsewhere so the rest of the app never special-cases it.
 class PushService {
-  final _messaging = FirebaseMessaging.instance;
+  // Lazy on purpose: `FirebaseMessaging.instance` reaches for an initialized
+  // Firebase app, which only exists on Android (main.dart inits Firebase there).
+  // Evaluating it eagerly would throw on the Windows desktop build, where the
+  // PushService is still constructed but never started. Every use sits behind a
+  // [_supported] (Android) guard, so this getter is never touched off-Android.
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
   NotificationService? _notifications;
   bool _started = false;
 

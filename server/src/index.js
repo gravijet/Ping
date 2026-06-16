@@ -103,6 +103,12 @@ export function createApp() {
     legacyHeaders: false,
     keyGenerator: clientKey,
     message: { error: 'Zu viele Versuche. Bitte warte einen Moment und versuch es erneut.' },
+    // Desktop device-linking lives under /api/auth/link but isn't credential
+    // guessing — the desktop *polls* /auth/link/poll every couple of seconds
+    // while it waits for the phone to scan the QR, which would blow through the
+    // strict bucket in seconds. These endpoints still fall under the general
+    // /api limiter below and the links themselves expire in ~2 minutes.
+    skip: (req) => req.originalUrl.includes('/auth/link'),
   });
   app.use('/api/auth', authLimiter);
 

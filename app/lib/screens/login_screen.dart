@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
+import '../platform.dart';
 import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../theme.dart';
 import '../widgets/ping_logo.dart';
 import 'forgot_password_screen.dart';
+import 'link_device_screen.dart';
 import 'phone_verify_screen.dart';
 
 /// The entry screen. Two modes:
@@ -31,6 +36,16 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _register = true; // start on the registration form
   bool _busy = false;
   bool _showPassword = false;
+  // On the Windows desktop build the primary path is linking via QR; the
+  // password form is a fallback the user can switch to.
+  bool _useQrLink = isDesktopPlatform;
+
+  @override
+  void initState() {
+    super.initState();
+    // Desktop can't register (no SMS phone verification) — start on sign-in.
+    if (isDesktopPlatform) _register = false;
+  }
 
   @override
   void dispose() {
@@ -128,38 +143,61 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _modeToggle(scheme),
-                            const SizedBox(height: 22),
-                            if (_register)
-                              ..._registerFields()
-                            else
-                              ..._loginFields(),
-                            const SizedBox(height: 22),
-                            FilledButton(
-                              onPressed: _busy ? null : _submit,
-                              child: _busy
-                                  ? const SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2.4, color: Colors.white),
-                                    )
-                                  : Text(_register ? 'Konto erstellen' : 'Anmelden'),
+                      child: (isDesktopPlatform && _useQrLink)
+                          ? _DesktopLinkPanel(
+                              onUsePassword: () =>
+                                  setState(() => _useQrLink = false),
+                              onEditServer: _busy ? null : _editServer,
+                            )
+                          : Form(
+                              key: _formKey,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  // No registration on desktop — only the toggle
+                                  // on mobile, where phone verification works.
+                                  if (!isDesktopPlatform) ...[
+                                    _modeToggle(scheme),
+                                    const SizedBox(height: 22),
+                                  ],
+                                  if (_register)
+                                    ..._registerFields()
+                                  else
+                                    ..._loginFields(),
+                                  const SizedBox(height: 22),
+                                  FilledButton(
+                                    onPressed: _busy ? null : _submit,
+                                    child: _busy
+                                        ? const SizedBox(
+                                            width: 22,
+                                            height: 22,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2.4,
+                                                color: Colors.white),
+                                          )
+                                        : Text(_register
+                                            ? 'Konto erstellen'
+                                            : 'Anmelden'),
+                                  ),
+                                  if (isDesktopPlatform)
+                                    TextButton.icon(
+                                      onPressed: _busy
+                                          ? null
+                                          : () => setState(
+                                              () => _useQrLink = true),
+                                      icon: const Icon(
+                                          Icons.qr_code_rounded, size: 18),
+                                      label: const Text('Mit QR-Code verknüpfen'),
+                                    ),
+                                  const SizedBox(height: 4),
+                                  TextButton.icon(
+                                    onPressed: _busy ? null : _editServer,
+                                    icon: const Icon(Icons.dns_outlined, size: 18),
+                                    label: const Text('Server-Adresse'),
+                                  ),
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 4),
-                            TextButton.icon(
-                              onPressed: _busy ? null : _editServer,
-                              icon: const Icon(Icons.dns_outlined, size: 18),
-                              label: const Text('Server-Adresse'),
-                            ),
-                          ],
-                        ),
-                      ),
                     ),
                   ],
                 ),
@@ -406,5 +444,162 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     }
+  }
+}
+
+/// Desktop sign-in via a QR code, WhatsApp-Web style: we ask the server for a
+/// pending link, render its code as a QR for the phone to scan, and poll until
+/// the phone approves it — at which point [AppState.pollDeviceLink] signs us in
+/// and the root widget swaps to the home screen. Expired codes auto-refresh.
+class _DesktopLinkPanel extends StatefulWidget {
+  const _DesktopLinkPanel({required this.onUsePassword, this.onEditServer});
+
+  final VoidCallback onUsePassword;
+  final VoidCallback? onEditServer;
+
+  @override
+  State<_DesktopLinkPanel> createState() => _DesktopLinkPanelState();
+}
+
+class _DesktopLinkPanelState extends State<_DesktopLinkPanel> {
+  String? _code;
+  String? _linkId;
+  String? _pollSecret;
+  String? _error;
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    _begin();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _begin() async {
+    setState(() {
+      _error = null;
+      _code = null;
+    });
+    try {
+      final link = await context.read<AppState>().startDeviceLink();
+      if (!mounted) return;
+      setState(() {
+        _code = link['code'] as String?;
+        _linkId = link['linkId'] as String?;
+        _pollSecret = link['pollSecret'] as String?;
+      });
+      _poll?.cancel();
+      _poll = Timer.periodic(const Duration(seconds: 2), (_) => _tick());
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
+  Future<void> _tick() async {
+    final linkId = _linkId, secret = _pollSecret;
+    if (linkId == null || secret == null) return;
+    try {
+      // On success this signs us in; the root widget replaces this screen.
+      await context.read<AppState>().pollDeviceLink(linkId, secret);
+    } on ApiException {
+      // The code expired before anyone scanned it — start a fresh one.
+      _poll?.cancel();
+      if (mounted) _begin();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Mit dem Handy verknüpfen',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Öffne Ping auf deinem Handy → Einstellungen → „Ping für Windows" und '
+          'scanne diesen Code.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 20),
+        Center(child: _qr(scheme)),
+        const SizedBox(height: 20),
+        TextButton.icon(
+          onPressed: widget.onUsePassword,
+          icon: const Icon(Icons.password_rounded, size: 18),
+          label: const Text('Stattdessen mit Passwort anmelden'),
+        ),
+        if (widget.onEditServer != null)
+          TextButton.icon(
+            onPressed: widget.onEditServer,
+            icon: const Icon(Icons.dns_outlined, size: 18),
+            label: const Text('Server-Adresse'),
+          ),
+      ],
+    );
+  }
+
+  Widget _qr(ColorScheme scheme) {
+    const size = 220.0;
+    if (_error != null) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.wifi_off_rounded, color: scheme.error, size: 40),
+            const SizedBox(height: 12),
+            Text(_error!, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton.tonal(
+              onPressed: _begin,
+              child: const Text('Erneut versuchen'),
+            ),
+          ],
+        ),
+      );
+    }
+    final code = _code;
+    if (code == null) {
+      return const SizedBox(
+        width: size,
+        height: size,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    // QR codes scan most reliably on a white field, regardless of app theme.
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: QrImageView(
+        data: '$kLinkQrPrefix$code',
+        size: size,
+        backgroundColor: Colors.white,
+        eyeStyle: const QrEyeStyle(
+          eyeShape: QrEyeShape.square,
+          color: Colors.black,
+        ),
+        dataModuleStyle: const QrDataModuleStyle(
+          dataModuleShape: QrDataModuleShape.square,
+          color: Colors.black,
+        ),
+      ),
+    );
   }
 }

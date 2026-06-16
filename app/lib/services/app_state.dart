@@ -58,6 +58,11 @@ const serverLabel = 'Ping Cloud';
 String _resolveDefaultServer() {
   const override = String.fromEnvironment('PING_SERVER');
   if (override.isNotEmpty) return override;
+  // On the web build the app is served from the same origin as its API and
+  // WebSocket (e.g. https://example.invalid), so default to that
+  // origin — keeps everything same-origin (no CORS) and lets a self-hosted
+  // server "just work" without a build-time --dart-define.
+  if (kIsWeb) return Uri.base.origin;
   // Primary domain (example.invalid), packed as base64.
   const packed = 'aHR0cHM6Ly9waW5nLmJlbmphbWluYmVyZ2VyLmF0';
   try {
@@ -635,6 +640,42 @@ class AppState extends ChangeNotifier {
       'password': password,
     });
     await _handleAuthSuccess(res);
+  }
+
+  // ---- Desktop device linking (scan a QR like WhatsApp Web) ----------------
+
+  /// Desktop: start a link. Returns `{ linkId, pollSecret, code, expiresAt }`.
+  /// The `code` goes into the QR the signed-in phone scans.
+  Future<Map<String, dynamic>> startDeviceLink() async {
+    final res = await _api.post('/auth/link/start');
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Desktop: poll a pending link. When the phone has approved it, this signs
+  /// the desktop in (same path as a normal login) and returns true. Otherwise
+  /// returns false and the caller keeps polling. Throws on an expired link.
+  Future<bool> pollDeviceLink(String linkId, String pollSecret) async {
+    final res = await _api.get('/auth/link/poll', {
+      'linkId': linkId,
+      'secret': pollSecret,
+    });
+    final status = (res as Map)['status'];
+    if (status == 'approved') {
+      await _handleAuthSuccess(res);
+      return true;
+    }
+    if (status == 'expired') {
+      throw ApiException('Dieser QR-Code ist abgelaufen.');
+    }
+    return false;
+  }
+
+  /// Phone (signed in): approve a scanned QR code, handing the desktop a session.
+  Future<void> approveDeviceLink(String code, {String? deviceLabel}) async {
+    await _api.post('/auth/link/approve', {
+      'code': code,
+      if (deviceLabel != null && deviceLabel.isNotEmpty) 'deviceLabel': deviceLabel,
+    });
   }
 
   /// Forgot password: set a new password after proving phone ownership via the

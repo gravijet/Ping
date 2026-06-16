@@ -212,7 +212,26 @@ export function mountDownloads(app, publicDir) {
       filename: `ping-${info.version}.apk`,
       url: '/download',
       variants,
+      // The Windows desktop build (only present once WINDOWS_DOWNLOAD_URL is
+      // configured). The site renders a second "Für Windows" download card from
+      // this; the actual installer lives on a GitHub release.
+      windows: config.windowsDownloadUrl
+        ? { url: '/download/windows', version: config.windowsVersion || null }
+        : null,
     });
+  });
+
+  // Windows installer: a stable redirect to the GitHub-release .exe. Keeping the
+  // indirection here means the published URL on the site never changes even if
+  // the release host does.
+  app.get('/download/windows', (_req, res) => {
+    if (!config.windowsDownloadUrl) {
+      return res
+        .status(404)
+        .type('text/plain; charset=utf-8')
+        .send('Die Windows-Version ist noch nicht verfügbar.');
+    }
+    res.redirect(302, config.windowsDownloadUrl);
   });
 
   // The download itself, under several friendly URLs.

@@ -387,6 +387,16 @@ nav.site.scrolled { border-color: var(--line); }
 .dl-assure span { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
 .dl-assure svg { width: 15px; height: 15px; color: var(--accent); }
 
+/* The "3 steps to link Windows" list inside the desktop download card. */
+.dl-steps { margin: 22px 0 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 12px; }
+.dl-steps li { position: relative; padding-left: 38px; font-size: 14px; color: var(--muted); line-height: 1.5; }
+.dl-steps li b { color: var(--text); }
+.dl-steps li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: -1px;
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); }
+#dlWindows { margin-top: 22px; }
+
 /* Advanced disclosure: per-CPU builds + checksum, hidden from casual visitors. */
 .dl-tech { border-top: 1px solid var(--line); }
 .dl-tech > summary { cursor: pointer; list-style: none; padding: 18px 36px; display: flex; align-items: center; gap: 10px;

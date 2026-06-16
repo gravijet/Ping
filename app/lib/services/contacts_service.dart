@@ -1,5 +1,7 @@
 import 'package:flutter_contacts/flutter_contacts.dart';
 
+import '../platform.dart';
+
 /// A single device-address-book entry, reduced to just what we need to match it
 /// against Ping: a display name plus the raw phone numbers and emails on it.
 class LocalContact {
@@ -18,11 +20,16 @@ class LocalContact {
 /// locally — the actual matching happens on the server, which stores nothing.
 class ContactsService {
   /// Ask for (or confirm) permission to read contacts. Returns whether granted.
-  Future<bool> requestPermission() => FlutterContacts.requestPermission(readonly: true);
+  /// `flutter_contacts` has no desktop implementation, so the Windows build has
+  /// no address book to read — report "not granted" instead of crashing.
+  Future<bool> requestPermission() => isMobilePlatform
+      ? FlutterContacts.requestPermission(readonly: true)
+      : Future.value(false);
 
   /// Load all device contacts that carry at least one phone number or email.
   /// Skips entries with no reachable identifier — they can never match.
   Future<List<LocalContact>> loadContacts() async {
+    if (!isMobilePlatform) return const [];
     final raw = await FlutterContacts.getContacts(
       withProperties: true,
       withPhoto: false,

@@ -11,6 +11,7 @@ import {
   requireAdmin,
 } from './auth.js';
 import { config } from './config.js';
+import { createLink, approveLink, pollLink, cancelLink } from './linkRepo.js';
 import { normalizePhone } from './phone.js';
 import { verifyFirebaseIdToken } from './firebaseAuth.js';
 import { requestCode, verifyCode } from './otp.js';
@@ -27,6 +28,7 @@ import {
   parse,
   registerSchema,
   loginSchema,
+  linkApproveSchema,
   requestCodeSchema,
   verifyCodeSchema,
   resetPasswordSchema,
@@ -579,6 +581,86 @@ router.post(
       return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
     }
     res.json({ token: signToken(user), user: privateUser(user) });
+  })
+);
+
+// ---- Desktop device linking (scan a QR like WhatsApp Web) ------------------
+// The desktop app has no phone number of its own; instead it shows a QR that a
+// signed-in phone scans to hand it a session. See linkRepo.js for the security
+// model. These live under /auth so they share the stricter auth rate limiter.
+
+// Desktop: begin a link. Returns the public `code` (rendered into the QR) plus
+// the private linkId/pollSecret the desktop keeps to claim the token.
+router.post(
+  '/auth/link/start',
+  h(async (_req, res) => {
+    const link = createLink();
+    res.json({
+      linkId: link.linkId,
+      pollSecret: link.pollSecret,
+      code: link.code,
+      expiresAt: link.expiresAt,
+    });
+  })
+);
+
+// Desktop: poll for approval. Only the matching (linkId, pollSecret) pair can
+// read the minted token, and it can be claimed exactly once.
+router.get(
+  '/auth/link/poll',
+  h(async (req, res) => {
+    const linkId = typeof req.query.linkId === 'string' ? req.query.linkId : '';
+    const secret = typeof req.query.secret === 'string' ? req.query.secret : '';
+    const result = pollLink(linkId, secret);
+    if (result.status === 'approved') {
+      const user = getUserById(result.userId);
+      if (!user || user.disabled) {
+        return res.json({ status: 'expired' });
+      }
+      return res.json({
+        status: 'approved',
+        token: result.sessionToken,
+        user: privateUser(user),
+      });
+    }
+    res.json({ status: result.status });
+  })
+);
+
+// Phone (signed in): approve a scanned QR. Mints a real session token for the
+// approving user and attaches it to the pending link.
+router.post(
+  '/auth/link/approve',
+  requireAuth,
+  h(async (req, res) => {
+    const { code, deviceLabel } = parse(linkApproveSchema, req.body);
+    const result = approveLink(code, {
+      userId: req.user.id,
+      sessionToken: signToken(req.user),
+      deviceLabel,
+    });
+    if (result.error === 'expired') {
+      return res.status(410).json({
+        error: 'Dieser QR-Code ist abgelaufen. Erzeuge am PC einen neuen.',
+      });
+    }
+    if (result.error === 'used') {
+      return res
+        .status(409)
+        .json({ error: 'Dieser QR-Code wurde bereits verwendet.' });
+    }
+    res.json({ ok: true });
+  })
+);
+
+// Desktop: drop a pending link (QR screen closed before approval).
+router.post(
+  '/auth/link/cancel',
+  h(async (req, res) => {
+    const linkId = typeof req.body?.linkId === 'string' ? req.body.linkId : '';
+    const secret = typeof req.body?.pollSecret === 'string' ? req.body.pollSecret : '';
+    cancelLink(linkId, secret);
+    res.json({ ok: true });
   })
 );
 
