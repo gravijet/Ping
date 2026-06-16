@@ -10,8 +10,9 @@ build/
 .idea/
 local.properties
 
-# Published APK binaries are served from disk, not tracked in git.
+# Published APK + Windows installer binaries are served from disk, not tracked.
 server/public/downloads/*.apk
+server/public/downloads/*.exe
 
 # The published Flutter web build ("Ping Web") is a build artifact, served from
 # disk and produced by server/scripts/build-web.sh — not tracked in git.
