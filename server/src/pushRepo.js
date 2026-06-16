@@ -15,6 +15,9 @@ const s = {
   deleteToken: db.prepare('DELETE FROM push_tokens WHERE token = ?'),
   deleteUserToken: db.prepare('DELETE FROM push_tokens WHERE user_id = ? AND token = ?'),
   byUser: db.prepare('SELECT token FROM push_tokens WHERE user_id = ?'),
+  byUserDetailed: db.prepare(
+    'SELECT token, platform, created_at, updated_at FROM push_tokens WHERE user_id = ? ORDER BY updated_at DESC'
+  ),
   allTokens: db.prepare('SELECT token, user_id FROM push_tokens'),
 };
 
@@ -43,4 +46,19 @@ export function tokensForUsers(userIds) {
 
 export function allPushTokens() {
   return s.allTokens.all();
+}
+
+/**
+ * Registered devices for one user (admin view). The raw token is never exposed;
+ * we return a short fingerprint so a specific device can still be identified and
+ * revoked without leaking the push credential.
+ */
+export function devicesForUser(userId) {
+  return s.byUserDetailed.all(userId).map((r) => ({
+    token: r.token,
+    fingerprint: r.token.slice(-8),
+    platform: r.platform,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
 }

@@ -297,15 +297,15 @@
     <div class="wrap">
       <section class="hero">
         <div>
-          <div class="status-line"><span class="led" id="heroLed"></span><span id="heroState">Server online · jetzt verfügbar</span></div>
-          <h1 class="display reveal in">Chatten,<br>wie es <span class="accent-text">sein soll.</span></h1>
-          <p class="lead reveal in">Ping ist ein blitzschneller, moderner Messenger — Echtzeit-Chats, Gruppen, Status,
-            Reaktionen, Sticker und Sprachnachrichten. Auf Android und Windows, am PC per QR-Code angemeldet.
-            Keine Werbung, kein Tracking, kein Schnickschnack.</p>
+          <div class="status-line"><span class="led" id="heroLed"></span><span id="heroState">Alle Systeme online</span></div>
+          <h1 class="display reveal in">Messaging,<br>das dir <span class="accent-text">gehört.</span></h1>
+          <p class="lead reveal in">Ping ist ein moderner Messenger für Android, Windows und den Browser:
+            Einzel- und Gruppenchats in Echtzeit, Status, Sprachnachrichten und mehr.
+            Werbefrei, ohne Tracking und mit so wenig gespeicherten Daten wie möglich.</p>
           <div class="cta reveal in">
             <a class="btn big" href="/download">${P.icon('download')}Für Android laden</a>
             <a class="btn ghost big" href="https://example.invalid">${P.icon('monitor')}Im Browser öffnen</a>
-            <a class="btn ghost big" href="/#how">So funktioniert's ${P.icon('arrowRight')}</a>
+            <a class="btn ghost big" href="/#features">Funktionen ansehen ${P.icon('arrowRight')}</a>
           </div>
           <div class="specs reveal in">
             <div class="spec"><span class="v" id="specVer">v…</span><span class="k">Aktuelle Version</span></div>
@@ -334,15 +334,15 @@
         <div class="cell"><div class="n">0 €</div><div class="k">Für immer kostenlos</div></div>
       </div>
       <div class="trust reveal">
-        ${[['bolt', 'Echtzeit-WebSocket'], ['bell', 'Push-Benachrichtigungen'], ['palette', '14+ Themes'], ['lock', 'Privat by default'], ['shield', 'Keine Werbung']]
+        ${[['bolt', 'Nachrichten in Echtzeit'], ['bell', 'Push-Benachrichtigungen'], ['palette', 'Viele Designs'], ['lock', 'Datensparsam'], ['shield', 'Werbefrei']]
           .map(([ic, t]) => `<span class="chip">${P.icon(ic)}${t}</span>`).join('')}
       </div>
 
       <section class="section" id="features">
         <div class="section-head reveal">
           <span class="kicker"><span class="idx">01</span> Funktionen</span>
-          <h2 class="h2">Alles drin. Nichts zu viel.</h2>
-          <p class="lead">Ein vollwertiger Messenger — durchdacht, schnell und schön. Jede Funktion ist da, weil sie etwas besser macht.</p>
+          <h2 class="h2">Alles, was guter Messenger braucht.</h2>
+          <p class="lead">Vom ersten „Hallo“ bis zur Gruppenplanung: Ping bringt die Funktionen mit, die du täglich nutzt — übersichtlich und ohne Ballast.</p>
         </div>
         <div class="feat-grid reveal">
           ${[
@@ -359,30 +359,45 @@
         </div>
       </section>
 
+      <section class="section" id="principles">
+        <div class="section-head reveal">
+          <span class="kicker"><span class="idx">02</span> Haltung</span>
+          <h2 class="h2">Worauf es uns ankommt.</h2>
+          <p class="lead">Ping ist ein unabhängiges Projekt aus Österreich. Diese Grundsätze stehen über jeder einzelnen Funktion.</p>
+        </div>
+        <div class="principles reveal">
+          ${[
+            ['lock', 'Datensparsam', 'Wir verarbeiten nur, was der Dienst wirklich braucht. Dein Adressbuch bleibt auf deinem Gerät, gefunden wirst du ausschließlich über deine Telefonnummer.'],
+            ['shield', 'Werbe- & trackingfrei', 'Keine Werbung, keine Werbe-Tracker, kein Verkauf deiner Daten an Dritte. Ping finanziert sich nicht über deine Aufmerksamkeit.'],
+            ['sparkles', 'Offen & ehrlich', 'Wir sagen klar, welche Daten wofür anfallen. Was sich ändert, steht im Changelog — keine versteckten Funktionen, keine Überraschungen.'],
+          ].map(([ic, t, d]) => `<div class="principle"><div class="ic">${P.icon(ic)}</div><div><h3>${t}</h3><p>${d}</p></div></div>`).join('')}
+        </div>
+      </section>
+
       <section class="section" id="how">
         <div class="section-head reveal">
-          <span class="kicker"><span class="idx">02</span> Installation</span>
-          <h2 class="h2">In 30 Sekunden startklar.</h2>
-          <p class="lead">Ping kommt als APK direkt von hier — keine App-Store-Wartezeit, keine Plattform-Gebühren.</p>
+          <span class="kicker"><span class="idx">03</span> Installation</span>
+          <h2 class="h2">In einer Minute startklar.</h2>
+          <p class="lead">Ping kommt direkt von hier — du brauchst kein zusätzliches Konto bei einem App-Store und keine Wartezeit auf Freigaben.</p>
         </div>
         <div class="steps reveal">
-          <div class="step"><div class="num">01</div><h4>APK laden</h4><p>Tippe auf „Für Android laden“ — die neueste Version kommt direkt von hier.</p></div>
-          <div class="step"><div class="num">02</div><h4>Installation erlauben</h4><p>Android fragt einmalig nach „Unbekannte Quellen“ — zustimmen.</p></div>
-          <div class="step"><div class="num">03</div><h4>Loslegen</h4><p>Öffne Ping, registriere dich mit deiner Handynummer und chatte los.</p></div>
+          <div class="step"><div class="num">01</div><h4>Herunterladen</h4><p>Tippe auf „Für Android laden“. Die Installationsdatei kommt direkt und immer aktuell von uns.</p></div>
+          <div class="step"><div class="num">02</div><h4>Installation bestätigen</h4><p>Dein Gerät fragt einmalig nach der Erlaubnis zur Installation — kurz bestätigen, fertig.</p></div>
+          <div class="step"><div class="num">03</div><h4>Loslegen</h4><p>Öffne Ping, melde dich mit deiner Handynummer an und schreib deiner ersten Person.</p></div>
         </div>
       </section>
 
       <section class="section" id="download">
-        <div class="section-head reveal"><span class="kicker"><span class="idx">03</span> Download</span>
+        <div class="section-head reveal"><span class="kicker"><span class="idx">04</span> Download</span>
           <h2 class="h2">Hol dir Ping.</h2>
-          <p class="lead">Direkt für Android — und jetzt auch für Windows. Kostenlos, werbefrei und ohne Konto-Zwang. Ein Tipp genügt, die passende Version wählen wir automatisch.</p></div>
+          <p class="lead">Für Android, Windows und den Browser. Kostenlos, werbefrei und ohne Konto-Zwang — die passende Version wählen wir automatisch für dich.</p></div>
         <div class="dl-card reveal">
           <div class="dl-top">
             <div>
               <h2 id="dlTitle">Ping für Android</h2>
               <p class="lead" style="margin-bottom:22px">Am Handy? Tippe auf „Herunterladen“ und folge der kurzen Anleitung. Am Computer? Öffne diese Seite einfach auf deinem Handy.</p>
               <a class="btn big" href="/download">${P.icon('download')}Herunterladen</a>
-              <div class="dl-assure">${[['shield', 'Auf Viren geprüft'], ['lock', 'Ohne Konto-Zwang'], ['refresh', 'Updates direkt in der App']]
+              <div class="dl-assure">${[['shield', 'Auf Schadsoftware geprüft'], ['lock', 'Ohne Konto-Zwang'], ['refresh', 'Updates direkt in der App']]
                 .map(([ic, t]) => `<span>${P.icon(ic)}${t}</span>`).join('')}</div>
             </div>
             <div class="dl-meta" id="dlMeta">
@@ -392,14 +407,6 @@
               <div class="kv"><span>Preis</span><b>Kostenlos</b></div>
             </div>
           </div>
-          <details class="dl-tech" id="dlTech">
-            <summary>${P.icon('sparkles')}Erweiterte Optionen &amp; Prüfsumme</summary>
-            <div class="dl-tech-in">
-              <p class="muted" style="font-size:13.5px;margin:0 0 14px">Brauchst du eine kleinere, auf deinen Prozessor zugeschnittene Datei? Wähle hier. Im Zweifel reicht der normale Download oben — er läuft auf jedem Android-Gerät.</p>
-              <div class="variants" id="dlVariants"></div>
-              <div class="dl-checksum" id="dlChecksum"></div>
-            </div>
-          </details>
         </div>
         <div class="dl-card reveal" id="dlWindows" style="display:none">
           <div class="dl-top">
@@ -427,7 +434,7 @@
 
       <section class="section" id="newsroom">
         <div class="teaser-head">
-          <div><span class="kicker reveal"><span class="idx">04</span> Newsroom</span><h2 class="h2 reveal" style="margin-top:12px">Frisch aus dem Team</h2></div>
+          <div><span class="kicker reveal"><span class="idx">05</span> Newsroom</span><h2 class="h2 reveal" style="margin-top:12px">Frisch aus dem Team</h2></div>
           <a class="more-link reveal" href="/news">Alle Neuigkeiten →</a>
         </div>
         <div class="tgrid" id="newsTeaser">${skel('tcard', 3, 160)}</div>
@@ -435,26 +442,25 @@
 
       <section class="section" id="changelog-teaser">
         <div class="teaser-head">
-          <div><span class="kicker reveal"><span class="idx">05</span> Changelog</span><h2 class="h2 reveal" style="margin-top:12px">Zuletzt verbessert</h2></div>
+          <div><span class="kicker reveal"><span class="idx">06</span> Changelog</span><h2 class="h2 reveal" style="margin-top:12px">Zuletzt verbessert</h2></div>
           <a class="more-link reveal" href="/changelog">Vollständiger Changelog →</a>
         </div>
         <div class="card reveal" id="logTeaser" style="padding:6px 24px">${skel('', 3, 56)}</div>
       </section>
 
       <section class="section" id="faq">
-        <div class="section-head reveal"><span class="kicker"><span class="idx">06</span> FAQ</span>
-          <h2 class="h2">Häufige Fragen</h2><p class="lead">Alles, was du vor dem Loslegen wissen musst.</p></div>
+        <div class="section-head reveal"><span class="kicker"><span class="idx">07</span> FAQ</span>
+          <h2 class="h2">Häufige Fragen</h2><p class="lead">Das Wichtigste auf einen Blick. Findest du deine Frage nicht, schreib uns einfach.</p></div>
         <div class="faq reveal">
           ${[
-            ['Ist Ping kostenlos?', 'Ja. Ping ist komplett kostenlos, werbefrei und ohne versteckte Käufe.'],
-            ['Warum kommt die App als APK und nicht aus dem Play Store?', 'Die Veröffentlichung im Play Store ist mit Gebühren und Provisionen an Google verbunden. Damit Ping für dich kostenfrei und ohne Plattform-Gebühren bleibt, vertreiben wir die App direkt als APK. Updates kommen so sofort und direkt von uns.'],
-            ['Bekomme ich automatisch Updates?', 'Ja. Sobald eine neue Version verfügbar ist, bietet die App das Update direkt an und installiert es auf Wunsch mit einem Tipp.'],
-            ['Android sagt „App nicht installiert" beim Update — was tun?', 'Das kann beim Umstieg auf eine neu signierte Version einmalig vorkommen. Deinstalliere die alte App einfach einmal und installiere die neue über den Download-Button. Danach laufen alle weiteren Updates wieder automatisch und mit einem Tipp.'],
-            ['Wie privat ist Ping?', 'Du wirst nur über deine Telefonnummer gefunden — nie über Namens- oder E-Mail-Suche. Dein Adressbuch bleibt auf deinem Gerät und wird nie gespeichert.'],
-            ['Welche Android-Version brauche ich?', 'Android 6.0 oder neuer. Die App ist schlank und läuft auch auf älteren Geräten flüssig.'],
-            ['Wie melde ich mich auf dem Windows-PC an?', 'Wie bei WhatsApp Desktop: Installiere Ping für Windows, öffne die Handy-App unter Einstellungen → „Ping für Windows“ und scanne den am PC angezeigten QR-Code. Dein PC ist danach mit deinem Konto verbunden — ohne separates Passwort.'],
-            ['Brauche ich für Windows ein eigenes Konto?', 'Nein. Die Windows-App nutzt dein bestehendes Ping-Konto vom Handy. Die Anmeldung läuft komplett über den QR-Code, deine Chats sind sofort da.'],
-            ['Unter welcher Adresse läuft Ping?', 'Ping läuft unter <b>example.invalid</b>.'],
+            ['Was kostet Ping?', 'Nichts. Ping ist kostenlos, werbefrei und ohne versteckte Käufe. Es ist ein privates Projekt, kein kommerzieller Dienst.'],
+            ['Wie geht Ping mit meinen Daten um?', 'So sparsam wie möglich. Wir speichern nur, was für den Betrieb nötig ist. Gefunden wirst du ausschließlich über deine Telefonnummer — nie über eine Namens- oder E-Mail-Suche. Dein Adressbuch bleibt auf deinem Gerät. Details findest du in der <a href="/legal#datenschutz">Datenschutzerklärung</a>.'],
+            ['Auf welchen Geräten läuft Ping?', 'Auf Android (Version 6.0 oder neuer), auf Windows (10 und neuer) sowie im Browser. Deine Chats bleiben auf allen Geräten synchron.'],
+            ['Bekomme ich automatisch Updates?', 'Ja. Sobald eine neue Version verfügbar ist, weist dich die App darauf hin und installiert sie auf Wunsch mit einem Tipp.'],
+            ['Warum lädt man Ping direkt hier und nicht im App-Store?', 'So bekommst du Updates ohne Umweg direkt von uns und Ping bleibt frei von Plattform-Gebühren. Die Installationsdatei wird vor jeder Veröffentlichung auf Schadsoftware geprüft.'],
+            ['Wie melde ich mich am Computer an?', 'Installiere Ping für Windows oder öffne die Web-Version, öffne die Handy-App unter Einstellungen → „Ping für Windows/Web“ und scanne den angezeigten QR-Code. Dein Konto ist sofort verbunden — ganz ohne zusätzliches Passwort.'],
+            ['Kann ich mein Konto und meine Daten löschen?', 'Jederzeit. In der App kannst du dein Konto mit allen Daten selbst löschen und deine Inhalte vorher exportieren. Status-Updates verschwinden ohnehin automatisch nach 24 Stunden.'],
+            ['Wer steckt hinter Ping?', 'Ping wird privat von Benjamin Berger in Österreich entwickelt und betrieben. Kontakt: <a href="mailto:user@example.invalid">user@example.invalid</a>.'],
           ].map(([q, a]) => `<details><summary>${q}</summary><div class="ans">${a}</div></details>`).join('')}
         </div>
       </section>
@@ -473,6 +479,13 @@
     loadBuild();
     loadStats();
     loadTeasers();
+    // Live server health in the hero status line — keeps the claim honest.
+    fetch('/health').then((r) => (r.ok ? r.json() : null)).then((d) => {
+      const led = document.getElementById('heroLed'), st = document.getElementById('heroState');
+      const ok = !!(d && d.ok);
+      if (led) led.style.background = ok ? '' : 'var(--warn, #f5a623)';
+      if (st) st.textContent = ok ? 'Alle Systeme online' : 'Eingeschränkter Betrieb';
+    }).catch(() => { const st = document.getElementById('heroState'); if (st) st.textContent = 'Status wird geprüft …'; });
     // If we arrived on /#hash, scroll there.
     if (location.hash) scrollToHash(location.hash);
   }
@@ -483,41 +496,12 @@
     return out;
   }
 
-  // Friendly, non-technical names for the per-CPU build splits. Most visitors
-  // never need these — the default download works everywhere — so the raw ABI
-  // codes stay tucked away behind the "advanced" disclosure.
-  const ABI_INFO = {
-    'arm64-v8a': { name: 'Moderne Geräte', note: 'Die meisten Handys ab 2017 (64-Bit)', rec: true },
-    'armeabi-v7a': { name: 'Ältere Geräte', note: 'Sehr alte oder günstige Handys (32-Bit)' },
-    'x86_64': { name: 'Emulator & Intel', note: 'Android-Emulatoren und Intel-Tablets' },
-  };
   function loadBuild() {
     fetch('/download/info').then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (!d) return;
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
       set('specVer', 'v' + d.version); set('specSize', P.human(d.size));
       set('dlVer', 'v' + d.version); set('dlSize', P.human(d.size));
-      const vbox = document.getElementById('dlVariants');
-      if (vbox) {
-        const order = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
-        const vs = Object.entries(d.variants || {})
-          .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-        vbox.innerHTML = vs.length
-          ? vs.map(([abi, v]) => {
-              const info = ABI_INFO[abi] || { name: abi, note: '' };
-              return `<a class="variant${info.rec ? ' rec' : ''}" href="${P.esc(v.url)}">
-                <div><div class="abi">${P.esc(info.name)}${info.rec ? '<span class="rec-tag">Empfohlen</span>' : ''}</div>
-                <div class="sz">${P.esc(info.note)} · ${P.human(v.size)}</div></div>${P.icon('download')}</a>`;
-            }).join('')
-          : `<div class="muted" style="font-size:13.5px">Aktuell ist nur die universelle Version verfügbar — sie läuft auf jedem Gerät.</div>`;
-      }
-      const cs = document.getElementById('dlChecksum');
-      if (cs) {
-        cs.innerHTML = `<div class="kv"><span>Build</span><b>${P.esc(d.build || d.version)}</b></div>
-          <div class="kv"><span>SHA-256 (zum Prüfen)</span><b class="hash" id="dlHash" title="Zum Kopieren tippen">${d.sha256 ? P.esc(d.sha256.slice(0, 24)) + '…' : '—'}</b></div>`;
-        const hash = document.getElementById('dlHash');
-        if (hash && d.sha256) hash.onclick = () => P.copy(d.sha256, 'Prüfsumme kopiert.');
-      }
       // Reveal the Windows card only once a desktop build is published
       // (WINDOWS_DOWNLOAD_URL is set on the server).
       const win = document.getElementById('dlWindows');
@@ -739,25 +723,109 @@
     view().innerHTML = `<div class="wrap"><div class="legal">
       <div class="page-head reveal" style="padding-bottom:18px"><span class="kicker">Rechtliches</span>
         <h1 class="h1">Impressum & Datenschutz</h1>
-        <p>Transparenz, wie es sich gehört. Wer Ping betreibt — und wie wir mit deinen Daten umgehen.</p></div>
-      <div class="toc reveal"><a href="/legal#impressum">Impressum</a><a href="/legal#datenschutz">Datenschutz</a><a href="/legal#kontakt">Kontakt</a></div>
+        <p>Wer Ping betreibt und wie wir mit deinen Daten umgehen — klar und vollständig erklärt.</p></div>
+      <div class="toc reveal">
+        <a href="/legal#impressum">Impressum</a><a href="/legal#datenschutz">Datenschutz</a>
+        <a href="/legal#rechte">Deine Rechte</a><a href="/legal#kontakt">Kontakt</a></div>
+
       <h2 id="impressum" class="reveal">Impressum</h2>
-      <div class="card reveal"><h3>Angaben gemäß § 5 ECG / § 25 MedienG</h3>
-        <p>Benjamin Berger<br>example.invalid<br>Österreich</p>
-        <h3>Kontakt</h3><p>E-Mail: <a href="mailto:user@example.invalid">user@example.invalid</a></p>
-        <h3>Verantwortlich für den Inhalt</h3><p>Benjamin Berger</p></div>
+      <div class="card reveal">
+        <h3>Angaben gemäß § 5 ECG und § 25 MedienG</h3>
+        <p>Ping ist ein privates, nicht-kommerzielles Projekt ohne Gewinnabsicht.</p>
+        <p><strong>Medieninhaber, Herausgeber &amp; Betreiber:</strong><br>
+          Benjamin Berger (Privatperson)<br>Österreich</p>
+        <h3>Kontakt</h3>
+        <p>E-Mail: <a href="mailto:user@example.invalid">user@example.invalid</a><br>
+          Web: example.invalid</p>
+        <p class="muted" style="font-size:13.5px">Da Ping privat und ohne Gewerbe betrieben wird, erfolgt der Kontakt
+          per E-Mail. Eine ladungsfähige Anschrift wird auf berechtigte rechtliche Anfrage bekannt gegeben.</p>
+        <h3>Für den Inhalt verantwortlich</h3><p>Benjamin Berger</p>
+        <h3>Online-Streitbeilegung</h3>
+        <p class="muted" style="font-size:13.5px">Es besteht keine Verpflichtung und keine Bereitschaft zur Teilnahme an einem
+          Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle.</p>
+      </div>
+
       <h2 id="datenschutz" class="reveal">Datenschutzerklärung</h2>
       <div class="card reveal">
-        <h3>Überblick</h3><p>Ping ist ein Messenger, der bewusst datensparsam ist. Wir verarbeiten nur, was für den Betrieb des Dienstes nötig ist. Es gibt keine Werbung und kein Tracking durch Dritte.</p>
-        <h3>Welche Daten wir verarbeiten</h3>
-        <ul><li><strong>Kontodaten:</strong> Telefonnummer (zur Anmeldung & zum Finden von Kontakten), E-Mail-Adresse, Anzeigename und ein gehashtes Passwort.</li>
-          <li><strong>Nachrichten & Medien:</strong> Inhalte, die du sendest, werden zur Zustellung gespeichert. Im Modus „lokale Speicherung“ werden gelesene Nachrichten serverseitig gelöscht.</li>
-          <li><strong>Technische Daten:</strong> IP-Adresse und Zeitstempel zur Abwehr von Missbrauch sowie ein optionales Push-Token für Benachrichtigungen.</li></ul>
-        <h3>Kontakte</h3><p>Der Kontaktabgleich findet ausschließlich im Arbeitsspeicher statt. Dein Adressbuch wird niemals dauerhaft gespeichert. Gefunden wirst du nur über deine Telefonnummer — nie über Namens- oder E-Mail-Suche.</p>
-        <h3>Push-Benachrichtigungen</h3><p>Für Push setzen wir Firebase Cloud Messaging (Google) ein. Dabei wird ein Gerätetoken an Google übertragen, um Benachrichtigungen zuzustellen.</p>
-        <h3>Speicherdauer & Löschung</h3><p>Du kannst dein Konto jederzeit in der App löschen. Damit werden deine Daten entfernt. Status-Updates verschwinden automatisch nach 24 Stunden.</p>
-        <h3>Deine Rechte</h3><p>Du hast das Recht auf Auskunft, Berichtigung, Löschung und Datenübertragbarkeit (DSGVO). In der App kannst du deine Daten unter „Backup & Export“ jederzeit selbst exportieren.</p>
-        <h3 id="kontakt">Kontakt für Datenschutz</h3><p>Bei Fragen erreichst du uns unter <a href="mailto:user@example.invalid">user@example.invalid</a>.</p></div>
+        <h3>1. Verantwortlicher</h3>
+        <p>Verantwortlich für die Datenverarbeitung im Sinne der Datenschutz-Grundverordnung (DSGVO) ist
+          Benjamin Berger, erreichbar unter <a href="mailto:user@example.invalid">user@example.invalid</a>.</p>
+
+        <h3>2. Unser Grundsatz</h3>
+        <p>Ping ist bewusst datensparsam. Wir verarbeiten nur Daten, die für den Betrieb des Messengers nötig sind.
+          Es gibt keine Werbung, kein Werbe-Tracking und keinen Verkauf von Daten an Dritte.</p>
+
+        <h3>3. Welche Daten wir verarbeiten — und auf welcher Grundlage</h3>
+        <ul>
+          <li><strong>Kontodaten</strong> (Telefonnummer, E-Mail-Adresse, Anzeigename, gehashtes Passwort, optionales
+            Profilbild): zur Bereitstellung deines Kontos. Rechtsgrundlage: Vertragserfüllung, Art. 6 Abs. 1 lit. b DSGVO.</li>
+          <li><strong>Nachrichten &amp; Medien</strong>: werden gespeichert, um sie an deine Empfänger zuzustellen.
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO. Im Modus „lokale Speicherung“ werden gelesene Nachrichten
+            serverseitig wieder gelöscht.</li>
+          <li><strong>Status-Updates</strong>: werden 24 Stunden lang angezeigt und danach automatisch gelöscht.
+            Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO.</li>
+          <li><strong>Telefon-Verifizierung</strong> (einmaliger SMS-Code): zur Bestätigung deiner Nummer und zum Schutz
+            vor Missbrauch. Rechtsgrundlage: Art. 6 Abs. 1 lit. b und lit. f DSGVO.</li>
+          <li><strong>Technische Daten</strong> (IP-Adresse, Zeitstempel, Server-Protokolle): zum sicheren Betrieb und
+            zur Abwehr von Missbrauch. Rechtsgrundlage: berechtigtes Interesse, Art. 6 Abs. 1 lit. f DSGVO.</li>
+          <li><strong>Push-Token</strong> für Benachrichtigungen: nur, wenn du Benachrichtigungen aktivierst.
+            Rechtsgrundlage: Einwilligung bzw. Vertragserfüllung, Art. 6 Abs. 1 lit. a/b DSGVO.</li>
+        </ul>
+
+        <h3>4. Kontakte</h3>
+        <p>Der Abgleich deiner Kontakte findet ausschließlich flüchtig im Arbeitsspeicher statt. Dein Adressbuch wird
+          niemals dauerhaft gespeichert. Gefunden wirst du nur über deine Telefonnummer — nie über eine Namens- oder
+          E-Mail-Suche.</p>
+
+        <h3>5. Empfänger &amp; Auftragsverarbeiter</h3>
+        <p>Zur Erbringung des Dienstes setzen wir sorgfältig ausgewählte Dienstleister ein:</p>
+        <ul>
+          <li><strong>Google Firebase Cloud Messaging</strong> (Google Ireland Ltd.): zustellen von Push-Benachrichtigungen.
+            Dabei wird ein Gerätetoken übermittelt.</li>
+          <li><strong>Cloudflare</strong>: Bereitstellung, Sicherheit und Beschleunigung der Verbindung. Dabei werden
+            Verbindungsdaten (u. a. IP-Adresse) verarbeitet.</li>
+          <li><strong>SMS-Dienstleister</strong>: Versand des einmaligen Verifizierungscodes an deine Telefonnummer
+            (sofern dieser Versand aktiviert ist).</li>
+        </ul>
+        <p class="muted" style="font-size:13.5px">Bei diesen Diensten kann eine Übermittlung in Drittländer (z. B. USA)
+          stattfinden. Sie ist durch geeignete Garantien wie EU-Standardvertragsklauseln bzw. das EU-US Data Privacy
+          Framework abgesichert.</p>
+
+        <h3>6. Speicherdauer &amp; Löschung</h3>
+        <p>Kontodaten und Inhalte speichern wir, solange dein Konto besteht. Du kannst dein Konto jederzeit in der App
+          löschen — damit werden deine zugehörigen Daten entfernt. Status-Updates werden nach 24 Stunden automatisch
+          gelöscht, technische Protokolle nur kurz aufbewahrt.</p>
+
+        <h3>7. Datensicherheit</h3>
+        <p>Die Verbindung zwischen App und Server ist per TLS (HTTPS) verschlüsselt. Passwörter werden ausschließlich als
+          sicherer Hash gespeichert, niemals im Klartext. Bitte beachte: Nachrichten werden zur Zustellung auf dem Server
+          gespeichert und sind nicht Ende-zu-Ende-verschlüsselt.</p>
+
+        <h3>8. Keine automatisierte Entscheidungsfindung</h3>
+        <p>Es findet keine automatisierte Entscheidungsfindung oder Profilbildung im Sinne des Art. 22 DSGVO statt.</p>
+
+        <h3 id="rechte">9. Deine Rechte</h3>
+        <p>Du hast jederzeit das Recht auf Auskunft (Art. 15), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung
+          der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und Widerspruch (Art. 21). Eine erteilte Einwilligung
+          kannst du jederzeit mit Wirkung für die Zukunft widerrufen. In der App kannst du deine Daten unter
+          „Backup &amp; Export“ selbst exportieren und dein Konto vollständig löschen.</p>
+        <p>Du hast außerdem das Recht auf Beschwerde bei der Aufsichtsbehörde:<br>
+          <strong>Österreichische Datenschutzbehörde</strong>, Barichgasse 40–42, 1030 Wien,
+          <a href="https://www.dsb.gv.at" target="_blank" rel="noopener">dsb.gv.at</a>.</p>
+
+        <h3>10. Diese Website</h3>
+        <p>Diese Website verwendet keine Werbe- oder Analyse-Cookies und kein Tracking. Lediglich eine technisch
+          notwendige Einstellung (dein gewähltes Design hell/dunkel) wird lokal in deinem Browser gespeichert. Beim Abruf
+          der Seite fallen serverseitig übliche Zugriffsdaten (u. a. IP-Adresse) zur Auslieferung und Sicherheit an.</p>
+
+        <h3 id="kontakt">11. Kontakt</h3>
+        <p>Bei Fragen zum Datenschutz erreichst du uns unter
+          <a href="mailto:user@example.invalid">user@example.invalid</a>.</p>
+
+        <h3>12. Änderungen</h3>
+        <p>Wir passen diese Erklärung an, wenn sich der Dienst oder die Rechtslage ändert. Es gilt jeweils die hier
+          veröffentlichte Fassung.</p>
+      </div>
       <p class="muted mono" style="font-size:12.5px">Stand: ${P.fmtDate(Date.now())}</p>
     </div></div>`;
     if (location.hash) scrollToHash(location.hash);

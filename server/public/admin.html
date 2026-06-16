@@ -339,6 +339,17 @@
         </div>
       </section>
 
+      <!-- STATUS MODERATION -->
+      <section data-pane="status" class="hidden">
+        <div class="topbar"><div><h2>Status-Moderation</h2><div class="sub">Alle aktiven Status ansehen und bei Bedarf entfernen</div></div>
+          <button class="ico" data-reload="status" title="Aktualisieren"></button></div>
+        <div class="card">
+          <div class="toolbar"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input id="statusQ" placeholder="Nach Autor oder Text suchen …" /></label></div>
+          <div class="scroll"><table><thead><tr><th>Autor</th><th>Typ</th><th>Inhalt</th><th>Aufrufe</th><th>Gepostet</th><th>Läuft ab</th><th></th></tr></thead><tbody id="statusRows"></tbody></table></div>
+          <p id="statusEmpty" class="empty hidden">Gerade sind keine Status aktiv.</p>
+        </div>
+      </section>
+
       <!-- BROADCAST -->
       <section data-pane="broadcast" class="hidden">
         <div class="topbar"><div><h2>Durchsagen</h2><div class="sub">An alle senden — live & als Push, auch wenn die App zu ist</div></div>
@@ -350,7 +361,11 @@
               <div><label>Beim Antippen öffnen</label><select id="b_route"></select></div></div>
             <label>Nachricht <span class="ccount" id="b_count">0</span></label>
             <textarea id="b_body" maxlength="2000" placeholder="z. B. Neue Datenschutz-Einstellungen verfügbar."></textarea>
-            <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="broadcastBtn">An alle senden</button></div>
+            <div class="grid2" style="margin-top:10px;align-items:end">
+              <div><label style="margin-top:0">Später senden (optional)</label><input id="b_when" type="datetime-local" /></div>
+              <div style="display:flex;justify-content:flex-end"><button class="btn" id="broadcastBtn">An alle senden</button></div>
+            </div>
+            <p class="hint" id="b_hint" style="margin-top:6px">Leer = sofort senden. Mit Zeitpunkt wird die Durchsage geplant.</p>
           </div>
           <div class="card" style="margin-top:0">
             <h3>Private Nachricht an alle</h3>
@@ -369,6 +384,11 @@
             <div><label>Hintergrundfarbe (nur Text)</label><input id="st_color" type="color" value="#4d9bff" style="height:44px;padding:4px" /></div>
           </div>
           <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn" id="statusBtn">Status posten</button></div>
+        </div>
+        <div class="card">
+          <h3>Geplante Durchsagen</h3>
+          <div class="scroll"><table><thead><tr><th>Geplant für</th><th>Titel</th><th>Nachricht</th><th></th></tr></thead><tbody id="schedRows"></tbody></table></div>
+          <p id="schedEmpty" class="empty hidden">Keine geplanten Durchsagen.</p>
         </div>
         <div class="card">
           <h3>Verlauf</h3>
@@ -421,6 +441,13 @@
       <section data-pane="config" class="hidden">
         <div class="topbar"><div><h2>Konfiguration</h2><div class="sub">Feature-Flags, Limits & Banner — wirkt sofort, ohne App-Update</div></div>
           <button class="ico" data-reload="config" title="Aktualisieren"></button></div>
+        <div class="card" id="maintCard">
+          <div class="ch"><h3>Wartungsmodus</h3>
+            <label class="switch" style="color:var(--text)"><input type="checkbox" id="cfg_maint_active"> Aktiv</label></div>
+          <p class="hint" style="margin-top:0;margin-bottom:10px">Ist der Wartungsmodus aktiv, sehen alle Nutzer in der App einen Wartungs-Hinweis. Gilt sofort nach „Speichern“.</p>
+          <label>Hinweistext (optional)</label>
+          <input id="cfg_maint_msg" maxlength="300" placeholder="z. B. Kurze Wartung — wir sind gleich wieder da." />
+        </div>
         <div class="card">
           <div class="ch"><h3>Feature-Flags</h3><button class="btn sec sm" id="addFlagBtn">+ Flag</button></div>
           <div id="cfgFlags" class="grid2"></div>
@@ -487,6 +514,10 @@
       overview: 'M3 13h8V3H3v10ZM13 21h8V3h-8v18ZM3 21h8v-6H3v6Z',
       users: 'M16 19a4 4 0 0 0-8 0M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
       moderation: 'M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z',
+      status: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.5 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0Z',
+      devices: 'M5 4h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM8 20h8M12 15v5',
+      clock: 'M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM12 10v4l2.5 1.5',
+      wrench: 'M14.7 6.3a4 4 0 0 1-5.2 5.2L4 17v3h3l5.5-5.5a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.6-.7-.7-2.6 2.4-2.5Z',
       broadcast: 'M3 11v2l14 5V6L3 11ZM17 9a3 3 0 0 1 0 6',
       content: 'M4 5h16M4 5v14M4 19h16M20 5v14M8 9h8M8 13h6',
       config: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L16 3h-4l-.8 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1L12 21h4',
@@ -500,8 +531,8 @@
     const svg = (d, w) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w||1.7}" stroke-linecap="round" stroke-linejoin="round">${d.split('M').filter(Boolean).map((p)=>`<path d="M${p.trim()}"/>`).join('')}</svg>`;
 
     const TABS = [
-      ['overview', 'Übersicht'], ['users', 'Nutzer'], ['moderation', 'Moderation'], ['broadcast', 'Durchsagen'],
-      ['content', 'Inhalte'], ['config', 'Konfiguration'], ['audit', 'Audit-Log'], ['system', 'System'],
+      ['overview', 'Übersicht'], ['users', 'Nutzer'], ['moderation', 'Moderation'], ['status', 'Status'],
+      ['broadcast', 'Durchsagen'], ['content', 'Inhalte'], ['config', 'Konfiguration'], ['audit', 'Audit-Log'], ['system', 'System'],
     ];
     const ROUTES = [['','Posteingang (Standard)'],['settings','Einstellungen'],['privacy','Datenschutz'],['notifications','Benachrichtigungen'],['design','Design & Farben'],['security','Sicherung & Login'],['backup','Backup'],['saved','Gespeichert'],['update','App-Update'],['profile','Profil']];
     const routeOptions = () => ROUTES.map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
@@ -549,7 +580,7 @@
       catch(e){ token=''; $('loginErr').textContent=e.message||'Anmeldung fehlgeschlagen.'; } }
 
     // ---- tabs ----
-    const LOADERS={overview:loadOverview,users:loadUsers,moderation:loadChats,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,audit:loadAudit,system:loadSystem};
+    const LOADERS={overview:loadOverview,users:loadUsers,moderation:loadChats,status:loadStatuses,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,audit:loadAudit,system:loadSystem};
     let activeTab='overview';
     function switchTab(name){ activeTab=name;
       document.querySelectorAll('.navitem').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
@@ -624,7 +655,10 @@
     }
     async function openUser(id){
       let data; try{data=await api('/admin/users/'+id);}catch(e){return toast(e.message);}
-      const u=data.user,a=data.activity||{}; closeModal();
+      const u=data.user,a=data.activity||{},devs=data.devices||[]; closeModal();
+      const devHtml=devs.length
+        ? `<label style="margin-top:16px">Geräte (${devs.length})</label>`+devs.map(d=>`<div class="kv"><span>${esc(deviceLabel(d.platform))} · …${esc(d.fingerprint)} <span class="muted mono" style="font-size:11px">aktiv ${relTime(d.updatedAt)}</span></span><button class="btn sec sm" data-revoke="${esc(d.token)}">Abmelden</button></div>`).join('')
+        : `<label style="margin-top:16px">Geräte</label><p class="empty" style="padding:4px 0">Keine registrierten Geräte.</p>`;
       const m=document.createElement('div'); m.className='overlay'; m.onclick=(e)=>{if(e.target===m)closeModal();};
       m.innerHTML=`<div class="modal"><div class="mh"><h3>${esc(u.displayName)}</h3><button class="ico" data-x>✕</button></div>`+
         `<div class="kv"><span>Status</span><b>${u.online?'online':'offline'}${u.disabled?' · gesperrt':''}${u.isAdmin?' · Admin':''}${u.premium?' · Premium':''}</b></div>`+
@@ -634,6 +668,7 @@
         `<label>Über mich</label><input id="m_about" value="${esc(u.about||'')}" /><label>Neues Passwort (optional)</label><input id="m_pw" type="text" placeholder="leer = unverändert" />`+
         `<div class="grid2" style="margin-top:14px"><button class="btn" data-save>Speichern</button><button class="btn sec" data-admin>${u.isAdmin?'Admin entziehen':'Zum Admin'}</button></div>`+
         `<div class="grid2" style="margin-top:10px"><button class="btn sec" data-prem>${u.premium?'Premium entziehen':'Premium geben'}</button><button class="btn ${u.disabled?'sec':'danger'}" data-ban>${u.disabled?'Entsperren':'Sperren'}</button></div>`+
+        devHtml+
         `<label style="margin-top:16px">Direkte Nachricht</label><textarea id="m_msg" placeholder="Nachricht an ${esc((u.displayName||'').split(' ')[0])} …"></textarea>`+
         `<div class="grid2" style="margin-top:8px"><div><label style="margin-top:0">Beim Antippen öffnen</label><select id="m_route">${routeOptions()}</select></div><div style="display:flex;align-items:end"><button class="btn sec" data-msg style="width:100%">Als Banner</button></div></div>`+
         `<div style="margin-top:8px"><button class="btn" data-dm style="width:100%">Als „Ping Team“-Chat senden</button></div>`+
@@ -647,6 +682,8 @@
       m.querySelector('[data-save]').onclick=async()=>{const b={displayName:$('m_name').value.trim(),email:$('m_email').value.trim(),about:$('m_about').value.trim()};const pw=$('m_pw').value.trim();if(pw)b.password=pw;patch(b,'Gespeichert — wirkt sofort.');};
       m.querySelector('[data-msg]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;const route=$('m_route').value;try{await api('/admin/users/'+id+'/message',{method:'POST',body:JSON.stringify(route?{body,route}:{body})});toast('Banner gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
       m.querySelector('[data-dm]').onclick=async()=>{const body=$('m_msg').value.trim();if(!body)return;try{await api('/admin/users/'+id+'/dm',{method:'POST',body:JSON.stringify({body})});toast('Als Chat gesendet.');$('m_msg').value='';}catch(e){toast(e.message);}};
+      m.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=async()=>{ const tok=b.dataset.revoke; if(!confirm('Dieses Gerät abmelden? Es bekommt dann keine Push-Benachrichtigungen mehr.'))return;
+        try{await api('/admin/users/'+id+'/devices/revoke',{method:'POST',body:JSON.stringify({token:tok})});toast('Gerät abgemeldet.');const kv=b.closest('.kv');if(kv)kv.remove();}catch(e){toast(e.message);} });
       $('modalRoot').appendChild(m);
     }
     function closeModal(){ $('modalRoot').innerHTML=''; }
@@ -661,10 +698,14 @@
         tr.querySelector('[data-del]').onclick=(e)=>{e.stopPropagation();delChat(c);};
         tr.onclick=()=>openChat(c); rows.appendChild(tr); } }
     async function openChat(c){ let data; try{data=await api('/admin/chats/'+c.id+'/messages');}catch(e){return toast(e.message);}
-      const msgs=data.messages||[]; closeModal();
+      const msgs=data.messages||[],members=data.members||[]; closeModal();
+      const memberHtml=members.length
+        ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">`+members.map(mm=>`<span class="pill ${mm.role==='owner'?'admin':'off'}">${esc(mm.name)}${mm.role==='owner'?' · Owner':''}</span>`).join('')+`</div>`
+        : '';
       const m=document.createElement('div'); m.className='overlay'; m.onclick=(e)=>{if(e.target===m)closeModal();};
       m.innerHTML=`<div class="modal wide"><div class="mh"><h3>${esc(c.title)}</h3><button class="ico" data-x>✕</button></div>`+
         `<div class="muted mono" style="font-size:12.5px;margin-bottom:8px">${c.type==='group'?'Gruppe':'Direkt'} · ${c.members} Mitglieder · ${c.messages} Nachrichten</div>`+
+        memberHtml+
         (msgs.length?msgs.map(x=>`<div class="msgline"><span class="who">${esc(x.sender)}</span><span>${esc(x.preview)}</span><span class="when">${fmtDateTime(x.createdAt)}</span></div>`).join(''):'<p class="empty">Keine Nachrichten.</p>')+
         `<div style="margin-top:16px"><button class="btn danger" data-del style="width:100%">Chat löschen</button></div></div>`;
       m.querySelector('[data-x]').onclick=closeModal;
@@ -672,12 +713,43 @@
       $('modalRoot').appendChild(m); }
     async function delChat(c){ if(!confirm('Chat „'+c.title+'“ unwiderruflich löschen?'))return; try{await api('/admin/chats/'+c.id,{method:'DELETE'});toast('Chat gelöscht.');loadChats();}catch(e){toast(e.message);} }
 
+    // ---- status moderation ----
+    function untilTime(ms){ if(!ms)return'–'; const s=Math.round((ms-Date.now())/1000); if(s<=0)return'abgelaufen'; const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return h?('in '+h+' h'):('in '+m+' min'); }
+    function deviceLabel(p){ return ({android:'Android',ios:'iPhone',web:'Web',windows:'Windows'}[p]||p||'Gerät'); }
+    let statusCache=[];
+    async function loadStatuses(){ const {statuses}=await api('/admin/statuses'); statusCache=statuses; drawStatuses(); }
+    function drawStatuses(){ const q=$('statusQ').value.trim().toLowerCase();
+      const list=statusCache.filter(s=>!q||((s.author||'')+' '+(s.body||'')).toLowerCase().includes(q));
+      const rows=$('statusRows'); rows.innerHTML=''; $('statusEmpty').classList.toggle('hidden',list.length>0);
+      for(const s of list){ const tr=document.createElement('tr');
+        const typeLabel={text:'Text',image:'Bild',video:'Video'}[s.type]||s.type;
+        const content=s.type==='text'?esc(s.body||'—'):(`<span class="pill improvement">${esc(typeLabel)}</span>`+(s.body?' '+esc(s.body):''));
+        tr.innerHTML=`<td><b>${esc(s.author||'—')}</b></td><td><span class="pill off">${esc(typeLabel)}</span></td><td>${content}</td>`+
+          `<td class="mono">${s.views??0}</td><td class="mono" style="font-size:12px">${relTime(s.createdAt)}</td><td class="mono" style="font-size:12px">${untilTime(s.expiresAt)}</td>`+
+          `<td><div class="rowact"><button class="btn danger sm" data-del>Löschen</button></div></td>`;
+        tr.querySelector('[data-del]').onclick=()=>delStatus(s); rows.appendChild(tr); } }
+    async function delStatus(s){ if(!confirm('Status von „'+(s.author||'?')+'“ wirklich löschen?'))return; try{await api('/admin/statuses/'+s.id,{method:'DELETE'});toast('Status gelöscht.');loadStatuses();}catch(e){toast(e.message);} }
+
+    // ---- scheduled broadcasts ----
+    async function loadScheduledBroadcasts(){ const {scheduled}=await api('/admin/scheduled-broadcasts'); const rows=$('schedRows'); rows.innerHTML=''; $('schedEmpty').classList.toggle('hidden',scheduled.length>0);
+      for(const sb of scheduled){ const tr=document.createElement('tr');
+        tr.innerHTML=`<td class="mono" style="font-size:12px">${fmtDateTime(sb.runAt)}</td><td>${esc(sb.title||'–')}</td><td>${esc(sb.body)}</td><td style="text-align:right"><button class="btn sec sm" data-cancel>Abbrechen</button></td>`;
+        tr.querySelector('[data-cancel]').onclick=()=>cancelScheduled(sb); rows.appendChild(tr); } }
+    async function cancelScheduled(sb){ if(!confirm('Geplante Durchsage abbrechen?'))return; try{await api('/admin/scheduled-broadcasts/'+sb.id,{method:'DELETE'});toast('Abgebrochen.');loadScheduledBroadcasts();}catch(e){toast(e.message);} }
+
     // ---- broadcast ----
     async function broadcast(){ const body=$('b_body').value.trim(); if(!body)return toast('Bitte eine Nachricht eingeben.');
       const route=$('b_route').value; const payload={title:$('b_title').value.trim(),body}; if(route)payload.route=route;
-      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify(payload)});$('b_body').value='';$('b_count').textContent='0';toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');loadBroadcasts();}catch(e){toast(e.message);} }
+      const whenVal=$('b_when').value;
+      if(whenVal){ const ts=new Date(whenVal).getTime(); if(isNaN(ts))return toast('Ungültiger Zeitpunkt.'); if(ts<=Date.now()+10000)return toast('Bitte einen Zeitpunkt in der Zukunft wählen.'); payload.scheduledAt=ts; }
+      try{const r=await api('/admin/broadcast',{method:'POST',body:JSON.stringify(payload)});
+        $('b_body').value='';$('b_count').textContent='0';$('b_when').value='';
+        if(r.scheduled)toast('Durchsage geplant für '+fmtDateTime(r.scheduled.runAt)+'.');
+        else toast('Gesendet · '+r.delivered+' live, '+r.pushed+' Push.');
+        loadBroadcasts();}catch(e){toast(e.message);} }
     async function loadBroadcasts(){ const {broadcasts}=await api('/admin/broadcasts'); const rows=$('bcRows'); rows.innerHTML=''; $('bcEmpty').classList.toggle('hidden',broadcasts.length>0);
-      for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML=`<td class="mono" style="font-size:12px">${fmtDateTime(b.createdAt)}</td><td>${esc(b.title||'–')}</td><td>${esc(b.body)}</td><td class="mono">${b.delivered}</td><td class="mono">${b.pushed}</td>`;rows.appendChild(tr);} }
+      for(const b of broadcasts){const tr=document.createElement('tr');tr.innerHTML=`<td class="mono" style="font-size:12px">${fmtDateTime(b.createdAt)}</td><td>${esc(b.title||'–')}</td><td>${esc(b.body)}</td><td class="mono">${b.delivered}</td><td class="mono">${b.pushed}</td>`;rows.appendChild(tr);}
+      loadScheduledBroadcasts().catch(()=>{}); }
     async function broadcastDm(){ const body=$('dm_body').value.trim(); if(!body)return toast('Bitte eine Nachricht eingeben.');
       try{const r=await api('/admin/broadcast-dm',{method:'POST',body:JSON.stringify({body})});$('dm_body').value='';$('dm_count').textContent='0';toast('Privat an '+r.delivered+' Nutzer gesendet.');loadBroadcasts();}catch(e){toast(e.message);} }
     async function adminUpload(file){ const r=await fetch('/api/admin/upload',{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Admin-Token':token,'X-Filename':encodeURIComponent(file.name||'datei')},body:file});
@@ -730,13 +802,17 @@
       $('cfgFlags').innerHTML=keys.map(k=>`<label class="switch" style="color:var(--text)"><input type="checkbox" data-flag="${esc(k)}" ${cfgFlagsState[k]?'checked':''}> ${esc(k)}</label>`).join('')||'<span class="muted">Keine Flags.</span>';
       document.querySelectorAll('[data-flag]').forEach(el=>el.onchange=()=>{cfgFlagsState[el.dataset.flag]=el.checked;}); }
     async function loadConfig(){ const c=await api('/admin/config'); cfgFlagsState={...(c.flags||{})}; renderFlags();
+      const maint=c.maintenance||{active:false,message:''};
+      $('cfg_maint_active').checked=!!maint.active; $('cfg_maint_msg').value=maint.message||''; updateMaintCard();
       $('cfg_notice_text').value=c.notice?c.notice.text:''; $('cfg_notice_level').value=c.notice?c.notice.level:'info';
       $('cfg_notice_route').innerHTML=routeOptions(); $('cfg_notice_route').value=(c.notice&&c.notice.route)||'';
       $('cfg_max_status').value=(c.values&&c.values.maxStatusSeconds)||30; $('cfg_invite').value=(c.values&&c.values.inviteUrl)||'';
       $('cfg_min_build').value=c.minSupportedBuild||0; $('cfgUpdated').textContent=c.updatedAt?('Zuletzt geändert: '+fmtDateTime(c.updatedAt)):''; }
+    function updateMaintCard(){ const on=$('cfg_maint_active').checked; const card=$('maintCard'); if(card)card.style.borderColor=on?'var(--warn)':''; }
     async function saveConfig(){ const text=$('cfg_notice_text').value.trim(); const route=$('cfg_notice_route').value;
       const notice=text?{text,level:$('cfg_notice_level').value,...(route?{route}:{})}:null;
-      const body={flags:cfgFlagsState,values:{maxStatusSeconds:Math.max(1,Number($('cfg_max_status').value)||30),inviteUrl:$('cfg_invite').value.trim()},notice,minSupportedBuild:Math.max(0,Number($('cfg_min_build').value)||0)};
+      const maintenance={active:$('cfg_maint_active').checked,message:$('cfg_maint_msg').value.trim()};
+      const body={flags:cfgFlagsState,values:{maxStatusSeconds:Math.max(1,Number($('cfg_max_status').value)||30),inviteUrl:$('cfg_invite').value.trim()},notice,maintenance,minSupportedBuild:Math.max(0,Number($('cfg_min_build').value)||0)};
       try{await api('/admin/config',{method:'PUT',body:JSON.stringify(body)});toast('Konfiguration gespeichert.');loadConfig();}catch(e){toast(e.message);} }
     function addFlag(){ const name=(prompt('Name des neuen Feature-Flags (z. B. communities):')||'').trim(); if(!name)return;
       if(!/^[a-zA-Z][a-zA-Z0-9_]{0,40}$/.test(name))return toast('Ungültiger Flag-Name.'); cfgFlagsState[name]=false; renderFlags(); }
@@ -837,6 +913,8 @@
     $('q').addEventListener('input',()=>{clearTimeout(window._tu);window._tu=setTimeout(()=>loadUsers().catch(()=>{}),300);});
     $('chatQ').addEventListener('input',()=>{clearTimeout(window._tc);window._tc=setTimeout(()=>loadChats().catch(()=>{}),300);});
     $('auditQ').addEventListener('input',()=>{clearTimeout(window._ta);window._ta=setTimeout(()=>loadAudit().catch(()=>{}),300);});
+    $('statusQ').addEventListener('input',drawStatuses);
+    $('cfg_maint_active').addEventListener('change',updateMaintCard);
     document.addEventListener('keydown',e=>{
       if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(!$('dash').classList.contains('hidden'))openCmd();}
       else if(e.key==='Escape'){closeModal();closeCmd();}

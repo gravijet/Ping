@@ -17,7 +17,9 @@ import { config } from './config.js';
 // web-app host; the apex site keeps its own stricter CSP from index.js.
 const WEB_APP_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob:",
+  // gstatic allowed as a fallback CanvasKit source; the build bundles it locally
+  // (--no-web-resources-cdn) so normally nothing external is loaded.
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob: https://www.gstatic.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",

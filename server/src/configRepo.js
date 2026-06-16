@@ -23,6 +23,9 @@ export const DEFAULT_CONFIG = {
   },
   // An app-wide banner, or null. level: 'info' | 'warning' | 'critical'.
   notice: null,
+  // Maintenance mode: when active, the app shows a full-screen "kurz nicht
+  // erreichbar" notice with this message. Off by default.
+  maintenance: { active: false, message: '' },
   // Apps whose Android versionCode is below this are nudged to update; a
   // 'critical' notice can turn that into a hard gate on the client.
   minSupportedBuild: 0,
@@ -51,6 +54,10 @@ export function getRemoteConfig() {
     flags: { ...DEFAULT_CONFIG.flags, ...(s.flags || {}) },
     values: { ...DEFAULT_CONFIG.values, ...(s.values || {}) },
     notice: s.notice ?? DEFAULT_CONFIG.notice,
+    maintenance: {
+      ...DEFAULT_CONFIG.maintenance,
+      ...(s.maintenance && typeof s.maintenance === 'object' ? s.maintenance : {}),
+    },
     minSupportedBuild: Number.isInteger(s.minSupportedBuild)
       ? s.minSupportedBuild
       : DEFAULT_CONFIG.minSupportedBuild,
@@ -66,6 +73,10 @@ export function setRemoteConfig(patch = {}) {
     flags: { ...cur.flags, ...(patch.flags || {}) },
     values: { ...cur.values, ...(patch.values || {}) },
     notice: patch.notice !== undefined ? patch.notice : cur.notice,
+    maintenance:
+      patch.maintenance !== undefined
+        ? { ...cur.maintenance, ...(patch.maintenance || {}) }
+        : cur.maintenance,
     minSupportedBuild:
       patch.minSupportedBuild !== undefined
         ? patch.minSupportedBuild

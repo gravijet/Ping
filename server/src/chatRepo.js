@@ -256,6 +256,27 @@ export function adminChatMessages(chatId, limit = 40) {
   });
 }
 
+// Moderation: members of a chat with their role + online-irrelevant metadata,
+// so the admin portal can show who is in a conversation it is reviewing.
+export function adminChatMembers(chatId) {
+  return db
+    .prepare(
+      `SELECT cm.user_id, cm.role, cm.joined_at,
+              u.display_name AS name, u.phone, u.avatar_color
+       FROM chat_members cm JOIN users u ON u.id = cm.user_id
+       WHERE cm.chat_id = ? ORDER BY cm.role DESC, u.display_name COLLATE NOCASE`
+    )
+    .all(chatId)
+    .map((m) => ({
+      id: m.user_id,
+      name: m.name,
+      phone: m.phone,
+      avatarColor: m.avatar_color,
+      role: m.role,
+      joinedAt: m.joined_at,
+    }));
+}
+
 // Build the rich chat view the client renders in the list: title, avatar,
 // last message, unread count and (for direct chats) the other participant.
 export function chatView(chat, viewerId) {

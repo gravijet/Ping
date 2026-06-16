@@ -299,6 +299,9 @@ export const adminBroadcastSchema = z.object({
   // Optional deep-link: which screen the app opens when the notification is
   // tapped (e.g. 'privacy' for the privacy settings). Defaults to the inbox.
   route: appRouteSchema.optional(),
+  // Optional future epoch-ms timestamp. When set (and in the future) the
+  // broadcast is queued and fired by the maintenance sweep instead of now.
+  scheduledAt: z.number().int().positive().optional(),
 });
 
 export const messageStorageSchema = z.object({
@@ -319,12 +322,21 @@ export const noticeSchema = z
   })
   .strict();
 
+// App-wide maintenance mode pushed via remote config (no app update needed).
+export const maintenanceSchema = z
+  .object({
+    active: z.boolean(),
+    message: z.string().trim().max(300).optional().default(''),
+  })
+  .strict();
+
 // A partial update to the server-driven runtime config (admin only).
 export const remoteConfigSchema = z
   .object({
     flags: z.record(z.boolean()).optional(),
     values: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
     notice: noticeSchema.nullable().optional(),
+    maintenance: maintenanceSchema.optional(),
     minSupportedBuild: z.number().int().min(0).max(1000000).optional(),
   })
   .strict();

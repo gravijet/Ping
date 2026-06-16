@@ -217,6 +217,19 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON broadcasts(created_at);
 
+  -- Broadcasts an admin composed now but scheduled for later. The maintenance
+  -- sweep dispatches due ones (run_at <= now) exactly like a manual broadcast,
+  -- then records them in the history above and deletes the row here.
+  CREATE TABLE IF NOT EXISTS scheduled_broadcasts (
+    id         TEXT PRIMARY KEY,
+    title      TEXT NOT NULL DEFAULT '',
+    body       TEXT NOT NULL,
+    route      TEXT NOT NULL DEFAULT '',
+    run_at     INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scheduled_broadcasts_run ON scheduled_broadcasts(run_at);
+
   -- Public content the marketing site + in-app "Neuigkeiten" surface: newsroom
   -- articles and changelog entries. One table, distinguished by the kind column.
   -- Drafts (published = 0) are visible only in the admin portal.

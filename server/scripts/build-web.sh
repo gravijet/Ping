@@ -16,7 +16,9 @@ WEB_SRC="$ROOT/app/build/web"
 DEST_DIR="${WEB_APP_DIR:-$ROOT/server/public/webapp}"
 
 echo "→ Baue Flutter-Web (release) …"
-( cd "$ROOT/app" && flutter build web --release --no-wasm-dry-run )
+# --no-web-resources-cdn bundelt CanvasKit lokal (statt von gstatic.com zu laden),
+# damit es ohne externen CDN + unter strenger CSP läuft (und kein Tracking).
+( cd "$ROOT/app" && flutter build web --release --no-wasm-dry-run --no-web-resources-cdn )
 
 if [ ! -f "$WEB_SRC/index.html" ]; then
   echo "❌ Kein Web-Build gefunden: $WEB_SRC/index.html" >&2

@@ -155,6 +155,7 @@ import {
   adminListChats,
   adminDeleteChat,
   adminChatMessages,
+  adminChatMembers,
 } from './chatRepo.js';
 import {
   saveUpload,
@@ -172,7 +173,16 @@ import {
   markStatusViewed,
   statusView,
   statusViewers,
+  adminListStatuses,
 } from './statusRepo.js';
+import {
+  createScheduledBroadcast,
+  listScheduledBroadcasts,
+  getScheduledBroadcast,
+  deleteScheduledBroadcast,
+  scheduledBroadcastView,
+} from './scheduledBroadcastRepo.js';
+import { dispatchBroadcast } from './broadcast.js';
 import {
   recordCall,
   listCalls,
@@ -194,6 +204,7 @@ import {
   savePushToken,
   removeUserPushToken,
   allPushTokens,
+  devicesForUser,
 } from './pushRepo.js';
 import {
   createPost,
@@ -2233,23 +2244,22 @@ router.post(
   '/admin/broadcast',
   requireAdmin,
   h(async (req, res) => {
-    const { title, body, route } = parse(adminBroadcastSchema, req.body);
-    const online = new Set(onlineUserIds());
-    for (const id of online) {
-      sendToUser(id, 'announcement', { title: title || 'Ping', body, route });
+    const { title, body, route, scheduledAt } = parse(adminBroadcastSchema, req.body);
+    // Scheduled for a real point in the future → queue it for the sweep instead
+    // of sending now. A timestamp in the past just falls through to "send now".
+    if (scheduledAt && scheduledAt > Date.now() + 5000) {
+      const row = createScheduledBroadcast({
+        title: title || '',
+        body,
+        route: route || '',
+        runAt: scheduledAt,
+      });
+      audit(req, 'broadcast.schedule', title || '(ohne Titel)', new Date(scheduledAt).toISOString());
+      return res.status(201).json({ ok: true, scheduled: scheduledBroadcastView(row) });
     }
-    // Push to offline devices (online users already saw the live announcement).
-    const offline = [
-      ...new Set(allPushTokens().map((r) => r.user_id)),
-    ].filter((id) => !online.has(id));
-    const pushed = await sendPushToUsers(offline, {
-      title: title || 'Ping',
-      body,
-      data: { type: 'announcement', ...(route ? { route } : {}) },
-    });
-    recordBroadcast({ title: title || '', body, delivered: online.size, pushed });
-    audit(req, 'broadcast.send', title || '(ohne Titel)', `${online.size} live · ${pushed} Push`);
-    res.json({ ok: true, delivered: online.size, pushed });
+    const { delivered, pushed } = await dispatchBroadcast({ title, body, route });
+    audit(req, 'broadcast.send', title || '(ohne Titel)', `${delivered} live · ${pushed} Push`);
+    res.json({ ok: true, delivered, pushed });
   })
 );
 
@@ -2258,6 +2268,53 @@ router.get(
   '/admin/broadcasts',
   requireAdmin,
   h(async (_req, res) => res.json({ broadcasts: listBroadcasts(30) }))
+);
+
+// Pending scheduled broadcasts (not yet fired), soonest first.
+router.get(
+  '/admin/scheduled-broadcasts',
+  requireAdmin,
+  h(async (_req, res) =>
+    res.json({ scheduled: listScheduledBroadcasts().map(scheduledBroadcastView) })
+  )
+);
+
+// Cancel a scheduled broadcast before it fires.
+router.delete(
+  '/admin/scheduled-broadcasts/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const row = getScheduledBroadcast(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Diese geplante Durchsage gibt es nicht.' });
+    deleteScheduledBroadcast(req.params.id);
+    audit(req, 'broadcast.cancel', row.title || '(ohne Titel)', '');
+    res.status(204).end();
+  })
+);
+
+// ---- Admin: status moderation ----------------------------------------------
+
+// Every status currently visible to users (all authors), newest first.
+router.get(
+  '/admin/statuses',
+  requireAdmin,
+  h(async (_req, res) => res.json({ statuses: adminListStatuses() }))
+);
+
+// Remove a single status (abuse / mistake). Online users refresh their tab.
+router.delete(
+  '/admin/statuses/:id',
+  requireAdmin,
+  h(async (req, res) => {
+    const row = getStatus(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Diesen Status gibt es nicht.' });
+    deleteStatus(req.params.id);
+    for (const id of onlineUserIds()) {
+      sendToUser(id, 'status-removed', { statusId: req.params.id, userId: row.user_id });
+    }
+    audit(req, 'status.delete', row.user_id, row.type);
+    res.status(204).end();
+  })
 );
 
 // ---- Admin: newsroom + changelog (content management) ----------------------
@@ -2347,7 +2404,10 @@ router.get(
   h(async (req, res) => {
     const chat = getChat(req.params.id);
     if (!chat) return res.status(404).json({ error: 'Diesen Chat gibt es nicht.' });
-    res.json({ messages: adminChatMessages(req.params.id, 50) });
+    res.json({
+      messages: adminChatMessages(req.params.id, 50),
+      members: adminChatMembers(req.params.id),
+    });
   })
 );
 
@@ -2434,7 +2494,7 @@ router.post(
   })
 );
 
-// Detailed view of one user (activity counters + online state).
+// Detailed view of one user (activity counters, devices + online state).
 router.get(
   '/admin/users/:id',
   requireAdmin,
@@ -2444,7 +2504,35 @@ router.get(
     res.json({
       user: { ...adminUser(user), online: isOnline(user.id) },
       activity: userActivity(user.id),
+      devices: devicesForUser(user.id),
     });
+  })
+);
+
+// Registered push devices for a user (admin device/session management).
+router.get(
+  '/admin/users/:id/devices',
+  requireAdmin,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    res.json({ devices: devicesForUser(user.id) });
+  })
+);
+
+// Revoke a single device: drop its push token so it stops receiving
+// notifications. The token is sent in the body so it never lands in a URL/log.
+router.post(
+  '/admin/users/:id/devices/revoke',
+  requireAdmin,
+  h(async (req, res) => {
+    const user = getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'Diesen Nutzer gibt es nicht.' });
+    const token = (req.body && req.body.token ? String(req.body.token) : '').trim();
+    if (!token) return res.status(400).json({ error: 'Kein Gerät angegeben.' });
+    removeUserPushToken(user.id, token);
+    audit(req, 'user.device.revoke', user.display_name, token.slice(-8));
+    res.json({ ok: true, devices: devicesForUser(user.id) });
   })
 );
 

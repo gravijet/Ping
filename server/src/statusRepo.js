@@ -24,6 +24,12 @@ const s = {
     SELECT viewer_id, viewed_at FROM status_views
     WHERE status_id = ? ORDER BY viewed_at DESC`),
   purge: db.prepare('DELETE FROM statuses WHERE expires_at <= ?'),
+  // Moderation: every active status across all users, newest first, joined to
+  // the author so the admin portal can show who posted it.
+  allActive: db.prepare(`
+    SELECT s.*, u.display_name AS author_name, u.avatar_color AS author_color
+    FROM statuses s JOIN users u ON u.id = s.user_id
+    WHERE s.expires_at > ? ORDER BY s.created_at DESC`),
 };
 
 export function createStatus({ userId, type = 'text', body = '', attachment = null, bgColor = null }) {
@@ -50,6 +56,24 @@ export const markStatusViewed = (statusId, viewerId) =>
 export const statusSeenBy = (statusId, viewerId) => !!s.seen.get(statusId, viewerId);
 export const statusViewCount = (statusId) => s.viewCount.get(statusId).n;
 export const purgeExpiredStatuses = () => s.purge.run(now());
+
+// Admin moderation view: every currently-visible status with its author and
+// view count, so an admin can spot and remove abusive posts.
+export function adminListStatuses() {
+  return s.allActive.all(now()).map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    author: row.author_name,
+    authorColor: row.author_color,
+    type: row.type,
+    body: row.body,
+    attachment: row.attachment ? JSON.parse(row.attachment) : null,
+    bgColor: row.bg_color,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    views: statusViewCount(row.id),
+  }));
+}
 
 export function statusViewers(statusId) {
   return s.viewers.all(statusId).map((r) => ({

@@ -3,6 +3,11 @@ import { purgeExpiredMessages, getChat } from './chatRepo.js';
 import { purgeExpiredStatuses } from './statusRepo.js';
 import { broadcastToChat } from './hub.js';
 import { dueScheduled, deleteScheduled } from './scheduledRepo.js';
+import {
+  dueScheduledBroadcasts,
+  deleteScheduledBroadcast,
+} from './scheduledBroadcastRepo.js';
+import { dispatchBroadcast } from './broadcast.js';
 import { deliverMessage } from './deliver.js';
 
 // Periodic housekeeping that keeps the database lean and makes disappearing
@@ -48,11 +53,26 @@ export function runMaintenance() {
       deleteScheduled(row.id); // don't let one bad row wedge the queue
     }
   }
+  // Scheduled broadcasts that have come due → send them like a manual broadcast.
+  // Delete first so a transient push failure can't replay the same broadcast on
+  // the next sweep (the live announcement already went out).
+  let sentBroadcasts = 0;
+  for (const row of dueScheduledBroadcasts()) {
+    deleteScheduledBroadcast(row.id);
+    dispatchBroadcast({ title: row.title, body: row.body, route: row.route || undefined })
+      .then(() => {})
+      .catch((e) => console.error('[maintenance] geplante Durchsage fehlgeschlagen:', e.message));
+    sentBroadcasts++;
+  }
   purgeExpiredStatuses();
   // Expired OTP rows are useless after their window; keep an hour of slack for
   // debugging ("why didn't my code work?") before dropping them.
   staleCodes.run(now() - 60 * 60 * 1000);
-  return { purgedMessages: purged.length, deliveredScheduled: delivered };
+  return {
+    purgedMessages: purged.length,
+    deliveredScheduled: delivered,
+    sentBroadcasts,
+  };
 }
 
 /**
