@@ -44,6 +44,12 @@ jobs:
 
       - name: Build Windows release
         working-directory: app
+        # Newer MSVC toolchains (VS 2026 / MSVC 14.51 on windows-latest) turned
+        # <experimental/coroutine> into a hard error (STL1011). Some plugins
+        # (audioplayers_windows, webview_windows) still include it, so define the
+        # documented escape macro for every cl.exe invocation via the CL env var.
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: flutter build windows --release
 
       - name: Ensure Inno Setup
