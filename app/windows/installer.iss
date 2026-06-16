@@ -58,5 +58,36 @@ Source: "{#MySrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
+; Ping for Windows renders the web client through Microsoft Edge WebView2. The
+; Evergreen runtime ships with current Windows 10/11, but on older machines it
+; may be missing — so if the workflow bundled the bootstrapper next to this
+; script, silently install the runtime first when it's not already present.
+#define WV2Bootstrapper "MicrosoftEdgeWebview2Setup.exe"
+#if FileExists(WV2Bootstrapper)
+[Files]
+Source: "{#WV2Bootstrapper}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: WebView2Missing
+#endif
+
 [Run]
+#if FileExists(WV2Bootstrapper)
+Filename: "{tmp}\{#WV2Bootstrapper}"; Parameters: "/silent /install"; StatusMsg: "Installiere Microsoft Edge WebView2-Laufzeit ..."; Check: WebView2Missing; Flags: waituntilterminated
+#endif
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// True when the WebView2 Evergreen runtime is not registered (per-machine or
+// per-user). The GUID is Microsoft's fixed client id for the runtime.
+function WebView2Missing(): Boolean;
+var
+  Pv: string;
+const
+  Client = 'Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+begin
+  Result := True;
+  if RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+    Result := False
+  else if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+    Result := False
+  else if RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+    Result := False;
+end;

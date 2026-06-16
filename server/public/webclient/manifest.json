@@ -1,0 +1,12 @@
+{
+  "name": "Ping Web",
+  "short_name": "Ping",
+  "description": "Ping – Messenger im Browser",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090e",
+  "theme_color": "#07090e",
+  "icons": [
+    { "src": "/favicon.png", "sizes": "192x192", "type": "image/png" }
+  ]
+}

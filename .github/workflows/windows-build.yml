@@ -53,6 +53,14 @@ jobs:
             choco install innosetup --no-progress -y
           }
 
+      - name: Fetch WebView2 bootstrapper
+        # Bundled into the installer so older machines without the Evergreen
+        # WebView2 runtime get it installed automatically (see installer.iss).
+        working-directory: app/windows
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "MicrosoftEdgeWebview2Setup.exe"
+
       - name: Build installer (Inno Setup)
         working-directory: app/windows
         shell: cmd

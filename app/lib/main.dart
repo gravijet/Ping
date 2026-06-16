@@ -10,6 +10,7 @@ import 'screens/home_screen.dart';
 import 'screens/lock_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/windows_web_shell.dart';
 import 'services/app_state.dart';
 import 'services/push_service.dart';
 import 'theme.dart';
@@ -22,6 +23,14 @@ final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Windows is a thin shell around the PC web client (Ping Web): it just hosts a
+  // WebView2 view, so it skips the full native bootstrap (AppState, Firebase,
+  // locale data) entirely. Android/iOS continue with the full app below.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    runApp(const WindowsWebShellApp());
+    return;
+  }
 
   // Locale data for date/time formatting. A failure here must never block the
   // first frame — fall back to the default locale rather than hang on the

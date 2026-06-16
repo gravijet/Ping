@@ -182,12 +182,13 @@ export const config = {
   windowsVersion: (process.env.WINDOWS_VERSION || '').trim(),
 
   // ---- Web app (Ping Web) --------------------------------------------------
-  // The Flutter web build ("Ping Web", WhatsApp-Web-style QR linking) is served
-  // on its own subdomain off *this same* Node process. When a request's Host
-  // matches webAppHost, the static bundle in webAppDir is served (with a SPA
-  // fallback to index.html); /api and /ws keep working same-origin on that host,
-  // so the web client needs no CORS. Point WEB_APP_HOST's DNS at this server in
-  // Cloudflare/nginx, and build + copy the bundle with scripts/build-web.sh.
+  // "Ping Web" is a dedicated, PC-optimized web client (WhatsApp-Web-style, plain
+  // HTML/CSS/ES-modules — no build step) served on its own subdomain off *this
+  // same* Node process. When a request's Host matches webAppHost, the static
+  // client in webAppDir is served (with a SPA fallback to index.html); /api and
+  // /ws keep working same-origin on that host, so the client needs no CORS.
+  // Point WEB_APP_HOST's DNS at this server in Cloudflare/nginx. The client lives
+  // in public/webclient and is committed (no build) — just restart the server.
   // Set WEB_APP_HOST='' to disable serving the web app entirely.
   webAppHost: (process.env.WEB_APP_HOST ?? 'example.invalid')
     .trim()
@@ -196,7 +197,7 @@ export const config = {
     .toLowerCase(),
   webAppDir:
     process.env.WEB_APP_DIR ||
-    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'webapp'),
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'webclient'),
 
   // ---- SMS phone verification (server-side OTP) ----------------------------
   // Ping can verify a phone number itself by texting a one-time code, instead of

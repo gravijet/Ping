@@ -3,27 +3,27 @@ import path from 'node:path';
 import express from 'express';
 import { config } from './config.js';
 
-// Serve the Flutter web build ("Ping Web") on its own subdomain (config.webAppHost),
+// Serve the dedicated "Ping Web" client on its own subdomain (config.webAppHost),
 // off *this same* Node process. On that host:
 //   - /api/*, /ws and /health are left to the normal handlers (same-origin, so
 //     the web client talks to its API + WebSocket without any CORS), and
-//   - everything else serves the static bundle in config.webAppDir, falling back
-//     to index.html so Flutter's client-side routing and deep links work.
+//   - everything else serves the static client in config.webAppDir, falling back
+//     to index.html so the SPA's client-side routing and deep links work.
 // On every other host this is a no-op, so the marketing site on the apex domain
 // is completely untouched.
 
-// A Flutter-web-friendly CSP (helmet's default blocks CanvasKit's wasm eval and
-// the inline bootstrap script). Applied only to responses we serve for the
+// CSP for the web client. It's plain HTML/CSS/ES-modules served from our own
+// origin, so we can keep it tight: no inline/eval scripts. We still allow
+// ws:/wss: for the realtime socket and data:/blob: images+media for avatars,
+// attachments and locally-captured call/voice media. Applied only on the
 // web-app host; the apex site keeps its own stricter CSP from index.js.
 const WEB_APP_CSP = [
   "default-src 'self'",
-  // gstatic allowed as a fallback CanvasKit source; the build bundles it locally
-  // (--no-web-resources-cdn) so normally nothing external is loaded.
-  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline' blob: https://www.gstatic.com",
+  "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self' ws: wss: blob: data: https://www.gstatic.com",
+  "connect-src 'self' ws: wss: blob: data:",
   "worker-src 'self' blob:",
   "media-src 'self' blob: data:",
 ].join('; ');
@@ -69,11 +69,11 @@ export function mountWebApp(app) {
       if (req.method !== 'GET' && req.method !== 'HEAD') return next();
       fs.access(indexFile, fs.constants.R_OK, (accessErr) => {
         if (accessErr) {
-          // The bundle hasn't been built yet — a clear hint beats a blank 404.
+          // The client files are missing — a clear hint beats a blank 404.
           return res
             .status(503)
             .type('text/plain; charset=utf-8')
-            .send('Ping Web ist noch nicht gebaut. Führe scripts/build-web.sh aus.');
+            .send('Ping Web ist nicht installiert (public/webclient/index.html fehlt).');
         }
         res.sendFile(indexFile);
       });

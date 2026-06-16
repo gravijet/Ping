@@ -1,7 +1,7 @@
 name: ping
 description: "Ping – ein schneller, moderner Messenger."
 publish_to: 'none'
-version: 0.14.0+19
+version: 0.15.0+20
 
 environment:
   sdk: ^3.12.1
@@ -39,6 +39,10 @@ dependencies:
   # build, scan it with the phone camera.
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.0.0
+  # Windows desktop is a thin shell around the PC web client (Ping Web): it
+  # hosts an Edge WebView2 view pointed at web.example.invalid. Windows-only
+  # plugin; unused on Android.
+  webview_windows: ^0.4.0
 
 dev_dependencies:
   flutter_test:
