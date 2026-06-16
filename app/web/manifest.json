@@ -1,12 +1,12 @@
 {
-    "name": "ping",
-    "short_name": "ping",
+    "name": "Ping Web",
+    "short_name": "Ping",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#07090e",
+    "theme_color": "#1f6bff",
+    "description": "Ping im Browser — am PC per QR-Code anmelden und chatten.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
