@@ -1,10 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/settings.dart';
 import '../services/app_state.dart';
+import '../services/platform_files.dart';
 import '../services/wallpaper_service.dart';
 
 /// A reusable wallpaper chooser: the preset colours plus "pick image / GIF /
@@ -168,10 +167,10 @@ class _MediaThumb extends StatelessWidget {
         child: const Icon(Icons.movie_rounded, size: 22),
       );
     } else {
-      inner = Image.file(
-        File(spec.path),
+      inner = localFileImage(
+        spec.path,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Container(
+        errorChild: () => Container(
           color: scheme.surfaceContainerHighest,
           child: const Icon(Icons.broken_image_rounded, size: 20),
         ),

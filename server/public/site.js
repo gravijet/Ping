@@ -32,6 +32,7 @@
     link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5',
     share: 'M4 12v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8M16 6l-4-4-4 4M12 2v13',
     download: 'M12 3v12M7 11l5 5 5-5M5 21h14',
+    monitor: 'M3 5h18a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM8 21h8M12 17v4',
     check: 'M5 12l5 5 9-11',
     chat: 'M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z',
     sparkles: 'M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3ZM19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2Z',
@@ -167,6 +168,7 @@
         </div>
         <div class="nav-right">
           <button class="icon-btn" id="themeBtn" aria-label="Design wechseln"></button>
+          <a class="btn sm ghost" href="https://example.invalid">${P.icon('monitor')}<span>Web</span></a>
           <a class="btn sm" href="/download">${P.icon('download')}<span>Laden</span></a>
           <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menü">${P.icon('menu')}</button>
         </div>
@@ -302,6 +304,7 @@
             Keine Werbung, kein Tracking, kein Schnickschnack.</p>
           <div class="cta reveal in">
             <a class="btn big" href="/download">${P.icon('download')}Für Android laden</a>
+            <a class="btn ghost big" href="https://example.invalid">${P.icon('monitor')}Im Browser öffnen</a>
             <a class="btn ghost big" href="/#how">So funktioniert's ${P.icon('arrowRight')}</a>
           </div>
           <div class="specs reveal in">
@@ -414,9 +417,9 @@
             </div>
             <div class="dl-meta">
               <div class="kv"><span>Aktuelle Version</span><b id="dlWinVer">…</b></div>
+              <div class="kv"><span>Download-Größe</span><b id="dlWinSize">…</b></div>
               <div class="kv"><span>Voraussetzung</span><b>Windows 10 +</b></div>
               <div class="kv"><span>Anmeldung</span><b>QR-Code</b></div>
-              <div class="kv"><span>Preis</span><b>Kostenlos</b></div>
             </div>
           </div>
         </div>
@@ -521,6 +524,7 @@
       if (win && d.windows && d.windows.url) {
         win.style.display = '';
         set('dlWinVer', d.windows.version ? 'v' + d.windows.version : '—');
+        set('dlWinSize', d.windows.size ? P.human(d.windows.size) : '—');
       }
     }).catch(() => {});
   }

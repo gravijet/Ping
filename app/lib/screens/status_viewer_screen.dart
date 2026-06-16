@@ -40,10 +40,10 @@ class _StatusViewerScreenState extends State<StatusViewerScreen>
 
   bool _isVideo(PingStatus s) => s.isVideo || s.attachment?.kind == 'video';
 
-  // video_player has no Windows implementation, so on desktop a video status is
-  // shown as a placeholder and advanced by the normal 5s timer (like an image)
-  // rather than driving its own playback-based progress.
-  bool _playableVideo(PingStatus s) => _isVideo(s) && !isDesktopPlatform;
+  // The lite clients (Windows desktop + web) don't ship inline video playback,
+  // so a video status is shown as a placeholder and advanced by the normal 5s
+  // timer (like an image) rather than driving its own playback-based progress.
+  bool _playableVideo(PingStatus s) => _isVideo(s) && !isLiteClient;
 
   @override
   void initState() {

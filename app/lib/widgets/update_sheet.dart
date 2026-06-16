@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -83,19 +81,19 @@ class _UpdateSheetState extends State<_UpdateSheet> {
       _phase = _downloaded ? _Phase.installing : _Phase.downloading;
       _progress = 0;
     });
-    final File? file = await state.updater.download(
+    final String? path = await state.updater.download(
       info,
       onProgress: (p) {
         if (mounted) setState(() => _progress = p);
       },
     );
     if (!mounted) return;
-    if (file == null) {
+    if (path == null) {
       setState(() => _phase = _Phase.error);
       return;
     }
     setState(() => _phase = _Phase.installing);
-    final ok = await state.updater.install(file);
+    final ok = await state.updater.install(path);
     if (!mounted) return;
     if (!ok) {
       setState(() => _phase = _Phase.error);

@@ -1,16 +1,15 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../platform.dart';
+import '../services/platform_files.dart';
 import '../models/chat.dart';
 import '../models/message.dart';
 import '../models/scheduled_message.dart';
@@ -1429,8 +1428,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _showError('Ohne Mikrofon-Berechtigung geht das leider nicht.');
         return;
       }
-      final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final path = await recordTargetPath(
+          'voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
       await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc),
           path: path);
       _recordPath = path;
@@ -1454,9 +1453,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await _recorder.stop();
     } catch (_) {}
     if (_recordPath != null) {
-      try {
-        File(_recordPath!).deleteSync();
-      } catch (_) {}
+      await deleteLocalFile(_recordPath!);
     }
     setState(() {
       _recording = false;
@@ -1477,8 +1474,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _recording = false);
     if (path == null) return;
     try {
-      final bytes = await File(path).readAsBytes();
-      if (bytes.isEmpty) return;
+      final bytes = await readLocalBytes(path);
+      if (bytes == null || bytes.isEmpty) return;
       await _sendBytes(bytes, 'audio/mp4',
           filename: 'sprachnachricht.m4a', kind: 'voice', durationMs: durationMs);
     } catch (_) {
@@ -1497,13 +1494,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _openVideo(Attachment att) {
-    // video_player has no Windows implementation yet, so the desktop build can't
-    // play inline video. Tell the user rather than crash on an unsupported call.
-    if (isDesktopPlatform) {
+    // The lite clients (Windows desktop + web) don't ship inline video playback
+    // yet. Tell the user rather than crash on an unsupported call.
+    if (isLiteClient) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content:
-                Text('Videos lassen sich in der Windows-App noch nicht abspielen.')),
+            content: Text(
+                'Videos lassen sich in der Web- und Desktop-App noch nicht abspielen.')),
       );
       return;
     }

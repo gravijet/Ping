@@ -159,6 +159,42 @@ function streamApk(res, info) {
   fs.createReadStream(info.full).pipe(res);
 }
 
+// The Windows installer, hosted locally just like the APK. Returns the newest
+// *.exe found in config.windowsDir with its size + a version (from the filename,
+// e.g. "Ping-Setup-0.13.0.exe", or the WINDOWS_VERSION override), or null when
+// none has been uploaded yet.
+function windowsInfo() {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(config.windowsDir);
+  } catch {
+    return null;
+  }
+  const exes = entries
+    .filter((f) => f.toLowerCase().endsWith('.exe'))
+    .map((f) => {
+      const full = path.join(config.windowsDir, f);
+      try {
+        const st = fs.statSync(full);
+        return { f, full, mtime: st.mtimeMs, size: st.size };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtime - a.mtime);
+  const latest = exes[0];
+  if (!latest) return null;
+  const m = latest.f.match(/(\d+\.\d+\.\d+)/);
+  const version = config.windowsVersion || (m ? m[1] : null);
+  return {
+    full: latest.full,
+    size: latest.size,
+    version,
+    updatedAt: Math.round(latest.mtime),
+  };
+}
+
 export function mountDownloads(app, publicDir) {
   // Landing page.
   app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
@@ -212,29 +248,48 @@ export function mountDownloads(app, publicDir) {
       filename: `ping-${info.version}.apk`,
       url: '/download',
       variants,
-      // The Windows desktop build (only present once WINDOWS_DOWNLOAD_URL is
-      // configured). The site renders a second "Für Windows" download card from
-      // this; the actual installer lives on a GitHub release.
-      windows: config.windowsDownloadUrl
-        ? { url: '/download/windows', version: config.windowsVersion || null }
-        : null,
+      // The Windows desktop build. Present when a local .exe has been dropped in
+      // (or, as a fallback, a download URL is configured). The site renders a
+      // second "Für Windows" download card from this.
+      windows: (() => {
+        const win = windowsInfo();
+        if (win) {
+          return { url: '/download/windows', version: win.version, size: win.size, updatedAt: win.updatedAt };
+        }
+        if (config.windowsDownloadUrl) {
+          return { url: '/download/windows', version: config.windowsVersion || null };
+        }
+        return null;
+      })(),
     });
   });
 
-  // Windows installer: a stable redirect to the GitHub-release .exe. Keeping the
-  // indirection here means the published URL on the site never changes even if
-  // the release host does.
-  app.get('/download/windows', (_req, res) => {
-    if (!config.windowsDownloadUrl) {
-      return res
-        .status(404)
-        .type('text/plain; charset=utf-8')
-        .send('Die Windows-Version ist noch nicht verfügbar.');
+  // Windows installer: streams the locally-hosted .exe (newest in windowsDir),
+  // exactly like the APK download. Falls back to a redirect if only a download
+  // URL is configured and no local file exists.
+  const serveWindows = (_req, res) => {
+    const win = windowsInfo();
+    if (win) {
+      const name = `Ping-Setup-${win.version || 'latest'}.exe`;
+      res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
+      res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+      res.setHeader('Content-Length', win.size);
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return fs.createReadStream(win.full).pipe(res);
     }
-    res.redirect(302, config.windowsDownloadUrl);
-  });
+    if (config.windowsDownloadUrl) {
+      return res.redirect(302, config.windowsDownloadUrl);
+    }
+    return res
+      .status(404)
+      .type('text/plain; charset=utf-8')
+      .send('Die Windows-Version ist noch nicht verfügbar.');
+  };
+  app.get('/download/windows', serveWindows);
+  app.get('/download/windows.exe', serveWindows);
 
-  // The download itself, under several friendly URLs.
+  // The Android download itself, under several friendly URLs (/download/android
+  // is the explicit-platform alias alongside the bare /download default).
   const serve = (_req, res) => {
     const info = apkInfo();
     if (!info) {
@@ -246,6 +301,7 @@ export function mountDownloads(app, publicDir) {
     streamApk(res, info);
   };
   app.get('/download', serve);
+  app.get('/download/android', serve);
   app.get('/download/ping.apk', serve);
   app.get('/ping.apk', serve);
   app.get('/app-release.apk', serve);

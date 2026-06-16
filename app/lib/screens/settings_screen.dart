@@ -137,11 +137,12 @@ class SettingsScreen extends StatelessWidget {
           _SectionHeader('Konto & Sicherheit'),
           _navTile(context, Icons.shield_outlined, 'Sicherung & Login',
               'E-Mail und Passwort ändern', () => const SecurityScreen()),
-          // Linking a desktop needs the phone camera, so it's only offered on
-          // the mobile build.
+          // Linking a web/desktop session needs the phone camera to scan the
+          // QR, so it's only offered on the mobile build.
           if (isMobilePlatform)
-            _navTile(context, Icons.devices_rounded, 'Ping für Windows',
-                'Gerät per QR-Code verknüpfen', () => const LinkDeviceScreen()),
+            _navTile(context, Icons.devices_rounded, 'Verknüpfte Geräte',
+                'Ping Web & PC per QR-Code anmelden',
+                () => const LinkDeviceScreen()),
           _navTile(context, Icons.lock_outline_rounded, 'Datenschutz',
               'Lesebestätigungen, Online-Status, Blockierte',
               () => const PrivacySettingsScreen()),

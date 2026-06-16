@@ -167,12 +167,36 @@ export const config = {
   // Primary domain is ping.example.invalid.
   publicUrl: (process.env.PUBLIC_URL || 'https://example.invalid').replace(/\/$/, ''),
 
-  // Windows desktop build. The .exe is produced by the GitHub Actions workflow
-  // (this Linux host can't compile it) and published as a release asset, so we
-  // just point the website at that stable URL. Leave WINDOWS_DOWNLOAD_URL empty
-  // and the "Für Windows" card simply doesn't appear.
+  // Windows desktop build. The .exe is hosted right here, next to the APK: drop
+  // the installer into WINDOWS_DIR (defaults to the same downloads folder) and
+  // the site's "Für Windows" card + /download/windows serve it. The .exe can't
+  // be built on this Linux host, so it's produced elsewhere (a Windows PC or the
+  // GitHub Actions workflow) and just copied in — exactly like publish-apk.sh.
+  // WINDOWS_VERSION overrides the version label (otherwise parsed from the
+  // filename). WINDOWS_DOWNLOAD_URL is an optional fallback: if no local .exe is
+  // found and it's set, /download/windows redirects there instead.
+  windowsDir:
+    process.env.WINDOWS_DIR ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'downloads'),
   windowsDownloadUrl: (process.env.WINDOWS_DOWNLOAD_URL || '').trim(),
   windowsVersion: (process.env.WINDOWS_VERSION || '').trim(),
+
+  // ---- Web app (Ping Web) --------------------------------------------------
+  // The Flutter web build ("Ping Web", WhatsApp-Web-style QR linking) is served
+  // on its own subdomain off *this same* Node process. When a request's Host
+  // matches webAppHost, the static bundle in webAppDir is served (with a SPA
+  // fallback to index.html); /api and /ws keep working same-origin on that host,
+  // so the web client needs no CORS. Point WEB_APP_HOST's DNS at this server in
+  // Cloudflare/nginx, and build + copy the bundle with scripts/build-web.sh.
+  // Set WEB_APP_HOST='' to disable serving the web app entirely.
+  webAppHost: (process.env.WEB_APP_HOST ?? 'example.invalid')
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '')
+    .toLowerCase(),
+  webAppDir:
+    process.env.WEB_APP_DIR ||
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'webapp'),
 
   // ---- SMS phone verification (server-side OTP) ----------------------------
   // Ping can verify a phone number itself by texting a one-time code, instead of

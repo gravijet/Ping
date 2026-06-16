@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
+
+import 'platform_files.dart';
 
 /// A chat wallpaper, encoded as a compact string so it fits in
 /// shared_preferences alongside the rest of the settings.
@@ -74,30 +73,13 @@ class WallpaperSpec {
 /// Picks wallpaper media and copies it into the app's private documents
 /// directory so it survives even if the original is moved/deleted.
 class WallpaperService {
-  Future<Directory> _dir() async {
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory('${docs.path}/wallpapers');
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return dir;
-  }
-
-  Future<String> _copyInto(String sourcePath, String suffix) async {
-    final dir = await _dir();
-    final ext = sourcePath.contains('.')
-        ? sourcePath.substring(sourcePath.lastIndexOf('.'))
-        : suffix;
-    final dest = '${dir.path}/wp_${DateTime.now().millisecondsSinceEpoch}$ext';
-    await File(sourcePath).copy(dest);
-    return dest;
-  }
-
   /// Pick a still image from the gallery and store it. Returns the spec or null
   /// if the user cancelled.
   Future<WallpaperSpec?> pickImage() async {
     final file = await ImagePicker()
         .pickImage(source: ImageSource.gallery, maxWidth: 2000, imageQuality: 90);
     if (file == null) return null;
-    final stored = await _copyInto(file.path, '.jpg');
+    final stored = await persistWallpaper(file.path, '.jpg');
     return WallpaperSpec.decode('image:$stored');
   }
 
@@ -110,7 +92,7 @@ class WallpaperService {
     if (res == null || res.files.isEmpty || res.files.first.path == null) {
       return null;
     }
-    final stored = await _copyInto(res.files.first.path!, '.gif');
+    final stored = await persistWallpaper(res.files.first.path!, '.gif');
     return WallpaperSpec.decode('gif:$stored');
   }
 
@@ -118,18 +100,10 @@ class WallpaperService {
   Future<WallpaperSpec?> pickVideo() async {
     final file = await ImagePicker().pickVideo(source: ImageSource.gallery);
     if (file == null) return null;
-    final stored = await _copyInto(file.path, '.mp4');
+    final stored = await persistWallpaper(file.path, '.mp4');
     return WallpaperSpec.decode('video:$stored');
   }
 
   /// Remove a stored wallpaper file (best-effort) when it's replaced/cleared.
-  Future<void> deleteFile(String path) async {
-    if (path.isEmpty) return;
-    try {
-      final f = File(path);
-      if (await f.exists()) await f.delete();
-    } catch (_) {
-      /* best effort */
-    }
-  }
+  Future<void> deleteFile(String path) => deleteLocalFile(path);
 }

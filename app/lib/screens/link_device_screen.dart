@@ -18,9 +18,9 @@ String? parseLinkCode(String? raw) {
   return code.isEmpty ? null : code;
 }
 
-/// "Gerät verknüpfen" — scan the QR shown by Ping for Windows to sign that
-/// desktop into this account (WhatsApp-Web style). Reached from Settings on the
-/// phone.
+/// "Verknüpfte Geräte" — scan the QR shown by Ping in the browser (web app) or
+/// the Windows desktop app to sign that device into this account (WhatsApp-Web
+/// style). Reached from Settings on the phone.
 class LinkDeviceScreen extends StatefulWidget {
   const LinkDeviceScreen({super.key});
 
@@ -74,11 +74,11 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
     }
 
     try {
-      await appState.approveDeviceLink(code, deviceLabel: 'Windows-PC');
+      await appState.approveDeviceLink(code, deviceLabel: 'Verknüpftes Gerät');
       navigator.pop();
       messenger.showSnackBar(
         const SnackBar(
-            content: Text('Gerät verknüpft. Du bist jetzt am PC angemeldet.')),
+            content: Text('Gerät verknüpft. Du bist jetzt dort angemeldet.')),
       );
     } on ApiException catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.message)));
@@ -130,13 +130,13 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Ping für Windows anmelden',
+                Text('Ping Web oder PC anmelden',
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text(
-                  'Öffne Ping auf deinem Windows-PC und halte den dort angezeigten '
-                  'QR-Code vor die Kamera. Danach ist der PC mit deinem Konto '
-                  'verbunden.',
+                  'Öffne Ping im Browser (Ping Web) oder auf deinem Windows-PC und '
+                  'halte den dort angezeigten QR-Code vor die Kamera. Danach ist '
+                  'das Gerät mit deinem Konto verbunden.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),

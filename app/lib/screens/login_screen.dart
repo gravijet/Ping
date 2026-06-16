@@ -36,15 +36,16 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _register = true; // start on the registration form
   bool _busy = false;
   bool _showPassword = false;
-  // On the Windows desktop build the primary path is linking via QR; the
-  // password form is a fallback the user can switch to.
-  bool _useQrLink = isDesktopPlatform;
+  // On the desktop and web builds the primary path is linking via QR (they have
+  // no phone number of their own); the password form is a fallback the user can
+  // switch to.
+  bool _useQrLink = usesQrLinkLogin;
 
   @override
   void initState() {
     super.initState();
-    // Desktop can't register (no SMS phone verification) — start on sign-in.
-    if (isDesktopPlatform) _register = false;
+    // Desktop/web can't register (no SMS phone verification) — start on sign-in.
+    if (usesQrLinkLogin) _register = false;
   }
 
   @override
@@ -143,7 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ],
                       ),
-                      child: (isDesktopPlatform && _useQrLink)
+                      child: (usesQrLinkLogin && _useQrLink)
                           ? _DesktopLinkPanel(
                               onUsePassword: () =>
                                   setState(() => _useQrLink = false),
@@ -154,9 +155,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  // No registration on desktop — only the toggle
-                                  // on mobile, where phone verification works.
-                                  if (!isDesktopPlatform) ...[
+                                  // No registration on desktop/web — only the
+                                  // toggle on mobile, where phone verification
+                                  // works.
+                                  if (!usesQrLinkLogin) ...[
                                     _modeToggle(scheme),
                                     const SizedBox(height: 22),
                                   ],
@@ -179,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                             ? 'Konto erstellen'
                                             : 'Anmelden'),
                                   ),
-                                  if (isDesktopPlatform)
+                                  if (usesQrLinkLogin)
                                     TextButton.icon(
                                       onPressed: _busy
                                           ? null
@@ -526,8 +528,8 @@ class _DesktopLinkPanelState extends State<_DesktopLinkPanel> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Öffne Ping auf deinem Handy → Einstellungen → „Ping für Windows" und '
-          'scanne diesen Code.',
+          'Öffne Ping auf deinem Handy → Einstellungen → „Verknüpfte Geräte" '
+          'und scanne diesen Code.',
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,

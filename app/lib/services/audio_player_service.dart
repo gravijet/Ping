@@ -55,7 +55,8 @@ class AudioController extends ChangeNotifier {
     notifyListeners();
     try {
       await _player.stop();
-      await _player.play(DeviceFileSource(path));
+      // On web [path] is a blob: URL (UrlSource); on native it's a real file.
+      await _player.play(kIsWeb ? UrlSource(path) : DeviceFileSource(path));
     } catch (_) {
       currentUrl = null;
       playing = false;

@@ -1,9 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
-
-import 'package:path_provider/path_provider.dart';
 
 import '../models/message.dart';
+import 'doc_store.dart';
 
 /// One bookmarked ("starred") message, together with a snapshot of the chat
 /// title so the saved-messages screen can show where it came from even if the
@@ -36,21 +34,13 @@ class StarredMessage {
 /// app documents directory; the message snapshots travel with the bookmark so
 /// "Gespeichert" works offline and survives the server purging history.
 class StarredStore {
-  File? _file;
-
-  Future<File> _resolve() async {
-    if (_file != null) return _file!;
-    final docs = await getApplicationDocumentsDirectory();
-    _file = File('${docs.path}/starred.json');
-    return _file!;
-  }
+  static const _name = 'starred.json';
 
   Future<List<StarredMessage>> load() async {
+    final raw = await readDoc(_name);
+    if (raw == null) return [];
     try {
-      final f = await _resolve();
-      if (!await f.exists()) return [];
-      final raw = jsonDecode(await f.readAsString()) as List;
-      final list = raw
+      final list = (jsonDecode(raw) as List)
           .map((e) => StarredMessage.fromJson(e as Map<String, dynamic>))
           .toList()
         ..sort((a, b) => b.starredAt.compareTo(a.starredAt));
@@ -60,14 +50,8 @@ class StarredStore {
     }
   }
 
-  Future<void> _save(List<StarredMessage> items) async {
-    try {
-      final f = await _resolve();
-      await f.writeAsString(jsonEncode(items.map((e) => e.toJson()).toList()));
-    } catch (_) {
-      /* best-effort */
-    }
-  }
+  Future<void> _save(List<StarredMessage> items) =>
+      writeDoc(_name, jsonEncode(items.map((e) => e.toJson()).toList()));
 
   /// Add or remove a bookmark; returns true when it is now starred.
   Future<bool> toggle(Message message, String chatTitle) async {
@@ -99,12 +83,5 @@ class StarredStore {
   Future<Set<String>> ids() async =>
       (await load()).map((e) => e.message.id).toSet();
 
-  Future<void> clearAll() async {
-    try {
-      final f = await _resolve();
-      if (await f.exists()) await f.delete();
-    } catch (_) {
-      /* ignore */
-    }
-  }
+  Future<void> clearAll() => deleteDoc(_name);
 }

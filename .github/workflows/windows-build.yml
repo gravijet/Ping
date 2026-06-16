@@ -2,22 +2,18 @@ name: Windows Desktop Build
 
 # Builds the Ping Windows desktop app and packages it as an installer.
 # This Linux production host can't compile a Windows .exe (Flutter Windows needs
-# Windows + Visual Studio), so CI does it on a windows-latest runner.
+# Windows + Visual Studio), so this runs on a windows-latest runner.
 #
-# Triggers:
-#   - pushing a tag like `v0.13.0`  -> builds + attaches the installer to a
-#     GitHub Release of that tag (the website links the "latest release" asset).
-#   - manual run (workflow_dispatch) -> builds + uploads the installer as a
-#     workflow artifact you can download to test.
+# The installer is uploaded as a downloadable workflow artifact only — Ping
+# hosts the .exe itself (drop it into server/public/downloads/ and the website's
+# /download/windows serves it). No GitHub Release is created.
+#
+# Run it manually from the Actions tab (workflow_dispatch), download the
+# "Ping-Windows-Setup" artifact, rename it to e.g. Ping-Setup-0.13.0.exe and copy
+# it into the server's downloads folder.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-
-permissions:
-  contents: write # needed to create/update the GitHub Release
 
 jobs:
   build:
@@ -38,13 +34,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          # On a tag build use the tag (v0.13.0 -> 0.13.0); otherwise read the
-          # version from pubspec.yaml (strip the +build suffix).
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            VER="$(grep -E '^version:' app/pubspec.yaml | head -1 | sed -E 's/version:\s*//; s/\+.*//')"
-          fi
+          VER="$(grep -E '^version:' app/pubspec.yaml | head -1 | sed -E 's/version:\s*//; s/\+.*//')"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "Building Ping for Windows v${VER}"
 
@@ -72,15 +62,8 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Ping-Windows-Setup
+          # Download this from the run, rename to Ping-Setup-<version>.exe and
+          # drop it into server/public/downloads/ on the server.
+          name: Ping-Setup-${{ steps.version.outputs.version }}
           path: app/windows/dist/Ping-Windows-Setup.exe
           if-no-files-found: error
-
-      - name: Attach installer to the release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          # Stable asset name -> the website can link:
-          # https://github.com/<owner>/<repo>/releases/latest/download/Ping-Windows-Setup.exe
-          files: app/windows/dist/Ping-Windows-Setup.exe
-          fail_on_unmatched_files: true

@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/settings.dart';
+import '../services/platform_files.dart';
 import '../services/wallpaper_service.dart';
 
 /// Paints a chat's background from a [WallpaperSpec]: a theme colour, a preset
@@ -70,15 +69,14 @@ class _MediaImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final file = File(path);
     return Stack(
       fit: StackFit.expand,
       children: [
         Container(color: fallback),
-        Image.file(
-          file,
+        localFileImage(
+          path,
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => Container(color: fallback),
+          errorChild: () => Container(color: fallback),
         ),
         // Keep the conversation legible over busy images.
         const _Scrim(),
@@ -103,7 +101,7 @@ class _MediaVideoState extends State<_MediaVideo> {
   @override
   void initState() {
     super.initState();
-    final c = VideoPlayerController.file(File(widget.path));
+    final c = localFileVideoController(widget.path);
     _controller = c;
     c.initialize().then((_) {
       if (!mounted) return;

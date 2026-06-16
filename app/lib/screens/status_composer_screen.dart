@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/api_client.dart';
 import '../services/app_state.dart';
+import '../services/platform_files.dart';
 
 /// Vibrant background colours for text statuses.
 const _statusColors = [
@@ -344,7 +344,7 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.file(File(widget.path));
+    _controller = localFileVideoController(widget.path);
     _controller.initialize().then((_) {
       if (!mounted) return;
       setState(() => _ready = true);
@@ -365,7 +365,15 @@ class _StatusVideoComposerState extends State<StatusVideoComposer> {
     setState(() => _busy = true);
     try {
       final state = context.read<AppState>();
-      final bytes = await File(widget.path).readAsBytes();
+      final bytes = await readLocalBytes(widget.path);
+      if (bytes == null) {
+        if (mounted) {
+          setState(() => _busy = false);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Das Video konnte nicht gelesen werden.')));
+        }
+        return;
+      }
       if (bytes.length > 30 * 1024 * 1024) {
         if (mounted) {
           setState(() => _busy = false);

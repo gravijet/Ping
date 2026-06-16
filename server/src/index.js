@@ -12,6 +12,7 @@ import { ensureOfficialUser } from './repo.js';
 import { startBackupScheduler } from './backup.js';
 import { startMaintenance } from './maintenance.js';
 import { mountDownloads } from './download.js';
+import { mountWebApp } from './webapp.js';
 import { requireCfAccess } from './cfAccess.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -51,6 +52,12 @@ export function createApp() {
       origin: config.corsOrigins === '*' ? true : config.corsOrigins.split(','),
     })
   );
+
+  // --- Ping Web (Flutter web app on its own subdomain) ---------------------
+  // Serves the web build for requests whose Host is config.webAppHost; /api,
+  // /ws and /health fall through to the normal handlers (same-origin, no CORS).
+  // A no-op on the apex domain, so the marketing site below is untouched.
+  mountWebApp(app);
 
   // --- In-app admin console bridge -----------------------------------------
   // The native app authenticates with a normal user JWT and can't carry a

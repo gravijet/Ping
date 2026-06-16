@@ -1,7 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
+import 'doc_store.dart';
 
 /// A message that was composed while offline and is waiting to be sent. It's
 /// stored verbatim on disk so the optimistic bubble survives an app restart and
@@ -52,21 +51,14 @@ class OutboxEntry {
 /// file in the app's documents directory. All operations are best-effort: a
 /// failed read or write simply behaves as an empty queue rather than throwing.
 class OutboxStore {
-  File? _file;
-
-  Future<File> _f() async {
-    if (_file != null) return _file!;
-    final docs = await getApplicationDocumentsDirectory();
-    _file = File('${docs.path}/outbox.json');
-    return _file!;
-  }
+  static const _name = 'outbox.json';
 
   Future<List<OutboxEntry>> load() async {
+    final raw = await readDoc(_name);
+    if (raw == null) return [];
     try {
-      final f = await _f();
-      if (!await f.exists()) return [];
-      final raw = jsonDecode(await f.readAsString()) as List;
-      return raw
+      final list = jsonDecode(raw) as List;
+      return list
           .map((e) => OutboxEntry.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (_) {
@@ -74,21 +66,8 @@ class OutboxStore {
     }
   }
 
-  Future<void> save(List<OutboxEntry> entries) async {
-    try {
-      final f = await _f();
-      await f.writeAsString(jsonEncode(entries.map((e) => e.toJson()).toList()));
-    } catch (_) {
-      /* best-effort */
-    }
-  }
+  Future<void> save(List<OutboxEntry> entries) =>
+      writeDoc(_name, jsonEncode(entries.map((e) => e.toJson()).toList()));
 
-  Future<void> clear() async {
-    try {
-      final f = await _f();
-      if (await f.exists()) await f.delete();
-    } catch (_) {
-      /* ignore */
-    }
-  }
+  Future<void> clear() => deleteDoc(_name);
 }
