@@ -80,14 +80,14 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 function WebView2Missing(): Boolean;
 var
   Pv: string;
-const
-  Client = 'Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
 begin
+  // GUID is Microsoft's fixed client id for the Evergreen runtime. Inno's Pascal
+  // Script has no local const block, so the path is inlined.
   Result := True;
-  if RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+  if RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
     Result := False
-  else if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+  else if RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
     Result := False
-  else if RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\' + Client, 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
+  else if RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Pv) and (Pv <> '') and (Pv <> '0.0.0.0') then
     Result := False;
 end;
