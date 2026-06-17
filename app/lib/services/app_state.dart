@@ -470,6 +470,7 @@ class AppState extends ChangeNotifier {
     themeMode = _themeFromString(prefs.getString(_kThemeMode));
     settings = PingSettings.decode(prefs.getString(_kSettings));
     TimeFormat.clock24h = settings.clock24h;
+    callController.ringtoneEnabled = settings.callRingtone;
     _applyPerformanceSettings();
     // Engage the app lock immediately on a cold start so a configured PIN
     // guards the very first frame (the gate watches [appLocked]).
@@ -1105,6 +1106,7 @@ class AppState extends ChangeNotifier {
     final sortChanged = next.chatSort != settings.chatSort;
     settings = next;
     TimeFormat.clock24h = next.clock24h;
+    callController.ringtoneEnabled = next.callRingtone;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kSettings, next.encode());
     _applyPerformanceSettings();

@@ -9,9 +9,13 @@ list(APPEND FLUTTER_PLUGIN_LIST
   firebase_core
   flutter_tts
   flutter_webrtc
+  local_notifier
   record_windows
+  screen_retriever_windows
+  tray_manager
   url_launcher_windows
   webview_windows
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

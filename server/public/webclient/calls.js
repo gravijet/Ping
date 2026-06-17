@@ -5,6 +5,7 @@
 
 import { api } from './api.js';
 import * as socket from './socket.js';
+import * as prefs from './prefs.js';
 import { el, clear, icon, avatar, toast } from './ui.js';
 
 let active = null; // current call session
@@ -26,6 +27,48 @@ export function wireCalls() {
   socket.on('call-end', () => endLocal('Anruf beendet'));
 }
 
+// ---- ringtones ------------------------------------------------------------
+// Synthesised on the fly (no audio asset): a bright "ring-ring" for incoming
+// calls, a calmer ringback while an outgoing call is still ringing. Controlled
+// by the callRingtone preference and stopped the instant the call state moves
+// on (answered / declined / ended).
+let ringCtx = null;
+let ringTimer = null;
+function ringAudio() {
+  try { ringCtx = ringCtx || new (window.AudioContext || window.webkitAudioContext)(); }
+  catch { return null; }
+  if (ringCtx.state === 'suspended') ringCtx.resume().catch(() => {});
+  return ringCtx;
+}
+function ringBurst(ctx, freqs, dur) {
+  const now = ctx.currentTime;
+  for (const f of freqs) {
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.16, now + 0.04);
+    g.gain.setValueAtTime(0.16, now + Math.max(0.06, dur - 0.08));
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(now); osc.stop(now + dur + 0.03);
+  }
+}
+function startRingtone(mode) {
+  if (!prefs.get('callRingtone')) return;
+  stopRingtone();
+  const ctx = ringAudio(); if (!ctx) return;
+  const cycle = () => {
+    if (mode === 'incoming') { ringBurst(ctx, [660, 550], 0.4); setTimeout(() => ringBurst(ctx, [660, 550], 0.4), 560); }
+    else ringBurst(ctx, [440, 480], 0.9);
+  };
+  cycle();
+  ringTimer = setInterval(cycle, mode === 'incoming' ? 2400 : 4000);
+}
+function stopRingtone() {
+  if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
+}
+
 // ---- outgoing -------------------------------------------------------------
 export async function startCall(peer, video) {
   if (active) { toast('Du bist bereits in einem Anruf.'); return; }
@@ -42,6 +85,7 @@ export async function startCall(peer, video) {
   active.localOfferSdp = offer.sdp;
   socket.send('call-offer', { to: peer.id, callId: active.callId, sdp: offer.sdp, video });
   active.state = 'ringing';
+  startRingtone('outgoing');
   renderCall();
 }
 
@@ -53,11 +97,13 @@ function onOffer(p) {
   active = newSession({ peer: p.from, video: p.video === true, outgoing: false,
     callId: p.callId, remoteOffer: p });
   active.state = 'incoming';
+  startRingtone('incoming');
   renderCall();
 }
 
 async function accept() {
   if (!active || active.state !== 'incoming') return;
+  stopRingtone();
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: active.video });
@@ -83,6 +129,7 @@ function reject() {
 
 async function onAnswer(p) {
   if (!active || !active.pc) return;
+  stopRingtone();
   await active.pc.setRemoteDescription({ type: 'answer', sdp: p.sdp });
   active.remoteSet = true;
   await flushIce();
@@ -119,7 +166,7 @@ async function makePeer() {
   };
   pc.ontrack = (e) => {
     e.streams[0]?.getTracks().forEach((t) => active.remoteStream.addTrack(t));
-    if (active.state !== 'connected') { active.state = 'connected'; active.startedAt = Date.now(); }
+    if (active.state !== 'connected') { active.state = 'connected'; active.startedAt = Date.now(); stopRingtone(); }
     renderCall();
   };
   pc.onconnectionstatechange = () => {
@@ -145,6 +192,7 @@ function hangup() {
 
 function endLocal(reason) {
   if (!active) return;
+  stopRingtone();
   try { active.pc?.close(); } catch {}
   active.localStream?.getTracks().forEach((t) => t.stop());
   active = null;

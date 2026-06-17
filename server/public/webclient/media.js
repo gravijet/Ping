@@ -112,8 +112,5 @@ async function downloadFile(att) {
 }
 
 function openLightbox(att) {
-  const img = el('img', { style: { maxWidth: '90vw', maxHeight: '86vh', borderRadius: '10px' } });
-  authedObjectUrl(att.url).then((u) => { if (u) img.src = u; });
-  const back = el('div', { class: 'modal-back', onClick: () => back.remove() }, img);
-  document.getElementById('modal-root').appendChild(back);
+  import('./gallery.js').then((m) => m.openGallery([att], 0));
 }

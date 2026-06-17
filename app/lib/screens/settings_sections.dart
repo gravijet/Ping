@@ -266,6 +266,16 @@ class NotificationSettingsScreen extends StatelessWidget {
                 : null,
           ),
           const Divider(),
+          _SettingsGroupLabel('Anrufe'),
+          SwitchListTile(
+            secondary: const Icon(Icons.ring_volume_rounded),
+            title: const Text('Anrufton'),
+            subtitle: const Text(
+                'Klingeln bei eingehenden und ausgehenden Anrufen.'),
+            value: s.callRingtone,
+            onChanged: (v) => update(s.copyWith(callRingtone: v)),
+          ),
+          const Divider(),
           _SettingsGroupLabel('Ruhezeiten'),
           SwitchListTile(
             secondary: const Icon(Icons.bedtime_rounded),

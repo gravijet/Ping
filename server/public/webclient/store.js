@@ -15,6 +15,7 @@ export const state = {
   lastSeen: new Map(),  // userId -> ts
   typing: new Map(),    // chatId -> Map<userId, timeoutHandle>
   search: '',
+  chatFilter: 'all',    // 'all' | 'unread' | 'fav' | 'groups'
 };
 
 export function on(event, fn) {

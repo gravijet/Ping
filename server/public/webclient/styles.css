@@ -16,67 +16,74 @@
 
 :root {
   --accent: #4d9bff;            /* overridable at runtime (localStorage) */
-  --accent-2: #7b6cff;          /* gradient partner for primary surfaces */
+  --accent-2: #4d9bff;          /* kept for compat; gradients now resolve flat */
 
-  --bg: #060912;
-  --bg-2: #0a0e1a;
-  --glass: rgba(20, 26, 40, 0.62);
-  --glass-2: rgba(28, 35, 53, 0.55);
-  --surface: rgba(255, 255, 255, 0.04);
+  /* Three calm, opaque planes: canvas (chat) · pane (list) · bar/elevated.
+     No translucency — the layout reads through contrast, not blur. */
+  --bg: #0d0f13;                /* main / conversation canvas */
+  --bg-2: #0d0f13;
+  --glass-2: #0f1318;           /* list pane + conversation header */
+  --glass: #161a21;             /* nav rail · composer · modals · menus */
+  --elevated: #1b2029;          /* popovers that sit above a surface */
+  --surface: rgba(255, 255, 255, 0.035);
   --surface-2: rgba(255, 255, 255, 0.06);
   --surface-3: rgba(255, 255, 255, 0.10);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #eef2fb;
-  --muted: #97a3bb;
-  --faint: #65708a;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  --text: #e9edf3;
+  --muted: #98a2b3;
+  --faint: #5b6573;
 
   --accent-press: color-mix(in srgb, var(--accent) 78%, #000);
-  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
-  --accent-line: color-mix(in srgb, var(--accent) 38%, transparent);
-  --accent-ink: color-mix(in srgb, var(--accent) 55%, #fff);
-  --accent-glow: color-mix(in srgb, var(--accent) 45%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 30%, transparent);
+  --accent-ink: color-mix(in srgb, var(--accent) 62%, #fff);
+  --accent-glow: transparent;   /* glows removed for the flat look */
 
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --danger: #ff5d73;
-  --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
+  --ok: #3fb950;
+  --warn: #d29922;
+  --danger: #f0506b;
+  --danger-soft: color-mix(in srgb, var(--danger) 15%, transparent);
 
-  --bubble-out: linear-gradient(135deg, var(--accent), var(--accent-2));
-  --bubble-in: rgba(255, 255, 255, 0.055);
+  --bubble-out: var(--accent);  /* flat fill, no gradient */
+  --bubble-in: var(--surface-2);
 
-  --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.35);
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 24px 70px rgba(0, 0, 0, 0.6);
+  /* Shadows live only on true overlays (menus, modals, toasts). */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow: 0 10px 34px rgba(0, 0, 0, 0.40);
+  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.50);
 
-  --radius: 18px;
-  --radius-lg: 24px;
-  --radius-sm: 12px;
-  --pane-left: clamp(320px, 30%, 460px);
-  --rail: 78px;
-  --header-h: 70px;
+  --radius: 14px;
+  --radius-lg: 18px;
+  --radius-sm: 10px;
+  --pane-left: clamp(300px, 28%, 420px);
+  --rail: 76px;
+  --header-h: 64px;
   --font-scale: 1;
   --font: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, Inter, system-ui, sans-serif;
+  /* Metadata (timestamps, sizes, counts) uses a mono face — a quiet signature. */
+  --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 :root[data-theme="light"] {
-  --bg: #eef1f9;
-  --bg-2: #e6ebf6;
-  --glass: rgba(255, 255, 255, 0.72);
-  --glass-2: rgba(255, 255, 255, 0.6);
+  --bg: #ffffff;
+  --bg-2: #ffffff;
+  --glass-2: #f5f7fa;
+  --glass: #ffffff;
+  --elevated: #ffffff;
   --surface: rgba(16, 22, 40, 0.035);
-  --surface-2: rgba(16, 22, 40, 0.06);
+  --surface-2: rgba(16, 22, 40, 0.055);
   --surface-3: rgba(16, 22, 40, 0.10);
   --line: rgba(16, 22, 40, 0.09);
-  --line-strong: rgba(16, 22, 40, 0.16);
-  --text: #0f1626;
-  --muted: #51607a;
-  --faint: #8593ad;
-  --bubble-in: #ffffff;
-  --shadow-sm: 0 4px 16px rgba(20, 30, 60, 0.10);
-  --shadow: 0 18px 50px rgba(20, 30, 60, 0.16);
-  --shadow-pop: 0 24px 70px rgba(20, 30, 60, 0.22);
+  --line-strong: rgba(16, 22, 40, 0.14);
+  --text: #0f141a;
+  --muted: #5b6573;
+  --faint: #8a93a3;
+  --bubble-in: #eef1f6;
+  --shadow-sm: 0 1px 2px rgba(20, 30, 60, 0.08);
+  --shadow: 0 10px 30px rgba(20, 30, 60, 0.12);
+  --shadow-pop: 0 16px 44px rgba(20, 30, 60, 0.18);
 }
 
 * { box-sizing: border-box; }
@@ -92,16 +99,13 @@ body {
   overflow: hidden;
   letter-spacing: -0.006em;
 }
-/* Ambient backdrop: two faint accent blooms over a deep base. */
+/* Flat canvas — no ambient blooms; depth comes from contrast, not glow. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(80% 60% at 8% -8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%),
-    radial-gradient(70% 60% at 100% 0%, color-mix(in srgb, var(--accent-2) 14%, transparent), transparent 55%),
-    linear-gradient(160deg, var(--bg-2), var(--bg));
+  background: var(--bg);
 }
 button { font-family: inherit; }
 input, textarea, select { font-family: inherit; }
@@ -353,6 +357,15 @@ a { color: var(--accent-ink); }
 .chatrow .tick.read { color: var(--accent); }
 .compact .chatrow { padding: 7px 12px; }
 .compact .chatrow .av { width: 40px !important; height: 40px !important; }
+/* per-row quick-actions: appears on hover (desktop), always visible on touch */
+.chatrow .row-menu {
+  position: absolute; top: 8px; right: 7px; width: 28px; height: 28px;
+  border-radius: 8px; background: var(--surface-2); color: var(--muted);
+  opacity: 0; transition: opacity .14s; flex: 0 0 auto;
+}
+.chatrow:hover .row-menu, .chatrow .row-menu:focus-visible { opacity: 1; }
+.chatrow .row-menu .icon { width: 17px; height: 17px; }
+@media (hover: none) { .chatrow .row-menu { opacity: .55; } }
 
 /* ============================================================================
    MAIN PANE
@@ -387,6 +400,10 @@ a { color: var(--accent-ink); }
 .conv-head .sub { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
 .conv-head .sub.typing { color: var(--accent); }
 .conv-head .actions { display: flex; gap: 2px; }
+/* The "back" chevron only matters in the single-pane (narrow) layout; the
+   responsive block below reveals it. Hidden by default so it never steals space
+   in the two-pane desktop layout. */
+.conv-head .back-only { display: none; }
 
 /* ---- thread --------------------------------------------------------------- */
 .thread {
@@ -467,9 +484,33 @@ a { color: var(--accent-ink); }
 }
 .msg.out .msg-actions { right: 4px; }
 .msg.in .msg-actions { left: 4px; }
-.msg:hover .msg-actions, .msg-actions:focus-within { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.msg:hover .msg-actions, .msg-actions:focus-within,
+.msg.show-actions .msg-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
 .msg-actions .iconbtn { width: 32px; height: 32px; border-radius: 9px; }
 .msg-actions .iconbtn .icon { width: 18px; height: 18px; }
+/* inline one-tap reactions on the hover bar */
+.msg-actions .qreact {
+  width: 31px; height: 32px; border: 0; background: transparent; cursor: pointer;
+  border-radius: 9px; font-size: 17px; line-height: 1; padding: 0;
+  display: grid; place-items: center; transition: transform .1s ease, background .14s;
+}
+.msg-actions .qreact:hover { background: var(--surface-2); transform: scale(1.22); }
+.msg-actions .qreact + .iconbtn { margin-left: 2px; position: relative; }
+.msg-actions .qreact + .iconbtn::before {
+  content: ""; position: absolute; left: -3px; top: 6px; bottom: 6px; width: 1px; background: var(--line);
+}
+
+/* inline message formatting (*bold* _italic_ ~strike~ `code` ||spoiler||) */
+.bubble code {
+  font-family: var(--mono); font-size: 0.92em; padding: 1px 5px;
+  border-radius: 6px; background: var(--surface-2); border: 1px solid var(--line);
+}
+.msg.out .bubble code { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.22); }
+.bubble .spoiler {
+  filter: blur(6px); border-radius: 4px; cursor: pointer;
+  transition: filter .18s ease; -webkit-user-select: none; user-select: none;
+}
+.bubble .spoiler:hover, .bubble .spoiler:active, .bubble .spoiler.revealed { filter: none; user-select: text; }
 
 .starred-flag { color: var(--warn); }
 .fwd-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--faint); font-style: italic; margin-bottom: 3px; }
@@ -655,8 +696,21 @@ a { color: var(--accent-ink); }
 
 /* swatches (accent / status bg) */
 .swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 0; }
-.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
+  position: relative; overflow: hidden; }
 .swatch.on { border-color: var(--text); box-shadow: 0 0 0 3px var(--bg-2), 0 0 0 5px var(--text); }
+.swatch .icon { width: 16px; height: 16px; color: var(--muted); }
+
+/* keyboard-shortcut chips shown in the settings → Tastenkürzel dialog */
+.kbd { font-family: var(--font); font-size: 12.5px; font-weight: 650;
+  padding: 3px 9px; border-radius: 8px; background: var(--surface-2);
+  border: 1px solid var(--line-strong); color: var(--text); white-space: nowrap; }
+.splash-glyph-sm { width: 60px; height: 60px; border-radius: 18px; display: grid;
+  place-items: center; font-size: 26px; font-weight: 800; color: #fff;
+  background: var(--bubble-out); box-shadow: 0 16px 32px -14px var(--accent-glow); margin: 0 auto; }
+
+/* "Kantig" bubble style — squares off chat bubbles (system pills stay round). */
+:root[data-bubbles="square"] .bubble:not(.system) { border-radius: 9px !important; }
 
 /* ============================================================================
    MODALS / SHEETS / MENUS / TOASTS
@@ -782,7 +836,15 @@ a { color: var(--accent-ink); }
 /* ============================================================================
    RESPONSIVE
    ========================================================================== */
-@media (max-width: 980px) {
+/* Medium windows (e.g. a half-screen browser or a small laptop): keep BOTH the
+   contacts sidebar and the open conversation visible — WhatsApp-style — but
+   tighten the rail and list pane so the conversation still has room. */
+@media (max-width: 1080px) {
+  :root { --pane-left: clamp(264px, 32%, 360px); --rail: 64px; }
+  .thread { padding: 16px clamp(12px, 4%, 40px) 8px; }
+}
+/* Only below the tablet width do we fall back to one pane at a time. */
+@media (max-width: 760px) {
   .shell { grid-template-columns: var(--rail) 1fr; }
   .main { display: none; }
   .shell.has-active .side { display: none; }
@@ -827,3 +889,247 @@ a { color: var(--accent-ink); }
     transition-duration: 0.01ms !important; scroll-behavior: auto !important;
   }
 }
+
+/* ============================================================================
+   CALM FLAT RE-SKIN
+   Overrides the few glossy bits the base sheet still sets (glass blur, gradient
+   bubbles, accent glows, round-everything) so the whole client reads as a calm,
+   content-first surface where the accent only ever signals intent.
+   ========================================================================== */
+.navrail, .side, .conv-head, .composer, .modal, .menu, .toast, .emoji-pop,
+.jump-btn, .msg-actions, .modal-back, .call-overlay, .infopanel, .palette-back,
+.lockscreen, .gallery {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.navrail { background: var(--glass); }
+.side, .conv-head { background: var(--glass-2); }
+.composer { box-shadow: none; border-radius: 16px; }
+.composer .send { box-shadow: none; }
+.modal-back { background: color-mix(in srgb, var(--bg) 50%, rgba(0, 0, 0, 0.62)); }
+.call-overlay { background: var(--bg); }
+
+/* Calmer corner radii everywhere. */
+.nav-item { border-radius: 12px; }
+.nav-logo { border-radius: 13px; box-shadow: none; }
+.chatrow, .chatrow.active::after, .urow { border-radius: 10px; }
+.search-box { border-radius: 12px; }
+.input, textarea.input, select.input, .btn, .iconbtn { border-radius: 10px; }
+.splash .glyph { box-shadow: none; border-radius: 24px; }
+
+/* Flat bubbles: solid fills, gentle radius, one squared tail corner, no shadow. */
+.bubble { box-shadow: none; border-radius: 16px; }
+.msg.out .bubble { box-shadow: none; }
+.msg.in.first .bubble { border-top-left-radius: 5px; }
+.msg.out.first .bubble { border-top-right-radius: 5px; }
+.att-img, .att-video video { border-radius: 12px; }
+
+/* In-bubble surfaces use tokens so they survive the light theme (incoming side;
+   the accent-filled outgoing side keeps its dark overlay from the base sheet). */
+.msg.in .reply-quote, .msg.in .att-file { background: var(--surface-2); }
+.msg.in .poll-opt .bar { background: var(--surface-3); }
+.msg.in .voice-msg .play { background: var(--surface-3); }
+
+/* Metadata in mono with tabular figures — the quiet signature. */
+.bubble .meta, .chatrow .time, .chatrow .badge, .nav-badge, .att-file .fsize,
+.voice-msg .vtime, .cstate, .rec-time {
+  font-family: var(--mono);
+  font-feature-settings: "tnum" 1;
+}
+
+/* Auth: calm flat hero, accent as a solid (not a gradient wash). */
+.auth-hero {
+  background: var(--glass-2);
+  border-right: 1px solid var(--line);
+}
+.auth-hero h1 .accent { -webkit-text-fill-color: var(--accent); color: var(--accent); }
+
+/* ---- info panel (slide-in right) ----------------------------------------- */
+.infopanel-scrim {
+  position: fixed; inset: 0; z-index: 89; background: rgba(0, 0, 0, 0.32);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.infopanel-scrim.open { opacity: 1; pointer-events: auto; }
+.infopanel {
+  position: fixed; top: 0; right: 0; z-index: 90;
+  width: min(380px, 92vw); height: 100dvh;
+  background: var(--glass); border-left: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .22s ease;
+  box-shadow: var(--shadow);
+}
+.infopanel.open { transform: none; }
+.infopanel-head {
+  display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  min-height: var(--header-h); border-bottom: 1px solid var(--line);
+}
+.infopanel-head h3 { margin: 0; font-size: 16px; font-weight: 680; flex: 1; }
+.infopanel-body { flex: 1; overflow-y: auto; padding: 18px; }
+.ip-hero { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.ip-hero h2 { margin: 8px 0 0; font-size: 20px; font-weight: 720; }
+.ip-hero .sub { color: var(--muted); font-size: 13.5px; }
+.ip-section {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--faint); padding: 20px 0 8px;
+}
+.ip-media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.ip-media-grid img {
+  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px;
+  cursor: pointer; background: var(--surface-2);
+}
+.ip-row { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ip-row .k { font-size: 12px; color: var(--faint); }
+.ip-row .v { font-size: 14.5px; }
+
+/* ---- command palette (Ctrl/⌘K) ------------------------------------------- */
+.palette-back {
+  position: fixed; inset: 0; z-index: 130; display: flex; justify-content: center;
+  align-items: flex-start; padding: 12vh 16px 16px; background: rgba(0, 0, 0, 0.42);
+  animation: fade .14s ease;
+}
+.palette {
+  width: 100%; max-width: 560px; background: var(--elevated);
+  border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow-pop);
+  overflow: hidden; display: flex; flex-direction: column; max-height: 64vh;
+  animation: pop .16s cubic-bezier(.2,.9,.3,1.05);
+}
+.palette-input { display: flex; align-items: center; gap: 11px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.palette-input .icon { color: var(--muted); }
+.palette-input input { flex: 1; border: 0; outline: 0; background: none; color: var(--text); font-size: 16px; }
+.palette-list { overflow-y: auto; padding: 6px; }
+.palette-group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); padding: 10px 12px 4px; }
+.palette-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+.palette-item .icon { width: 19px; height: 19px; color: var(--muted); flex: 0 0 auto; }
+.palette-item.sel { background: var(--surface-2); }
+.palette-item .pi-main { flex: 1; min-width: 0; }
+.palette-item .pi-title { font-size: 14.5px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-item .pi-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.palette-item .pi-hint { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+/* ---- app lock screen ----------------------------------------------------- */
+.lockscreen {
+  position: fixed; inset: 0; z-index: 300; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; background: var(--bg);
+}
+.lockscreen .lock-logo {
+  width: 60px; height: 60px; border-radius: 18px; display: grid; place-items: center;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: 26px;
+}
+.lockscreen h2 { margin: 0; font-size: 19px; font-weight: 680; }
+.lockscreen .hint { color: var(--muted); }
+.lock-dots { display: flex; gap: 12px; height: 16px; }
+.lock-dots i { width: 13px; height: 13px; border-radius: 50%; background: var(--surface-3); transition: background .15s; }
+.lock-dots i.on { background: var(--accent); }
+.lock-pad { display: grid; grid-template-columns: repeat(3, 72px); gap: 14px; margin-top: 6px; }
+.lock-key {
+  height: 62px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font-size: 22px; font-weight: 600; cursor: pointer;
+  transition: background .12s, transform .1s;
+}
+.lock-key:hover { background: var(--surface-2); }
+.lock-key:active { transform: scale(.95); }
+.lock-key.wide { font-size: 14px; }
+.lockscreen.shake { animation: shake .4s; }
+@keyframes shake { 25% { transform: translateX(-8px); } 50% { transform: translateX(8px); } 75% { transform: translateX(-5px); } }
+
+/* ---- media gallery / lightbox -------------------------------------------- */
+.gallery { position: fixed; inset: 0; z-index: 160; display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.94); }
+.gallery-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; color: #fff; }
+.gallery-head .g-title { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gallery-head .iconbtn { color: #fff; }
+.gallery-head .iconbtn:hover { background: rgba(255, 255, 255, 0.14); }
+.gallery-stage { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+.gallery-stage img, .gallery-stage video { max-width: 94vw; max-height: 78vh; border-radius: 6px; user-select: none; }
+.gallery-stage img { cursor: zoom-in; transition: transform .2s ease; }
+.gallery-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px;
+  border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.12); color: #fff;
+  cursor: pointer; display: grid; place-items: center;
+}
+.gallery-nav:hover { background: rgba(255, 255, 255, 0.22); }
+.gallery-nav.prev { left: 18px; }
+.gallery-nav.next { right: 18px; }
+.gallery-strip { display: flex; gap: 6px; padding: 10px 16px; overflow-x: auto; justify-content: center; }
+.gallery-strip img { width: 52px; height: 52px; object-fit: cover; border-radius: 8px; cursor: pointer; opacity: .5; transition: opacity .15s; }
+.gallery-strip img:hover { opacity: .8; }
+.gallery-strip img.on { opacity: 1; outline: 2px solid var(--accent); }
+
+/* ---- draw a sticker ------------------------------------------------------ */
+.draw-wrap { display: flex; flex-direction: column; gap: 12px; }
+.draw-canvas { width: 100%; aspect-ratio: 4 / 3; background: #fff; border-radius: 12px; border: 1px solid var(--line); touch-action: none; cursor: crosshair; }
+.draw-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.draw-colors { display: flex; gap: 6px; }
+.draw-color { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.draw-color.on { border-color: var(--text); }
+
+/* ---- settings: category layout ------------------------------------------- */
+.settings-layout { display: grid; grid-template-columns: 172px 1fr; gap: 18px; min-height: 400px; }
+.settings-cats { display: flex; flex-direction: column; gap: 2px; }
+.settings-cat {
+  display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 10px;
+  border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px;
+  font-weight: 560; text-align: left;
+}
+.settings-cat .icon { width: 18px; height: 18px; flex: 0 0 auto; }
+.settings-cat:hover { background: var(--surface); color: var(--text); }
+.settings-cat.on { background: var(--accent-soft); color: var(--accent-ink); }
+.settings-content { min-width: 0; }
+@media (max-width: 560px) {
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-cats { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .settings-cat span { display: none; }
+}
+
+/* ---- chat-list helper rows (Saved, Archived) ----------------------------- */
+.list-link {
+  display: flex; align-items: center; gap: 13px; padding: 11px 12px; border-radius: 10px;
+  cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 560;
+}
+.list-link:hover { background: var(--surface); color: var(--text); }
+.list-link .icon { width: 19px; height: 19px; flex: 0 0 auto; }
+.list-link .count { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+/* ---- chat-list quick filters --------------------------------------------- */
+.chat-filters { display: flex; margin: 0 14px 8px; padding: 3px; gap: 2px; }
+.chat-filters button { flex: 1; padding: 6px 4px; font-size: 12.5px; }
+
+/* ---- in-chat search bar -------------------------------------------------- */
+.chat-search {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--glass-2); border-bottom: 1px solid var(--line);
+}
+.chat-search > .icon { color: var(--muted); flex: 0 0 auto; }
+.cs-input { flex: 1; border: 0; outline: 0; background: none; color: var(--text); font-size: 14.5px; }
+.cs-count { font-family: var(--mono); font-size: 12px; color: var(--faint); min-width: 38px; text-align: right; }
+.chat-search .iconbtn { width: 34px; height: 34px; }
+.bubble.hit { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.bubble.hit-current { outline: 2px solid var(--accent); }
+
+/* ---- multi-select --------------------------------------------------------- */
+.select-bar {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+  background: var(--glass-2); border-bottom: 1px solid var(--line);
+}
+.sel-count { font-weight: 650; font-size: 14px; }
+.thread.selecting .msg { cursor: pointer; }
+.thread.selecting .msg-actions { display: none !important; }
+.thread.selecting .msg.selected .bubble { outline: 2px solid var(--accent); }
+.thread.selecting .msg.selected::after {
+  content: ""; position: absolute; inset: -4px -10px; border-radius: 14px;
+  background: var(--accent-soft); z-index: -1;
+}
+
+/* ---- accessibility: underline links & larger targets --------------------- */
+/* Both are opt-in via Einstellungen → Design → Barrierefreiheit. They key off
+   data-attributes set by prefs.applyVisual(), so they re-apply instantly. */
+:root[data-underline="on"] a:not(.btn):not(.nav-item):not(.swatch) { text-decoration: underline; }
+:root[data-underline="on"] .link,
+:root[data-underline="on"] .msg-body a { text-decoration: underline; }
+
+:root[data-targets="large"] .iconbtn { width: 42px; height: 42px; }
+:root[data-targets="large"] .set-row { padding-top: 14px; padding-bottom: 14px; }
+:root[data-targets="large"] .btn { min-height: 44px; }
+:root[data-targets="large"] .chat-row { padding-top: 12px; padding-bottom: 12px; }
+:root[data-targets="large"] .nav-item { min-height: 52px; }
+:root[data-targets="large"] .menu-item { padding-top: 11px; padding-bottom: 11px; }

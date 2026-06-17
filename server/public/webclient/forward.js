@@ -7,9 +7,14 @@ import { api } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast } from './ui.js';
 
-export function forwardMessage(msg) {
-  if (!msg || msg.deleted || msg.type === 'system' || msg.type === 'poll') {
-    toast('Diese Nachricht kann nicht weitergeleitet werden.');
+// Forward a single message (kept for existing call sites).
+export function forwardMessage(msg) { forwardMessages([msg]); }
+
+// Forward one or more messages to one or more chats.
+export function forwardMessages(msgs) {
+  const list = (msgs || []).filter((m) => m && !m.deleted && m.type !== 'system' && m.type !== 'poll');
+  if (!list.length) {
+    toast('Diese Nachricht(en) können nicht weitergeleitet werden.');
     return;
   }
   const selected = new Set();
@@ -19,7 +24,7 @@ export function forwardMessage(msg) {
     [icon('forward'), 'Weiterleiten']);
 
   const m = modal({
-    title: 'Weiterleiten',
+    title: list.length > 1 ? `Weiterleiten (${list.length})` : 'Weiterleiten',
     body: (b) => b.append(
       el('div', { class: 'field' }, search),
       listWrap,
@@ -61,22 +66,24 @@ export function forwardMessage(msg) {
   async function doSend() {
     if (!selected.size) return;
     sendBtn.disabled = 'disabled'; sendBtn.textContent = 'Senden …';
-    const payload = msg.attachment
-      ? { type: msg.type || 'file', attachment: stripAttachment(msg.attachment),
-          ...(msg.body ? { body: msg.body } : {}) }
-      : { body: msg.body || '' };
     let ok = 0;
     for (const chatId of selected) {
-      try { const r = await api.post(`/chats/${chatId}/messages`, payload);
-        store.addMessage(chatId, r.message);
-        const c = store.getChat(chatId);
-        if (c && r.message) { c.lastMessage = r.message; c.updatedAt = r.message.createdAt; }
-        ok += 1;
-      } catch (e) { toast(e.message, 'err'); }
+      for (const msg of list) {
+        const payload = msg.attachment
+          ? { type: msg.type || 'file', attachment: stripAttachment(msg.attachment),
+              ...(msg.body ? { body: msg.body } : {}) }
+          : { body: msg.body || '' };
+        try { const r = await api.post(`/chats/${chatId}/messages`, payload);
+          store.addMessage(chatId, r.message);
+          const c = store.getChat(chatId);
+          if (c && r.message) { c.lastMessage = r.message; c.updatedAt = r.message.createdAt; }
+          ok += 1;
+        } catch (e) { toast(e.message, 'err'); }
+      }
     }
     store.emit('chats');
     m.close();
-    if (ok) toast(`An ${ok} Chat${ok > 1 ? 's' : ''} weitergeleitet.`, 'ok');
+    if (ok) toast(`Weitergeleitet an ${selected.size} Chat${selected.size > 1 ? 's' : ''}.`, 'ok');
   }
 }
 

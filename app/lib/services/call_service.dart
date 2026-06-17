@@ -59,6 +59,10 @@ class CallController extends ChangeNotifier {
   bool speakerOn = true;
   bool incomingIsVideo = false;
 
+  /// Whether call ring tones / ringback should sound. Mirrors the user's
+  /// `callRingtone` setting; kept in sync by [AppState].
+  bool ringtoneEnabled = true;
+
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
   final RingtoneService _ring = RingtoneService();
@@ -209,7 +213,7 @@ class CallController extends ChangeNotifier {
     state = CallState.outgoing;
     notifyListeners();
     _setNativeCallActive(true);
-    _ring.startOutgoing();
+    if (ringtoneEnabled) _ring.startOutgoing();
     _armRingTimeout();
     await _ensureRenderers();
     await _createPeer();
@@ -257,7 +261,7 @@ class CallController extends ChangeNotifier {
     state = CallState.incoming;
     notifyListeners();
     _setNativeCallActive(true);
-    _ring.startIncoming();
+    if (ringtoneEnabled) _ring.startIncoming();
     _armRingTimeout();
   }
 

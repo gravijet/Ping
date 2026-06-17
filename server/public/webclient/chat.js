@@ -15,14 +15,19 @@ import { messagePreview } from './format.js';
 import { startCall } from './calls.js';
 import { openEmojiPicker, closeEmoji } from './emoji.js';
 import { startRecorder } from './voice.js';
-import { forwardMessage } from './forward.js';
+import { forwardMessage, forwardMessages } from './forward.js';
+import { openInfoPanel, closeInfoPanel } from './infopanel.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
+// Shown inline on the hover action bar so the most common reactions are one tap
+// away and visible — no need to discover the hidden picker menu first.
+const QUICK_REACTIONS = ['👍', '❤️', '😂'];
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|️|‍){1,8}$/u;
 let cur = null;
 
 export function closeChat() {
   if (cur) { cur.unsubs.forEach((u) => u()); if (cur.recorder) cur.recorder.cancel(); cur = null; }
+  closeInfoPanel();
 }
 
 export async function openChat(slot, chatId, { onBack } = {}) {
@@ -78,19 +83,19 @@ function buildHead(chat, onBack) {
 
   const sub = el('div', { class: 'sub', id: 'head-sub' });
   const head = el('div', { class: 'conv-head' }, [
-    el('button', { class: 'iconbtn back-only', title: 'Zurück',
-      onClick: onBack, style: { display: innerWidth <= 980 ? '' : 'none' } }, icon('back')),
+    el('button', { class: 'iconbtn back-only', title: 'Zurück', onClick: onBack }, icon('back')),
     el('div', { class: 'peer', onClick: () => openChatInfo(chat) }, [
       av,
       el('div', {}, [el('div', { class: 'title', text: chat.self ? 'Notiz an mich' : chat.title }), sub]),
     ]),
-    el('div', { class: 'actions' }, isDirect && !chat.self ? [
-      el('button', { class: 'iconbtn', title: 'Videoanruf', onClick: () => startCall(peer, true) }, icon('video')),
-      el('button', { class: 'iconbtn', title: 'Sprachanruf', onClick: () => startCall(peer, false) }, icon('phone')),
+    el('div', { class: 'actions' }, [
+      isDirect && !chat.self
+        ? el('button', { class: 'iconbtn', title: 'Videoanruf', onClick: () => startCall(peer, true) }, icon('video')) : null,
+      isDirect && !chat.self
+        ? el('button', { class: 'iconbtn', title: 'Sprachanruf', onClick: () => startCall(peer, false) }, icon('phone')) : null,
+      el('button', { class: 'iconbtn', title: 'Suchen (Strg+F)', onClick: () => toggleChatSearch() }, icon('search')),
       el('button', { class: 'iconbtn', title: 'Menü', onClick: (e) => chatMenu(e, chat) }, icon('menu')),
-    ] : [
-      el('button', { class: 'iconbtn', title: 'Menü', onClick: (e) => chatMenu(e, chat) }, icon('menu')),
-    ]),
+    ].filter(Boolean)),
   ]);
   setTimeout(updateHeadSub, 0);
   return head;
@@ -125,6 +130,7 @@ function renderThread(forceBottom) {
   const stick = forceBottom || nearBottom(thread);
   const prevH = thread.scrollHeight, prevTop = thread.scrollTop;
   clear(thread);
+  thread.classList.toggle('selecting', !!cur.select);
   const msgs = store.getHistory(cur.chatId);
   if (!msgs.length) {
     thread.appendChild(el('div', { class: 'daysep', text: 'Noch keine Nachrichten' }));
@@ -148,6 +154,7 @@ function renderThread(forceBottom) {
   if (stick) thread.scrollTop = thread.scrollHeight;
   else thread.scrollTop = prevTop + (thread.scrollHeight - prevH);
   updateJump();
+  if (cur.search?.q) applySearchHighlights();
 }
 
 function renderMessage(m, chat, first) {
@@ -175,8 +182,8 @@ function renderMessage(m, chat, first) {
   } else if (m.type === 'poll') {
     bubble.appendChild(renderPoll(m));
   } else {
-    if (m.attachment) bubble.appendChild(renderAttachment(m.attachment));
-    if (m.body) bubble.appendChild(el('span', { html: linkify(m.body) }));
+    if (m.attachment) bubble.appendChild(renderAttachment(m.attachment, { onImageClick: () => openChatMedia(m) }));
+    if (m.body) bubble.appendChild(el('span', { html: richText(m.body) }));
   }
 
   if (!m.deleted) {
@@ -192,11 +199,28 @@ function renderMessage(m, chat, first) {
   }
 
   const reactWrap = renderReactions(m);
-  const wrap = el('div', { class: `msg ${mine ? 'out' : 'in'} ${first ? 'first' : ''}` },
+  const selected = cur.select && cur.select.has(m.id);
+  const wrap = el('div', { class: `msg ${mine ? 'out' : 'in'} ${first ? 'first' : ''} ${selected ? 'selected' : ''}` },
     [bubble, reactWrap].filter(Boolean));
   if (!m.deleted) {
     wrap.appendChild(buildMsgActions(m, mine));
     wrap.addEventListener('contextmenu', (e) => msgMenu(e, m, mine));
+    // On touch devices there's no hover, so a tap on the bubble reveals the
+    // action bar (desktop keeps the hover behaviour). In selection mode a tap
+    // toggles the message instead. Ignore taps on links/attachments/buttons.
+    wrap.addEventListener('click', (e) => {
+      if (cur.select) {
+        if (e.target.closest('a, .reaction')) return;
+        toggleSelect(m.id, wrap);
+        return;
+      }
+      if (matchMedia('(hover: hover)').matches) return;
+      if (e.target.closest('a, .att-img, .att-file, .reaction, button')) return;
+      if (window.getSelection && String(window.getSelection())) return;
+      document.querySelectorAll('.msg.show-actions').forEach((n) =>
+        n !== wrap && n.classList.remove('show-actions'));
+      wrap.classList.toggle('show-actions');
+    });
   }
   return wrap;
 }
@@ -210,8 +234,12 @@ function renderReactions(m) {
 }
 
 function buildMsgActions(m, mine) {
+  const quick = QUICK_REACTIONS.map((emoji) =>
+    el('button', { class: 'qreact', title: `Mit ${emoji} reagieren`,
+      onClick: () => toggleReaction(m, emoji) }, emoji));
   return el('div', { class: 'msg-actions' }, [
-    el('button', { class: 'iconbtn', title: 'Reagieren', onClick: (e) => reactionPicker(e, m) }, icon('react')),
+    ...quick,
+    el('button', { class: 'iconbtn', title: 'Weitere Reaktion', onClick: (e) => reactionPicker(e, m) }, icon('react')),
     el('button', { class: 'iconbtn', title: 'Antworten', onClick: () => setReply(m) }, icon('reply')),
     el('button', { class: 'iconbtn', title: 'Mehr', onClick: (e) => msgMenu(e, m, mine) }, icon('menu')),
   ]);
@@ -219,9 +247,14 @@ function buildMsgActions(m, mine) {
 
 function msgMenu(e, m, mine) {
   const starred = prefs.isStarred(cur.chatId, m.id);
+  const chat = store.getChat(cur.chatId);
+  const canReplyPrivately = chat?.type === 'group' && !mine && m.senderId;
   openMenu(e, [
     { label: 'Antworten', icon: 'reply', onClick: () => setReply(m) },
+    canReplyPrivately ? { label: 'Privat antworten', icon: 'user',
+      onClick: () => import('./contacts.js').then((c) => c.startDirect(m.senderId)) } : null,
     { label: 'Weiterleiten', icon: 'forward', onClick: () => forwardMessage(m) },
+    { label: 'Auswählen', icon: 'check', onClick: () => enterSelect(m) },
     { label: starred ? 'Markierung entfernen' : 'Markieren', icon: 'star',
       onClick: () => { prefs.toggleStar(cur.chatId, m.id, starSnapshot(m)); renderThread(); } },
     mine && m.type === 'text' && !m.attachment
@@ -341,7 +374,8 @@ function renderComposer() {
   if (cur.replyTo) wrap.appendChild(contextBar('reply', cur.replyTo, () => { cur.replyTo = null; renderComposer(); }));
   if (cur.editing) wrap.appendChild(contextBar('edit', cur.editing, () => { cur.editing = null; renderComposer(); }));
 
-  const ta = el('textarea', { rows: '1', placeholder: 'Nachricht schreiben …' });
+  const ta = el('textarea', { rows: '1', placeholder: 'Nachricht schreiben …',
+    spellcheck: prefs.get('spellcheck') ? 'true' : 'false' });
   if (cur.editing) ta.value = cur.editing.body || '';
   const sendBtn = el('button', { class: 'send', title: 'Senden', onClick: submit }, icon('send'));
   const micBtn = el('button', { class: 'send', title: 'Sprachnachricht', onClick: startVoice }, icon('mic'));
@@ -365,6 +399,7 @@ function renderComposer() {
 
   const composer = el('div', { class: 'composer' }, [
     el('button', { class: 'iconbtn', title: 'Anhängen', onClick: (e) => attachMenu(e) }, icon('attach')),
+    el('button', { class: 'iconbtn', title: 'Schnellantwort', onClick: (e) => quickReplyMenu(e, ta) }, icon('bolt')),
     el('div', { class: 'grow' }, [emojiBtn, ta]),
     right,
   ]);
@@ -453,13 +488,71 @@ function contextBar(kind, m, onClose) {
 function setReply(m) { cur.editing = null; cur.replyTo = m; renderComposer(); cur.ta?.focus(); }
 function setEdit(m) { cur.replyTo = null; cur.editing = m; renderComposer(); }
 
+// Canned replies (managed in Einstellungen → Chats): tap to drop one into the
+// composer, ready to edit or send.
+function quickReplyMenu(e, ta) {
+  const replies = prefs.get('quickReplies') || [];
+  if (!replies.length) { toast('Lege Schnellantworten in den Einstellungen an.'); return; }
+  openMenu(e, replies.map((text) => ({ label: text, onClick: () => insertAtCursor(ta, text) })));
+}
+
 function attachMenu(e) {
   openMenu(e, [
     { label: 'Foto / Video', icon: 'image', onClick: () => attach('image/*,video/*') },
     { label: 'Datei', icon: 'file', onClick: () => attach('') },
+    { label: 'Kontakt', icon: 'user', onClick: () => shareContact() },
+    { label: 'Standort', icon: 'pin', onClick: () => sendLocation() },
+    { label: 'Zeichnen', icon: 'paint', onClick: () => import('./draw.js').then((m) => m.drawModal(cur.chatId)) },
     { label: 'Umfrage', icon: 'poll', onClick: () => import('./groups.js').then((m) => m.newPollModal(cur.chatId)) },
     { label: 'Geplante Nachricht', icon: 'schedule', onClick: () => scheduleModal() },
   ]);
+}
+
+// Share one of your contacts (from an existing direct chat) as a message with
+// their name and number. Looks the phone up on demand if the chat summary
+// didn't carry it. No server change — it's a normal text message.
+function shareContact() {
+  const chatId = cur.chatId;
+  const directs = store.chatsSorted().filter((c) => c.type === 'direct' && !c.self && c.otherUser);
+  const mdl = modal({ title: 'Kontakt senden', body: (b) => {
+    if (!directs.length) { b.append(el('div', { class: 'pane-empty', text: 'Noch keine Kontakte.' })); return; }
+    b.append(el('p', { class: 'hint', text: 'Wähle einen Kontakt zum Teilen.' }));
+    for (const c of directs) {
+      const u = c.otherUser;
+      b.append(el('button', { class: 'urow', onClick: () => pick(u) }, [
+        avatar(u, 44, { kind: 'user' }),
+        el('div', { class: 'meta' }, el('div', { class: 'uname', text: u.displayName })),
+      ]));
+    }
+  } });
+  async function pick(u) {
+    mdl.close();
+    let phone = u.phone;
+    if (!phone) { try { const r = await api.get(`/users/${u.id}`); phone = r.user?.phone; } catch { /* optional */ } }
+    const body = `👤 Kontakt: ${u.displayName}` + (phone ? `\n📞 ${phone}` : '');
+    try { const r = await api.post(`/chats/${chatId}/messages`, { body }); store.addMessage(chatId, r.message); }
+    catch (e) { toast(e.message || 'Senden fehlgeschlagen', 'err'); }
+  }
+}
+
+// Share the current device location as a message with a maps link. No server
+// change needed — it rides along as a normal text message (the link is tappable
+// in every client, web and native).
+function sendLocation() {
+  if (!navigator.geolocation) { toast('Standort wird nicht unterstützt.', 'err'); return; }
+  const chatId = cur.chatId;
+  toast('Standort wird ermittelt …');
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = pos.coords.latitude.toFixed(6);
+    const lng = pos.coords.longitude.toFixed(6);
+    const body = `📍 Mein Standort: https://maps.google.com/?q=${lat},${lng}`;
+    try {
+      const r = await api.post(`/chats/${chatId}/messages`, { body });
+      store.addMessage(chatId, r.message);
+    } catch (err) { toast(err.message || 'Senden fehlgeschlagen', 'err'); }
+  }, (err) => {
+    toast(err.code === err.PERMISSION_DENIED ? 'Standort-Zugriff verweigert.' : 'Standort nicht verfügbar.', 'err');
+  }, { enableHighAccuracy: true, timeout: 10000 });
 }
 async function attach(accept) {
   const file = await pickFile(accept);
@@ -526,6 +619,7 @@ async function listScheduled() {
 
 // ---- typing throttle ------------------------------------------------------
 function emitTyping(on) {
+  if (!prefs.get('sendTyping')) return;
   if (on === cur.typingOn && on) return;
   if (on !== cur.typingOn) { socket.send('typing', { chatId: cur.chatId, typing: on }); cur.typingOn = on; }
   clearTimeout(cur.typingTimer);
@@ -571,17 +665,155 @@ function onPaste(e) {
   if (item) { const file = item.getAsFile(); if (file) { e.preventDefault(); uploadAndSend(file); } }
 }
 
+// ---- in-chat search -------------------------------------------------------
+export function toggleChatSearch() {
+  if (!cur) return;
+  if (cur.searchBar) return closeChatSearch();
+  if (cur.select) exitSelect();
+  const input = el('input', { class: 'cs-input', placeholder: 'In dieser Unterhaltung suchen …' });
+  const count = el('span', { class: 'cs-count' });
+  const upIco = icon('chevron'); upIco.style.transform = 'rotate(-90deg)';
+  const downIco = icon('chevron'); downIco.style.transform = 'rotate(90deg)';
+  const bar = el('div', { class: 'chat-search' }, [
+    icon('search', 'sm'), input, count,
+    el('button', { class: 'iconbtn', title: 'Vorheriges', onClick: () => stepSearch(-1) }, upIco),
+    el('button', { class: 'iconbtn', title: 'Nächstes', onClick: () => stepSearch(1) }, downIco),
+    el('button', { class: 'iconbtn', title: 'Schließen', onClick: () => closeChatSearch() }, icon('close')),
+  ]);
+  cur.searchBar = bar;
+  cur.search = { q: '', matches: [], idx: 0, count };
+  cur.slot.insertBefore(bar, cur.thread);
+  input.addEventListener('input', () => { cur.search.q = input.value.trim(); runSearch(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); stepSearch(e.shiftKey ? -1 : 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeChatSearch(); }
+  });
+  setTimeout(() => input.focus(), 0);
+}
+
+function closeChatSearch() {
+  if (!cur?.searchBar) return;
+  cur.searchBar.remove(); cur.searchBar = null; cur.search = null;
+  document.querySelectorAll('.bubble.hit, .bubble.hit-current')
+    .forEach((b) => b.classList.remove('hit', 'hit-current'));
+}
+
+function runSearch() {
+  const s = cur.search; if (!s) return;
+  const q = s.q.toLowerCase();
+  s.matches = !q ? [] : store.getHistory(cur.chatId)
+    .filter((m) => !m.deleted && (m.body || '').toLowerCase().includes(q))
+    .map((m) => m.id);
+  s.idx = 0;
+  applySearchHighlights();
+  if (s.matches.length) scrollToMessage(s.matches[0]);
+}
+
+function applySearchHighlights() {
+  const s = cur.search; if (!s) return;
+  document.querySelectorAll('.bubble.hit, .bubble.hit-current')
+    .forEach((b) => b.classList.remove('hit', 'hit-current'));
+  s.matches.forEach((id, i) => {
+    const b = document.getElementById('msg-' + id);
+    if (b) { b.classList.add('hit'); if (i === s.idx) b.classList.add('hit-current'); }
+  });
+  s.count.textContent = s.matches.length ? `${s.idx + 1}/${s.matches.length}` : (s.q ? '0/0' : '');
+}
+
+function stepSearch(dir) {
+  const s = cur?.search; if (!s || !s.matches.length) return;
+  s.idx = (s.idx + dir + s.matches.length) % s.matches.length;
+  applySearchHighlights();
+  scrollToMessage(s.matches[s.idx]);
+}
+
+// ---- multi-select ---------------------------------------------------------
+function enterSelect(m) {
+  if (cur.searchBar) closeChatSearch();
+  cur.select = new Set(m ? [m.id] : []);
+  renderThread();
+  showSelectBar();
+}
+function exitSelect() {
+  if (!cur?.select) return;
+  cur.select = null;
+  cur.selectBar?.remove(); cur.selectBar = null; cur.selectCount = null;
+  renderThread();
+}
+function toggleSelect(id, wrap) {
+  if (!cur.select) return;
+  if (cur.select.has(id)) { cur.select.delete(id); wrap.classList.remove('selected'); }
+  else { cur.select.add(id); wrap.classList.add('selected'); }
+  if (cur.selectCount) cur.selectCount.textContent = `${cur.select.size} ausgewählt`;
+}
+function selectedMsgs() {
+  return store.getHistory(cur.chatId).filter((m) => cur.select.has(m.id));
+}
+function showSelectBar() {
+  const count = el('span', { class: 'sel-count', text: '1 ausgewählt' });
+  cur.selectCount = count;
+  const bar = el('div', { class: 'select-bar' }, [
+    el('button', { class: 'iconbtn', title: 'Abbrechen', onClick: () => exitSelect() }, icon('close')),
+    count,
+    el('div', { style: { flex: '1' } }),
+    el('button', { class: 'iconbtn', title: 'Weiterleiten', onClick: () => {
+      const ms = selectedMsgs(); if (ms.length) forwardMessages(ms); exitSelect(); } }, icon('forward')),
+    el('button', { class: 'iconbtn', title: 'Markieren', onClick: () => {
+      for (const m of selectedMsgs()) if (!prefs.isStarred(cur.chatId, m.id)) prefs.toggleStar(cur.chatId, m.id, starSnapshot(m));
+      toast('Markiert.', 'ok'); exitSelect(); } }, icon('star')),
+    el('button', { class: 'iconbtn', title: 'Kopieren', onClick: () => {
+      const text = selectedMsgs().map((m) => m.body || messagePreview(m)).join('\n');
+      navigator.clipboard?.writeText(text).then(() => toast('Kopiert.')); exitSelect(); } }, icon('copy')),
+    el('button', { class: 'iconbtn', title: 'Löschen', onClick: () => bulkDelete() }, icon('trash')),
+  ]);
+  cur.selectBar = bar;
+  cur.slot.insertBefore(bar, cur.thread);
+}
+async function bulkDelete() {
+  const ms = selectedMsgs(); if (!ms.length) return;
+  if (!await confirmModal({ title: 'Nachrichten löschen',
+    message: `${ms.length} Nachricht${ms.length > 1 ? 'en' : ''} für dich entfernen?`,
+    confirmText: 'Löschen', danger: true })) return;
+  for (const m of ms) {
+    try { await api.post(`/chats/${cur.chatId}/messages/${m.id}/hide`); store.removeMessage(cur.chatId, m.id); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+  exitSelect();
+}
+
 // ---- chat menu / info -----------------------------------------------------
 function chatMenu(e, chat) {
   openMenu(e, [
     { label: 'Infos', icon: 'info', onClick: () => openChatInfo(chat) },
+    { label: 'Suchen', icon: 'search', onClick: () => toggleChatSearch() },
+    { label: 'Nachrichten auswählen', icon: 'check', onClick: () => enterSelect(null) },
     { label: chat.muted ? 'Stummschaltung aufheben' : 'Stummschalten', icon: 'mute', onClick: () => toggleMute(chat) },
     { label: 'Verschwindende Nachrichten', icon: 'clock', onClick: () => expireModal(chat) },
     { label: 'Geplante Nachrichten', icon: 'schedule', onClick: () => listScheduled() },
     { label: chat.archived ? 'Aus Archiv' : 'Archivieren', icon: 'archive', onClick: () => toggleArchive(chat) },
+    { label: 'Chat exportieren', icon: 'download', onClick: () => exportChat(chat) },
     chat.type === 'group' ? { label: 'Gruppe verlassen', icon: 'logout', danger: true,
       onClick: () => import('./groups.js').then((m) => m.leaveGroup(chat.id)) } : null,
   ].filter(Boolean));
+}
+
+// Export the loaded conversation history as a plain-text file.
+function exportChat(chat) {
+  const msgs = store.getHistory(chat.id);
+  if (!msgs.length) { toast('Nichts zu exportieren.'); return; }
+  const title = chat.self ? 'Notiz an mich' : chat.title;
+  const lines = msgs.map((m) => {
+    const who = m.senderId === store.state.me?.id ? 'Du'
+      : (chat.members?.find((u) => u.id === m.senderId)?.displayName || chat.otherUser?.displayName || chat.title || '');
+    const when = new Date(m.createdAt).toLocaleString('de-DE');
+    return `[${when}] ${who}: ${m.deleted ? '(gelöscht)' : messagePreview(m)}`;
+  });
+  const blob = new Blob([`Ping — ${title}\n\n${lines.join('\n')}\n`], { type: 'text/plain' });
+  const u = URL.createObjectURL(blob);
+  const a = el('a', { href: u, download: `ping-${(title || 'chat').replace(/\W+/g, '-').toLowerCase()}.txt` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 4000);
+  toast('Chat exportiert.', 'ok');
 }
 async function toggleMute(chat) {
   try { await api.post(`/chats/${chat.id}/mute`, { muted: !chat.muted });
@@ -609,11 +841,37 @@ function openMenuLike(items, title) {
   } });
 }
 function openChatInfo(chat) {
-  import('./groups.js').then((m) => m.openChatInfo(chat))
-    .catch(() => import('./contacts.js').then((m) => m.openProfile(chat.otherUser)));
+  openInfoPanel(chat);
 }
 
-function linkify(text) {
-  return escapeHtml(text).replace(/(https?:\/\/[^\s<]+)/g,
-    '<a href="$1" target="_blank" rel="noopener">$1</a>');
+// Open the gallery scoped to every image/video in the open conversation,
+// starting at the tapped message.
+function openChatMedia(msg) {
+  const items = store.getHistory(cur.chatId)
+    .filter((x) => !x.deleted && x.attachment && ['image', 'gif', 'video'].includes(x.attachment.kind))
+    .map((x) => x.attachment);
+  const start = items.findIndex((a) => a === msg.attachment);
+  import('./gallery.js').then((m) => m.openGallery(items, Math.max(0, start)));
+}
+
+// Render a message body to safe HTML: escape, protect URLs, optionally apply
+// lightweight text formatting (*bold* _italic_ ~strike~ `code` ||spoiler||),
+// then restore the URLs as links. Mirrors the native app's formatting set.
+function richText(text) {
+  const fmt = prefs.get('messageFormatting');
+  // Split on URLs so formatting never touches a link (underscores in a URL
+  // aren't mistaken for italics); only the non-URL parts get formatted.
+  return String(text).split(/(https?:\/\/[^\s<]+)/g).map((seg, i) => {
+    const safe = escapeHtml(seg);
+    if (i % 2 === 1) return `<a href="${safe}" target="_blank" rel="noopener">${safe}</a>`;
+    return fmt ? applyFormatting(safe) : safe;
+  }).join('');
+}
+function applyFormatting(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\|\|([^|]+)\|\|/g, '<span class="spoiler" title="Zum Aufdecken antippen">$1</span>')
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_\n]+)_/g, '<em>$1</em>')
+    .replace(/~([^~\n]+)~/g, '<del>$1</del>');
 }

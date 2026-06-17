@@ -40,6 +40,13 @@
       --shadow: 0 18px 50px -30px rgba(20,35,80,.4);
     }
     * { box-sizing: border-box; }
+    /* Keyboard accessibility: a clear focus ring on every interactive element
+       (buttons, nav tabs, icon buttons, links), and respect reduced-motion. */
+    :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+    .btn:focus-visible, .navitem:focus-visible, .ico:focus-visible { outline-offset: 3px; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    }
     body { margin: 0; font-family: var(--fb); color: var(--text); background: var(--bg);
       min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5; }
     .atmos { position: fixed; inset: 0; z-index: -1; pointer-events: none;
@@ -583,11 +590,12 @@
     const LOADERS={overview:loadOverview,users:loadUsers,moderation:loadChats,status:loadStatuses,broadcast:loadBroadcasts,content:loadContent,config:loadConfig,audit:loadAudit,system:loadSystem};
     let activeTab='overview';
     function switchTab(name){ activeTab=name;
-      document.querySelectorAll('.navitem').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+      document.querySelectorAll('.navitem').forEach(t=>{ const on=t.dataset.tab===name; t.classList.toggle('active',on); t.setAttribute('aria-current',on?'page':'false'); });
       document.querySelectorAll('[data-pane]').forEach(p=>p.classList.toggle('hidden',p.dataset.pane!==name));
       (LOADERS[name]||(()=>Promise.resolve()))().catch(e=>toast(e.message)); }
-    function buildNav(){ $('nav').innerHTML=TABS.map(([k,l])=>`<div class="navitem${k==='overview'?' active':''}" data-tab="${k}">${svg(IC[k])}<span>${l}</span></div>`).join('');
-      document.querySelectorAll('.navitem').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab)); }
+    function buildNav(){ $('nav').setAttribute('role','tablist'); $('nav').innerHTML=TABS.map(([k,l])=>`<div class="navitem${k==='overview'?' active':''}" role="tab" tabindex="0" aria-current="${k==='overview'?'page':'false'}" data-tab="${k}">${svg(IC[k])}<span>${l}</span></div>`).join('');
+      document.querySelectorAll('.navitem').forEach(t=>{ t.onclick=()=>switchTab(t.dataset.tab);
+        t.onkeydown=e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); switchTab(t.dataset.tab); } }; }); }
 
     function startAuto(){ stopAuto(); autoTimer=setInterval(()=>{if(activeTab==='overview')loadOverview().catch(()=>{});},10000); }
     function stopAuto(){ if(autoTimer){clearInterval(autoTimer);autoTimer=null;} }

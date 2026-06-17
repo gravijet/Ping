@@ -7,7 +7,7 @@
 const KEY = 'ping.prefs';
 
 const DEFAULTS = {
-  theme: 'dark',          // 'dark' | 'light'
+  theme: 'system',        // 'dark' | 'light' | 'system' (follows the OS)
   accent: '#4d9bff',
   wallpaper: '',          // '' | preset id | data URL
   fontScale: 1,           // 0.9 .. 1.3
@@ -15,10 +15,28 @@ const DEFAULTS = {
   largeEmoji: true,       // emoji-only messages render bigger
   highContrast: false,
   reduceMotion: false,
+  underlineLinks: false,  // always underline links (accessibility)
+  bigTargets: false,      // larger tap/click targets (accessibility)
   enterToSend: true,
+  spellcheck: true,       // browser spellcheck in the composer
+  sendTyping: true,       // broadcast "tippt …" to the other side
   notifEnabled: false,    // browser notifications
   notifPreview: true,
+  notifSound: true,       // play a soft chime with each notification
+  callRingtone: true,     // play a ringtone for incoming / a ringback for outgoing calls
+  dndUntil: 0,            // suppress notifications until this timestamp (Do Not Disturb)
+  bubbleStyle: 'rounded', // 'rounded' | 'square' chat bubbles
+  fontFamily: 'jakarta',  // 'jakarta' | 'system' | 'serif' | 'mono' — app-wide typeface
+  messageFormatting: true, // render *bold* _italic_ ~strike~ `code` ||spoiler||
+  quickReplies: ['👍 Alles klar!', 'Bin gleich da 🏃', 'Melde mich später 🙂',
+    'Danke dir! 🙏', 'Kannst du kurz anrufen?'], // canned composer replies
   readReceipts: true,     // cosmetic on web (server doesn't gate it)
+  lockEnabled: false,     // app PIN lock on this device
+  lockHash: '',           // SHA-256(salt:pin)
+  lockSalt: '',           // random per-device salt
+  lockTimeoutMs: 120000,  // auto-lock after this much inactivity
+  desktopAutostart: false,    // Windows shell: launch Ping at login
+  desktopCloseToTray: true,   // Windows shell: closing hides to the tray
   pinned: [],             // chatId[]
   markedUnread: [],       // chatId[]
   starred: {},            // chatId -> messageId[]   (fast membership lookup)
@@ -27,6 +45,15 @@ const DEFAULTS = {
 
 export const ACCENTS = ['#4d9bff', '#7b6cff', '#3fe0bd', '#ff8a5b', '#f472b6',
   '#34d399', '#fbbf24', '#ff5d73'];
+
+// Selectable app typefaces. 'jakarta' keeps the bundled Plus Jakarta Sans; the
+// rest fall back to fonts the OS already ships, so there's nothing to download.
+export const FONTS = [
+  ['jakarta', 'Plus Jakarta (Standard)', '"Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif'],
+  ['system', 'System', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif'],
+  ['serif', 'Serif', 'Georgia, "Times New Roman", "Noto Serif", serif'],
+  ['mono', 'Monospace', 'ui-monospace, "SF Mono", Menlo, Consolas, monospace'],
+];
 
 export const WALLPAPERS = [
   { id: '', label: 'Standard', css: '' },
@@ -53,15 +80,40 @@ export function get(k) { return prefs[k]; }
 export function set(k, v) { prefs[k] = v; persist(); if (VISUAL.has(k)) applyVisual(); }
 export function all() { return { ...prefs }; }
 
-const VISUAL = new Set(['theme', 'accent', 'wallpaper', 'fontScale', 'highContrast', 'reduceMotion']);
+const VISUAL = new Set(['theme', 'accent', 'wallpaper', 'fontScale', 'highContrast',
+  'reduceMotion', 'bubbleStyle', 'fontFamily', 'underlineLinks', 'bigTargets']);
+
+// Resolve 'system' to a concrete scheme by asking the OS; 'dark'/'light' pass
+// through unchanged. Everything visual keys off this, not the raw pref.
+function osPrefersLight() {
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches); }
+  catch { return false; }
+}
+export function effectiveTheme() {
+  return prefs.theme === 'light' || prefs.theme === 'dark' ? prefs.theme
+    : (osPrefersLight() ? 'light' : 'dark');
+}
+export const isLight = () => effectiveTheme() === 'light';
+
+// Re-apply when the OS scheme flips while we're in 'system' mode.
+try {
+  window.matchMedia && window.matchMedia('(prefers-color-scheme: light)')
+    .addEventListener('change', () => { if (prefs.theme === 'system') applyVisual(); });
+} catch { /* no matchMedia (e.g. headless test) */ }
 
 export function applyVisual() {
   const r = document.documentElement;
-  r.setAttribute('data-theme', prefs.theme);
+  r.setAttribute('data-theme', effectiveTheme());
   r.setAttribute('data-contrast', prefs.highContrast ? 'high' : 'normal');
   r.setAttribute('data-motion', prefs.reduceMotion ? 'reduce' : 'full');
+  r.setAttribute('data-underline', prefs.underlineLinks ? 'on' : 'off');
+  r.setAttribute('data-targets', prefs.bigTargets ? 'large' : 'normal');
+  r.setAttribute('data-bubbles', prefs.bubbleStyle || 'rounded');
   r.style.setProperty('--accent', prefs.accent || DEFAULTS.accent);
   r.style.setProperty('--font-scale', String(prefs.fontScale || 1));
+  const font = FONTS.find((f) => f[0] === prefs.fontFamily);
+  if (font && prefs.fontFamily !== 'jakarta') r.style.setProperty('--font', font[2]);
+  else r.style.removeProperty('--font'); // keep the stylesheet's default
   const wp = WALLPAPERS.find((w) => w.id === prefs.wallpaper);
   const css = prefs.wallpaper && prefs.wallpaper.startsWith('data:')
     ? `center / cover no-repeat url(${prefs.wallpaper})`
@@ -70,7 +122,23 @@ export function applyVisual() {
 }
 
 export function toggleTheme() {
-  set('theme', prefs.theme === 'dark' ? 'light' : 'dark');
+  // Toggle the *effective* scheme, landing on a concrete value (leaves 'system').
+  set('theme', isLight() ? 'dark' : 'light');
+}
+
+// ---- settings backup / restore -------------------------------------------
+// A portable snapshot of every device-side preference — lets users carry their
+// look & behaviour to another browser, or keep a backup before experimenting.
+export function exportPrefs() {
+  return { app: 'ping-web', kind: 'prefs', version: 1, exportedAt: Date.now(), prefs: { ...prefs } };
+}
+export function importPrefs(data) {
+  const incoming = data && data.prefs && typeof data.prefs === 'object' ? data.prefs : data;
+  if (!incoming || typeof incoming !== 'object') throw new Error('Ungültige Sicherungsdatei.');
+  // Only adopt keys we actually know — ignore anything foreign.
+  for (const k of Object.keys(DEFAULTS)) if (k in incoming) prefs[k] = incoming[k];
+  persist();
+  applyVisual();
 }
 
 // ---- per-device chat state ------------------------------------------------

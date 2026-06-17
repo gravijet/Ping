@@ -10,10 +10,13 @@ import * as prefs from './prefs.js';
 import { el, clear, icon, avatar, toast, setImageResolver } from './ui.js';
 import { renderAuth } from './auth.js';
 import { renderChatList } from './chats.js';
-import { openChat, closeChat } from './chat.js';
+import { openChat, closeChat, toggleChatSearch } from './chat.js';
 import { newChatModal } from './contacts.js';
 import { openSettings } from './settings.js';
 import { wireCalls } from './calls.js';
+import { openPalette, paletteOpen } from './palette.js';
+import { initLock } from './lock.js';
+import * as native from './native.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
@@ -22,6 +25,12 @@ const root = document.getElementById('app');
 
 // ---- theme (kept exported: settings.js imports it) ------------------------
 export function toggleTheme() { prefs.toggleTheme(); store.emit('prefs'); }
+// Keep the nav-rail theme button's icon in sync when the theme is toggled from
+// elsewhere (command palette, keyboard, settings).
+export function refreshThemeNav() {
+  const btn = document.getElementById('nav-theme');
+  if (btn) clear(btn).appendChild(icon(prefs.isLight() ? 'moon' : 'sun'));
+}
 
 // ---- session lifecycle ----------------------------------------------------
 onUnauthorized(() => doLogout(true));
@@ -72,8 +81,11 @@ async function enterApp() {
   root.setAttribute('aria-busy', 'false');
   buildShell();
   wireSocket();
+  wireShortcuts();
   socket.connect(getToken());
   wireCalls();
+  initLock();
+  wireNative();
   api.get('/config').then((c) => { store.state.config = c; }).catch(() => {});
   try {
     const { chats } = await api.get('/chats');
@@ -107,11 +119,9 @@ function buildNavRail(me) {
     navItem('calls', 'phone', 'Anrufe'),
     navItem('saved', 'star', 'Gespeichert'),
   ]);
-  const isLight = () => prefs.get('theme') === 'light';
-  const themeBtn = el('button', { class: 'nav-item', 'data-label': 'Design',
-    title: 'Hell/Dunkel', onClick: () => { toggleTheme(); refreshThemeBtn(); } },
-    icon(isLight() ? 'moon' : 'sun'));
-  function refreshThemeBtn() { clear(themeBtn).appendChild(icon(isLight() ? 'moon' : 'sun')); }
+  const themeBtn = el('button', { class: 'nav-item', id: 'nav-theme', 'data-label': 'Design',
+    title: 'Hell/Dunkel', onClick: () => { toggleTheme(); refreshThemeNav(); } },
+    icon(prefs.isLight() ? 'moon' : 'sun'));
 
   const navAvatar = el('div', { class: 'nav-avatar', id: 'nav-avatar', title: 'Profil & Einstellungen',
     onClick: openSettings }, avatar(me, 42, { kind: 'user' }));
@@ -169,6 +179,7 @@ function renderChatsSection() {
   sideHead.append(
     el('div', { class: 'pane-title', text: 'Chats' }),
     el('div', { class: 'actions' }, [
+      iconBtn('doublecheck', 'Alle als gelesen', markAllRead),
       iconBtn('edit', 'Neuer Chat', () => newChatModal()),
       iconBtn('group', 'Neue Gruppe', () => import('./groups.js').then((m) => m.newGroupModal())),
     ]),
@@ -183,8 +194,21 @@ function renderChatsSection() {
     ]),
   ]);
   const list = el('div', { class: `chatlist ${prefs.get('compact') ? 'compact' : ''}`, id: 'chatlist' });
-  sideBody.append(search, list);
+  sideBody.append(search, buildChatFilters(), list);
   renderChatList(list, (chatId) => openChatInShell(chatId));
+}
+
+// Quick filters above the chat list: Alle · Ungelesen · Favoriten · Gruppen.
+function buildChatFilters() {
+  const filters = [['all', 'Alle'], ['unread', 'Ungelesen'], ['fav', 'Favoriten'], ['groups', 'Gruppen']];
+  const seg = el('div', { class: 'seg chat-filters' }, filters.map(([id, label]) =>
+    el('button', { class: store.state.chatFilter === id ? 'on' : '', dataset: { filter: id },
+      onClick: () => {
+        store.state.chatFilter = id;
+        seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.filter === id));
+        store.emit('chats');
+      } }, label)));
+  return seg;
 }
 
 function splash() {
@@ -220,6 +244,76 @@ function iconBtn(name, title, onClick) {
   return el('button', { class: 'iconbtn', title, onClick }, icon(name));
 }
 
+// Mark every chat as read (clears unread counts + the manual "unread" flag).
+async function markAllRead() {
+  const chats = [...store.state.chats.values()];
+  for (const c of chats) {
+    prefs.setMarkedUnread(c.id, false);
+    if (c.unread) {
+      try { await api.post(`/chats/${c.id}/read`); } catch { /* ignore */ }
+      c.unread = 0;
+    }
+  }
+  store.emit('chats');
+  toast('Alle als gelesen markiert.', 'ok');
+}
+
+// ---- command palette ------------------------------------------------------
+// One searchable surface for jumping to chats and running common actions, so
+// these never need to live in a dozen separate menus.
+export function openCommandPalette() {
+  if (paletteOpen()) return;
+  const cmds = [
+    { title: 'Neuer Chat', icon: 'edit', keywords: 'new chat kontakt nachricht', run: () => newChatModal() },
+    { title: 'Neue Gruppe', icon: 'group', keywords: 'group gruppe', run: () => import('./groups.js').then((m) => m.newGroupModal()) },
+    { title: 'Nachrichten durchsuchen', icon: 'search', keywords: 'search suche finden', run: () => {
+      setSection('chats'); setTimeout(() => document.querySelector('.search-box input')?.focus(), 0); } },
+    { title: 'Chats', icon: 'chat', keywords: 'unterhaltungen', run: () => setSection('chats') },
+    { title: 'Status', icon: 'status', keywords: 'stories', run: () => setSection('status') },
+    { title: 'Anrufe', icon: 'phone', keywords: 'calls anrufverlauf', run: () => setSection('calls') },
+    { title: 'Gespeichert', icon: 'star', keywords: 'saved starred markiert', run: () => setSection('saved') },
+    { title: 'Einstellungen', icon: 'settings', hint: 'Strg ,', keywords: 'settings profil konto', run: () => openSettings() },
+    { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
+    { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
+    { title: 'Gerät verknüpfen', icon: 'link', keywords: 'device link qr handy', run: () => import('./devices.js').then((m) => m.linkDeviceModal()) },
+    { title: 'Abmelden', icon: 'logout', keywords: 'logout signout', run: () => doLogout(false) },
+  ];
+  openPalette({ commands: cmds, onOpenChat: openChatInShell });
+}
+
+// ---- keyboard shortcuts ---------------------------------------------------
+let shortcutsWired = false;
+function wireShortcuts() {
+  if (shortcutsWired) return; shortcutsWired = true;
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    // Ctrl/⌘+K — open the command palette.
+    if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCommandPalette(); return; }
+    // Ctrl/⌘+, — open settings.
+    if (mod && e.key === ',') { e.preventDefault(); openSettings(); return; }
+    // Ctrl/⌘+N — new chat.
+    if (mod && (e.key === 'n' || e.key === 'N')) { e.preventDefault(); newChatModal(); return; }
+    // Ctrl/⌘+F — search within the open conversation.
+    if (mod && (e.key === 'f' || e.key === 'F')) {
+      if (store.state.activeId) { e.preventDefault(); toggleChatSearch(); }
+      return;
+    }
+    // Alt+↑/↓ — move to the previous / next chat.
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault(); switchChat(e.key === 'ArrowDown' ? 1 : -1); return;
+    }
+  });
+}
+
+// Jump to the previous/next chat in the visible (non-archived) list.
+function switchChat(dir) {
+  const list = store.chatsSorted().filter((c) => !c.archived);
+  if (!list.length) return;
+  const i = list.findIndex((c) => c.id === store.state.activeId);
+  const next = list[(i + dir + list.length) % list.length] || list[0];
+  if (next) { if (currentSection !== 'chats') setSection('chats'); openChatInShell(next.id); }
+}
+
 // ---- nav badges -----------------------------------------------------------
 export function setNavBadge(section, count) {
   const item = document.querySelector(`.nav-item[data-section="${section}"]`);
@@ -231,11 +325,29 @@ export function setNavBadge(section, count) {
 
 function refreshBadges() {
   let unread = 0;
+  let unreadTotal = 0;
   for (const c of store.state.chats.values()) {
-    if (c.unread) unread += 1;
+    if (c.unread) { unread += 1; unreadTotal += c.unread; }
     else if (prefs.isMarkedUnread(c.id)) unread += 1;
   }
   setNavBadge('chats', unread);
+  // Mirror the total onto the Windows taskbar icon when running in the shell.
+  native.setUnread(unreadTotal);
+}
+
+// ---- Windows desktop bridge (no-ops in a normal browser) ------------------
+let nativeWired = false;
+function wireNative() {
+  if (nativeWired || !native.isShell()) return;
+  nativeWired = true;
+  native.onNative('open-chat', (d) => { if (d.chatId) { window.focus?.(); openChatInShell(d.chatId); } });
+  native.onNative('lock', () => import('./lock.js').then((m) => m.lockNow()));
+  native.onNative('settings', () => openSettings());
+  native.onNative('command', () => openCommandPalette());
+  native.onNative('new-chat', () => newChatModal());
+  // Sync the host with the user's saved desktop preferences.
+  native.setAutostart(prefs.get('desktopAutostart'));
+  native.setCloseToTray(prefs.get('desktopCloseToTray'));
 }
 
 // ---- realtime: socket events → store --------------------------------------
@@ -318,17 +430,49 @@ function applyIncomingMessage(msg) {
 // ---- desktop/browser notifications ----------------------------------------
 function maybeNotify(msg, chat, isActive) {
   if (!prefs.get('notifEnabled')) return;
+  if ((prefs.get('dndUntil') || 0) > Date.now()) return; // Do Not Disturb
   if (isActive && document.hasFocus()) return;
   if (chat?.muted) return;
+  const title = chat?.title || 'Ping';
+  const body = prefs.get('notifPreview')
+    ? (msg.body || (msg.attachment ? '📎 Anhang' : 'Neue Nachricht'))
+    : 'Neue Nachricht';
+  // In the Windows shell the host owns OS notifications + the tray (it can show
+  // them even when the window is hidden); fall back to the Web Notification API.
+  if (native.isShell()) {
+    native.nativeNotify({ title, body, chatId: msg.chatId });
+    if (prefs.get('notifSound')) playChime();
+    return;
+  }
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
-    const title = chat?.title || 'Ping';
-    const body = prefs.get('notifPreview')
-      ? (msg.body || (msg.attachment ? '📎 Anhang' : 'Neue Nachricht'))
-      : 'Neue Nachricht';
-    const n = new Notification(title, { body, tag: msg.chatId, silent: false });
+    const n = new Notification(title, { body, tag: msg.chatId, silent: prefs.get('notifSound') });
     n.onclick = () => { window.focus(); openChatInShell(msg.chatId); n.close(); };
+    if (prefs.get('notifSound')) playChime();
   } catch { /* ignore */ }
+}
+
+// A short, soft two-tone chime synthesised on the fly (no audio asset needed).
+let audioCtx = null;
+function playChime() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+    [[880, 0], [1175, 0.11]].forEach(([freq, at]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + at);
+      gain.gain.exponentialRampToValueAtTime(0.12, now + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.22);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + at);
+      osc.stop(now + at + 0.24);
+    });
+  } catch { /* audio not available */ }
 }
 
 boot();

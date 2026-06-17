@@ -40,18 +40,30 @@ function sortChats(list) {
   });
 }
 
+function passesFilter(c) {
+  switch (store.state.chatFilter) {
+    case 'unread': return !!(c.unread || prefs.isMarkedUnread(c.id));
+    case 'fav': return prefs.isPinned(c.id);
+    case 'groups': return c.type === 'group';
+    default: return true;
+  }
+}
+
 function paint(container, onSelect) {
   clear(container);
   const all = store.chatsSorted();
   const q = store.state.search.trim().toLowerCase();
-  const match = (c) => !q || (c.title || '').toLowerCase().includes(q);
+  const filtering = store.state.chatFilter !== 'all';
+  const match = (c) => (!q || (c.title || '').toLowerCase().includes(q)) && passesFilter(c);
 
   const active = sortChats(all.filter((c) => !c.archived && match(c)));
-  const archived = sortChats(all.filter((c) => c.archived && match(c)));
+  // Archived chats only surface in the unfiltered "Alle" view (or via search).
+  const archived = filtering ? [] : sortChats(all.filter((c) => c.archived && match(c)));
 
   if (!active.length && !archived.length && !q) {
     container.appendChild(el('div', { class: 'chatlist-empty',
-      text: 'Noch keine Chats. Starte oben rechts einen neuen Chat.' }));
+      text: filtering ? 'Keine Chats in diesem Filter.'
+        : 'Noch keine Chats. Starte oben rechts einen neuen Chat.' }));
     return;
   }
 
@@ -121,6 +133,10 @@ function row(chat, onSelect) {
   }
 
   const unreadCue = chat.unread || prefs.isMarkedUnread(chat.id);
+  // Visible quick-actions button (hover on desktop, always tappable on touch) so
+  // pin / mute / archive aren't hidden behind a right-click only.
+  const menuBtn = el('button', { class: 'iconbtn row-menu', title: 'Aktionen',
+    onClick: (e) => { e.stopPropagation(); rowMenu(e, chat); } }, icon('menu'));
   const node = el('div', {
     class: `chatrow ${unreadCue ? 'unread' : ''} ${store.state.activeId === chat.id ? 'active' : ''}`,
     onClick: () => onSelect(chat.id),
@@ -140,6 +156,7 @@ function row(chat, onSelect) {
           : (prefs.isMarkedUnread(chat.id) ? el('span', { class: 'badge', text: ' ' }) : null),
       ]),
     ]),
+    menuBtn,
   ]);
   return node;
 }

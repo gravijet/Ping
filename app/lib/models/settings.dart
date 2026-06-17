@@ -11,6 +11,7 @@ class PingSettings {
   final bool notificationsEnabled;
   final bool notificationPreview; // include message text in the notification
   final bool notificationVibrate;
+  final bool callRingtone; // play a ringtone (incoming) / ringback (outgoing)
 
   // Chats
   final bool enterToSend;
@@ -82,6 +83,7 @@ class PingSettings {
     this.notificationsEnabled = true,
     this.notificationPreview = true,
     this.notificationVibrate = true,
+    this.callRingtone = true,
     this.enterToSend = false,
     this.fontScale = 1.0,
     this.wallpaper = 0,
@@ -130,6 +132,7 @@ class PingSettings {
     bool? notificationsEnabled,
     bool? notificationPreview,
     bool? notificationVibrate,
+    bool? callRingtone,
     bool? enterToSend,
     double? fontScale,
     int? wallpaper,
@@ -179,6 +182,7 @@ class PingSettings {
         notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
         notificationPreview: notificationPreview ?? this.notificationPreview,
         notificationVibrate: notificationVibrate ?? this.notificationVibrate,
+        callRingtone: callRingtone ?? this.callRingtone,
         enterToSend: enterToSend ?? this.enterToSend,
         fontScale: fontScale ?? this.fontScale,
         wallpaper: wallpaper ?? this.wallpaper,
@@ -228,6 +232,7 @@ class PingSettings {
         'notificationsEnabled': notificationsEnabled,
         'notificationPreview': notificationPreview,
         'notificationVibrate': notificationVibrate,
+        'callRingtone': callRingtone,
         'enterToSend': enterToSend,
         'fontScale': fontScale,
         'wallpaper': wallpaper,
@@ -276,6 +281,7 @@ class PingSettings {
         notificationsEnabled: j['notificationsEnabled'] ?? true,
         notificationPreview: j['notificationPreview'] ?? true,
         notificationVibrate: j['notificationVibrate'] ?? true,
+        callRingtone: j['callRingtone'] ?? true,
         enterToSend: j['enterToSend'] ?? false,
         fontScale: (j['fontScale'] as num?)?.toDouble() ?? 1.0,
         wallpaper: j['wallpaper'] ?? 0,

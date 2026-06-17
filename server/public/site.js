@@ -170,14 +170,16 @@
           <button class="icon-btn" id="themeBtn" aria-label="Design wechseln"></button>
           <a class="btn sm ghost" href="https://example.invalid">${P.icon('monitor')}<span>Web</span></a>
           <a class="btn sm" href="/download">${P.icon('download')}<span>Laden</span></a>
-          <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menü">${P.icon('menu')}</button>
+          <button class="icon-btn menu-btn" id="menuBtn" aria-label="Menü" aria-expanded="false" aria-controls="navLinks">${P.icon('menu')}</button>
         </div>
       </div>`;
     document.getElementById('themeBtn').onclick = toggleTheme;
     const links = document.getElementById('navLinks');
     document.getElementById('menuBtn').onclick = () => {
       const open = links.classList.toggle('open');
-      document.getElementById('menuBtn').innerHTML = P.icon(open ? 'close' : 'menu');
+      const btn = document.getElementById('menuBtn');
+      btn.innerHTML = P.icon(open ? 'close' : 'menu');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
     addEventListener('scroll', () => document.getElementById('nav').classList.toggle('scrolled', scrollY > 8), { passive: true });
 
@@ -210,7 +212,11 @@
     }).catch(() => { const s = document.getElementById('footState'); if (s) s.textContent = '● Status unbekannt'; });
   }
   function setActiveNav(key) {
-    document.querySelectorAll('#navLinks .lnk').forEach((a) => a.classList.toggle('active', a.dataset.key === key));
+    document.querySelectorAll('#navLinks .lnk').forEach((a) => {
+      const on = a.dataset.key === key;
+      a.classList.toggle('active', on);
+      if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
   }
 
   // ---------------------------------------------------------------- router ---
@@ -247,7 +253,12 @@
   }
   function scrollToHash(hash) {
     const el = document.getElementById(hash.replace('#', ''));
-    if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+    if (el) setTimeout(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Move keyboard focus to the target if it can take it (e.g. the skip
+      // link's #view), so screen-reader users land where they jumped.
+      if (el.hasAttribute('tabindex')) el.focus({ preventScroll: true });
+    }, 30);
     else window.scrollTo({ top: 0 });
   }
 
@@ -268,7 +279,12 @@
   function currentNavKey() { const f = match(location.pathname); return f ? f.route.nav : ''; }
   function closeMenu() {
     const links = document.getElementById('navLinks');
-    if (links && links.classList.contains('open')) { links.classList.remove('open'); document.getElementById('menuBtn').innerHTML = P.icon('menu'); }
+    if (links && links.classList.contains('open')) {
+      links.classList.remove('open');
+      const btn = document.getElementById('menuBtn');
+      btn.innerHTML = P.icon('menu');
+      btn.setAttribute('aria-expanded', 'false');
+    }
   }
 
   // Intercept eligible internal link clicks for SPA navigation.

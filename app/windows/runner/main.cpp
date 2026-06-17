@@ -13,6 +13,28 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     CreateAndAttachConsole();
   }
 
+  // Single instance: if Ping is already running (e.g. launched again from the
+  // tray shortcut or at login), focus the existing window instead of opening a
+  // second copy. The mutex handle is intentionally leaked for the process life.
+  HANDLE singleton = ::CreateMutexW(nullptr, TRUE, L"Local\\PingDesktopSingleInstance");
+  if (singleton != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing = nullptr;
+    while ((existing = ::FindWindowExW(nullptr, existing,
+                                       L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr)) != nullptr) {
+      wchar_t title[256] = {0};
+      ::GetWindowTextW(existing, title, 256);
+      const bool is_ping = title[0] == L'P' && title[1] == L'i' &&
+                           title[2] == L'n' && title[3] == L'g';
+      if (is_ping) {
+        ::ShowWindow(existing, SW_SHOW);
+        if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
+        ::SetForegroundWindow(existing);
+        break;
+      }
+    }
+    return EXIT_SUCCESS;
+  }
+
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
