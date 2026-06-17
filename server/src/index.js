@@ -7,6 +7,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { config } from './config.js';
 import { router } from './routes.js';
+import { apiV1 } from './apiV1.js';
 import { createHub } from './hub.js';
 import { ensureOfficialUser } from './repo.js';
 import { startBackupScheduler } from './backup.js';
@@ -86,6 +87,14 @@ export function createApp() {
   // Public landing page + APK download (root domain auto-downloads the latest build).
   mountDownloads(app, publicDir);
 
+  // Developer API documentation — a static page that documents /api/v1. Served
+  // before the JSON parser and the API rate limiters so it behaves like any
+  // other marketing page, and before the catch-all /api 404 so GET /api lands
+  // here instead of erroring.
+  app.get(['/api', '/api/docs'], (_req, res) =>
+    res.sendFile(path.join(publicDir, 'api-docs.html'))
+  );
+
   app.use(express.json({ limit: '64kb' }));
 
   app.get('/health', (_req, res) =>
@@ -151,6 +160,10 @@ export function createApp() {
       message: { error: 'Etwas zu schnell — bitte einen Moment warten.' },
     })
   );
+
+  // Public developer API (key-authenticated). Sits under the general /api rate
+  // limiter above but outside the stricter /api/auth and /api/admin buckets.
+  app.use('/api/v1', apiV1);
 
   app.use('/api', router);
 

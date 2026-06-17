@@ -11,6 +11,7 @@ import {
   requireAdmin,
 } from './auth.js';
 import { config } from './config.js';
+import { windowsInfo } from './download.js';
 import { createLink, approveLink, pollLink, cancelLink } from './linkRepo.js';
 import { normalizePhone } from './phone.js';
 import { verifyFirebaseIdToken } from './firebaseAuth.js';
@@ -60,6 +61,7 @@ import {
   scheduleSchema,
   joinSchema,
   callLogSchema,
+  apiKeyCreateSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import {
@@ -218,6 +220,12 @@ import {
   postView,
 } from './postsRepo.js';
 import { recordAudit, listAudit } from './auditRepo.js';
+import {
+  createApiKey,
+  listApiKeys,
+  revokeApiKey,
+  API_SCOPES,
+} from './apiKeysRepo.js';
 
 export const router = Router();
 
@@ -406,6 +414,25 @@ router.get(
   '/config',
   h(async (_req, res) => {
     res.json(getRemoteConfig());
+  })
+);
+
+// Latest Windows desktop build, for the Windows shell's background auto-updater.
+// Lives under /api (not /download) so it stays same-origin reachable on the web
+// app host. `url` is absolute because the .exe itself is served from the apex
+// host (/download/windows is not an /api pass-through route). Returns 204 when
+// no build has been published yet — the shell treats that as "nothing newer".
+router.get(
+  '/desktop/version',
+  h(async (_req, res) => {
+    const win = windowsInfo();
+    if (!win || !win.version) return res.status(204).end();
+    res.json({
+      version: win.version,
+      url: `${config.publicUrl}/download/windows`,
+      size: win.size,
+      updatedAt: win.updatedAt,
+    });
   })
 );
 
@@ -2136,6 +2163,43 @@ router.delete(
     const { token } = parse(pushTokenSchema, req.body);
     removeUserPushToken(req.user.id, token);
     res.json({ ok: true });
+  })
+);
+
+// ---- Developer API keys (self-service) -------------------------------------
+// A signed-in user manages the keys that external integrations use to talk to
+// /api/v1 on their behalf. The plaintext secret is returned exactly once, on
+// creation; afterwards only its prefix is ever shown.
+
+router.get(
+  '/dev/keys',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ keys: listApiKeys(req.user.id), scopes: API_SCOPES });
+  })
+);
+
+router.post(
+  '/dev/keys',
+  requireAuth,
+  h(async (req, res) => {
+    const { name, scopes } = parse(apiKeyCreateSchema, req.body || {});
+    // A small cap keeps a single account from minting unbounded keys.
+    if (listApiKeys(req.user.id).length >= 25) {
+      return res.status(409).json({ error: 'Du hast zu viele API-Schlüssel. Lösche zuerst einen.' });
+    }
+    const created = createApiKey({ userId: req.user.id, name: name || '', scopes });
+    res.status(201).json({ key: created });
+  })
+);
+
+router.delete(
+  '/dev/keys/:id',
+  requireAuth,
+  h(async (req, res) => {
+    const ok = revokeApiKey(req.user.id, req.params.id);
+    if (!ok) return res.status(404).json({ error: 'Diesen API-Schlüssel gibt es nicht.' });
+    res.status(204).end();
   })
 );
 

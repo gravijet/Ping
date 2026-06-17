@@ -1,9 +1,11 @@
-/* groups.js — create groups, manage members, group/chat info panel, leave a
-   group, and create polls. Lazy-loaded from the shell menu and chat actions. */
+/* groups.js — create groups, join by invite link, manage members + the group
+   info panel (rename, description, avatar, invite link, leave), and create
+   polls. Lazy-loaded from the shell menu and chat actions. */
 
-import { api } from './api.js';
+import { api, authedObjectUrl } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, confirmModal } from './ui.js';
+import { pickFile } from './media.js';
 import { lookup, userRow, openProfile } from './contacts.js';
 
 // ---- create group ---------------------------------------------------------
@@ -23,6 +25,9 @@ export function newGroupModal() {
         el('div', { style: { display: 'flex', gap: '8px' } },
           [el('div', { style: { flex: '1' } }, phone), addBtn])]),
       chips, err,
+      el('div', { class: 'auth-or', text: 'oder' }),
+      el('button', { class: 'btn block', onClick: () => { m.close(); joinModal(); } },
+        [icon('link'), 'Per Einladungslink beitreten']),
     ),
     foot: [el('button', { class: 'btn primary', onClick: create }, [icon('group'), 'Gruppe erstellen'])],
   });
@@ -56,38 +61,136 @@ export function newGroupModal() {
   }
 }
 
+// ---- join by invite code/link ---------------------------------------------
+export function joinModal() {
+  const err = el('div', { class: 'formerr' });
+  const input = el('input', { class: 'input', placeholder: 'Einladungslink oder Code' });
+  const m = modal({
+    title: 'Gruppe beitreten',
+    body: (b) => b.append(
+      el('p', { class: 'hint', text: 'Füge einen Ping-Einladungslink oder den Code ein.' }),
+      el('div', { class: 'field', style: { marginTop: '10px' } }, input), err),
+    foot: [el('button', { class: 'btn primary', onClick: submit }, 'Beitreten')],
+  });
+  setTimeout(() => input.focus(), 0);
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+  async function submit() {
+    err.textContent = '';
+    const raw = input.value.trim();
+    const code = raw.includes('/join/') ? raw.split('/join/')[1].split(/[/?#]/)[0] : raw;
+    if (!code) { err.textContent = 'Bitte einen Code eingeben.'; return; }
+    try {
+      const { chat } = await api.post('/chats/join', { code });
+      store.upsertChat(chat); m.close(); store.emit('open-chat', chat.id);
+      toast('Beigetreten.', 'ok');
+    } catch (e) { err.textContent = e.message; }
+  }
+}
+
 // ---- chat / group info ----------------------------------------------------
 export function openChatInfo(chat) {
   if (chat.type === 'direct') return openProfile(chat.otherUser);
   const meOwner = chat.ownerId === store.state.me?.id;
 
-  modal({
-    title: 'Gruppeninfo',
-    body: (body) => {
+  const mdl = modal({ title: 'Gruppeninfo', body: (body) => render(body) });
+
+  function render(body) {
+    clear(body);
+    const avBox = el('div', { style: { position: 'relative', cursor: meOwner ? 'pointer' : 'default' },
+      onClick: meOwner ? changeAvatar : null, title: meOwner ? 'Gruppenbild ändern' : '' },
+      avatar({ id: chat.id, title: chat.title, avatarColor: chat.avatarColor,
+        hasAvatar: chat.hasAvatar, avatarVersion: chat.avatarVersion }, 96, { kind: 'chat' }));
+    if (meOwner) avBox.appendChild(el('div', { style: { position: 'absolute', right: '0', bottom: '0',
+      background: 'var(--accent)', borderRadius: '50%', width: '28px', height: '28px',
+      display: 'grid', placeItems: 'center', border: '3px solid var(--glass)' } }, icon('camera', 'sm')));
+
+    body.append(
+      el('div', { class: 'profile-pane' }, [avBox,
+        el('h3', { text: chat.title }),
+        chat.description ? el('p', { class: 'hint', text: chat.description }) : null,
+        el('div', { class: 'hint', text: `${chat.members?.length || 0} Mitglieder` }),
+      ].filter(Boolean)),
+    );
+
+    if (meOwner) {
       body.append(
-        el('div', { class: 'profile-pane' }, [
-          avatar({ id: chat.id, title: chat.title, avatarColor: chat.avatarColor,
-            hasAvatar: chat.hasAvatar, avatarVersion: chat.avatarVersion }, 100, { kind: 'chat' }),
-          el('h3', { text: chat.title, style: { margin: '4px 0 0' } }),
-          chat.description ? el('p', { class: 'hint', text: chat.description }) : null,
-          el('div', { class: 'hint', text: `${chat.members?.length || 0} Mitglieder` }),
-        ].filter(Boolean)),
-        meOwner ? el('button', { class: 'btn block', style: { margin: '10px 0' },
-          onClick: () => addMember(chat) }, [icon('plus'), 'Mitglied hinzufügen']) : null,
-        el('div', { class: 'list-section', text: 'Mitglieder' }),
+        editRow('Gruppenname', chat.title, (v) => patch({ name: v })),
+        editRow('Beschreibung', chat.description || '', (v) => patch({ description: v }), 'Worum geht es?'),
       );
-      for (const u of chat.members || []) {
-        const row = userRow(u, () => u.id !== store.state.me.id && openProfile(u));
-        if (u.id === chat.ownerId) row.appendChild(el('span', { class: 'badge', text: 'Admin',
-          style: { background: 'var(--surface-3)', color: 'var(--muted)' } }));
-        else if (meOwner) row.appendChild(el('button', { class: 'iconbtn', title: 'Entfernen',
-          onClick: (e) => { e.stopPropagation(); removeMember(chat, u); } }, icon('close')));
-        body.appendChild(row);
-      }
-      body.appendChild(el('button', { class: 'btn danger block', style: { marginTop: '16px' },
-        onClick: () => leaveGroup(chat.id) }, [icon('logout'), 'Gruppe verlassen']));
-    },
-  });
+    }
+
+    inviteSection(body, chat, meOwner);
+
+    body.append(meOwner ? el('button', { class: 'btn block', style: { margin: '10px 0' },
+      onClick: () => addMember(chat) }, [icon('plus'), 'Mitglied hinzufügen']) : null,
+      el('div', { class: 'list-section', text: 'Mitglieder' }));
+    for (const u of chat.members || []) {
+      const row = userRow(u, () => u.id !== store.state.me.id && openProfile(u));
+      if (u.id === chat.ownerId) row.appendChild(el('span', { class: 'badge', text: 'Admin' }));
+      else if (meOwner) row.appendChild(el('button', { class: 'iconbtn', title: 'Entfernen',
+        onClick: (e) => { e.stopPropagation(); removeMember(chat, u); } }, icon('close')));
+      body.appendChild(row);
+    }
+    body.appendChild(el('button', { class: 'btn danger block', style: { marginTop: '16px' },
+      onClick: () => leaveGroup(chat.id) }, [icon('logout'), 'Gruppe verlassen']));
+
+    async function patch(p) {
+      try { const { chat: updated } = await api.patch(`/chats/${chat.id}`, p);
+        Object.assign(chat, updated); store.upsertChat(chat); render(body); toast('Gespeichert.', 'ok'); }
+      catch (e) { toast(e.message, 'err'); }
+    }
+    async function changeAvatar() {
+      const file = await pickFile('image/*'); if (!file) return;
+      try { const buf = await file.arrayBuffer();
+        await api.post(`/chats/${chat.id}/avatar`, buf, { raw: true, headers: { 'Content-Type': file.type || 'image/jpeg' } });
+        const { chat: updated } = await api.get(`/chats/${chat.id}`);
+        Object.assign(chat, updated); store.upsertChat(chat); render(body); toast('Bild aktualisiert.', 'ok'); }
+      catch (e) { toast(e.message || 'Upload fehlgeschlagen', 'err'); }
+    }
+  }
+}
+
+function inviteSection(body, chat, meOwner) {
+  const wrap = el('div');
+  body.append(el('div', { class: 'list-section', text: 'Einladungslink' }), wrap);
+  const draw = (code, url) => {
+    clear(wrap);
+    if (code) {
+      const field = el('input', { class: 'input', readonly: 'readonly', value: url || code });
+      wrap.append(el('div', { style: { display: 'flex', gap: '8px' } }, [
+        el('div', { style: { flex: '1' } }, field),
+        el('button', { class: 'btn sm', title: 'Kopieren', onClick: () => {
+          navigator.clipboard?.writeText(url || code).then(() => toast('Kopiert.')); } }, icon('copy')),
+      ]));
+      if (meOwner) wrap.append(el('div', { style: { display: 'flex', gap: '8px', marginTop: '8px' } }, [
+        el('button', { class: 'btn sm', onClick: rotate }, [icon('refresh'), 'Neu']),
+        el('button', { class: 'btn sm danger', onClick: revoke }, 'Widerrufen'),
+      ]));
+    } else {
+      wrap.append(meOwner
+        ? el('button', { class: 'btn sm', onClick: rotate }, [icon('link'), 'Link erstellen'])
+        : el('div', { class: 'hint', text: 'Noch kein Einladungslink.' }));
+    }
+  };
+  api.get(`/chats/${chat.id}/invite`).then((r) => draw(r.code, r.url)).catch(() => draw(null));
+  async function rotate() {
+    try { const r = await api.post(`/chats/${chat.id}/invite`); draw(r.code, r.url); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+  async function revoke() {
+    try { await api.del(`/chats/${chat.id}/invite`); draw(null); toast('Widerrufen.'); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+}
+
+function editRow(label, value, onSave, placeholder) {
+  const input = el('input', { class: 'input', value, placeholder: placeholder || '' });
+  const btn = el('button', { class: 'btn sm primary', onClick: () => onSave(input.value.trim()) }, 'OK');
+  btn.style.display = 'none';
+  input.addEventListener('input', () => { btn.style.display = input.value !== value ? '' : 'none'; });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') onSave(input.value.trim()); });
+  return el('div', { class: 'field' }, [el('label', { text: label }),
+    el('div', { style: { display: 'flex', gap: '8px' } }, [el('div', { style: { flex: '1' } }, input), btn])]);
 }
 
 async function addMember(chat) {
@@ -125,12 +228,9 @@ export function newPollModal(chatId) {
   const optsBox = el('div');
   const err = el('div', { class: 'formerr' });
   const addOpt = (val = '') => {
-    const i = el('input', { class: 'input', placeholder: 'Option', value: val,
-      style: { marginBottom: '8px' } });
+    const i = el('input', { class: 'input', placeholder: 'Option', value: val, style: { marginBottom: '8px' } });
     optsBox.appendChild(i);
-    i.addEventListener('input', () => {
-      if (i === optsBox.lastChild && i.value.trim()) addOpt();
-    });
+    i.addEventListener('input', () => { if (i === optsBox.lastChild && i.value.trim()) addOpt(); });
   };
   addOpt(); addOpt();
   const m = modal({

@@ -5,8 +5,10 @@ export function attachmentLabel(att) {
   if (!att) return '';
   const kind = att.kind || '';
   if (kind === 'image') return '📷 Foto';
+  if (kind === 'gif') return '🎞️ GIF';
   if (kind === 'video') return '🎥 Video';
-  if (kind === 'audio') return '🎤 Sprachnachricht';
+  if (kind === 'voice') return '🎤 Sprachnachricht';
+  if (kind === 'audio') return '🎵 Audio';
   return '📎 ' + (att.name || 'Datei');
 }
 

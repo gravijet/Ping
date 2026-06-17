@@ -1,74 +1,99 @@
-/* status.js — ephemeral status updates ("Stories"): see your own + peers', post
-   text (coloured background) or image updates, and a simple full-screen viewer
-   that marks items seen. */
+/* status.js — ephemeral status updates ("Stories") rendered as a list-pane
+   section: your own updates, peers' updates, a full-screen viewer that marks
+   items seen, a composer (coloured text card or image/video) and — for your
+   own — a viewers list and delete. */
 
 import { api } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, chatTime } from './ui.js';
 import { pickFile } from './media.js';
 import { uploadFile, authedObjectUrl } from './api.js';
+import { setNavBadge } from './app.js';
 
-const BG = ['#4d9bff', '#3fe0bd', '#ff8a5b', '#c084fc', '#f472b6', '#34d399', '#1f2937'];
+const BG = ['#4d9bff', '#7b6cff', '#3fe0bd', '#ff8a5b', '#f472b6', '#34d399', '#1f2937'];
+let paneBody = null;
+let data = { mine: [], others: [] };
 
-export async function openStatus() {
-  const m = modal({ title: 'Status', width: '460px', body: (b) =>
-    b.append(el('div', { class: 'hint', text: 'Lade …' })) });
-  let data;
-  try { data = await api.get('/status'); }
-  catch (e) { toast(e.message, 'err'); return; }
-  render(m.body);
+export async function renderStatusPane(head, body) {
+  paneBody = body;
+  clear(head).append(
+    el('div', { class: 'pane-title', text: 'Status' }),
+    el('div', { class: 'actions' }, [
+      el('button', { class: 'iconbtn', title: 'Status hinzufügen', onClick: () => addStatus(refresh) }, icon('plus')),
+    ]),
+  );
+  clear(body).append(el('div', { class: 'pane-empty', text: 'Lade …' }));
+  await refresh();
+}
 
-  function render(body) {
-    clear(body);
-    const me = store.state.me;
-    const mineCount = data.mine?.length || 0;
-    body.append(
-      el('div', { class: 'urow', onClick: () => mineCount ? view(data.mine, 0) : addStatus(m, refresh) }, [
-        (() => { const a = avatar(me, 50, { kind: 'user' });
-          a.style.outline = mineCount ? '2.5px solid var(--accent)' : 'none';
-          a.style.outlineOffset = '2px'; return a; })(),
+async function refresh() {
+  try { data = await api.get('/status'); } catch (e) { toast(e.message, 'err'); return; }
+  setNavBadge('status', (data.others || []).filter((g) => g.hasUnseen).length);
+  if (paneBody) paint(paneBody);
+}
+
+function paint(body) {
+  clear(body);
+  const scroll = el('div', { class: 'pane-scroll' });
+  body.appendChild(scroll);
+  const me = store.state.me;
+  const mineCount = data.mine?.length || 0;
+
+  const myAv = avatar(me, 50, { kind: 'user' });
+  const myRing = el('div', { class: `status-ring ${mineCount ? 'mine' : ''}` }, myAv);
+  scroll.appendChild(el('button', { class: 'urow',
+    onClick: () => mineCount ? view(data.mine, 0, true) : addStatus(refresh) }, [
+    myRing,
+    el('div', { class: 'meta' }, [
+      el('div', { class: 'uname', text: 'Mein Status' }),
+      el('div', { class: 'uabout', text: mineCount ? `${mineCount} Update(s) · zum Ansehen tippen` : 'Tippe, um zu posten' }),
+    ]),
+    el('span', { class: 'iconbtn', title: 'Hinzufügen',
+      onClick: (e) => { e.stopPropagation(); addStatus(refresh); } }, icon('plus')),
+  ]));
+
+  if (data.others?.length) {
+    scroll.appendChild(el('div', { class: 'pane-section' }, [icon('status'), el('span', { text: 'Letzte Updates' })]));
+    for (const grp of data.others) {
+      const a = avatar(grp.user, 50, { kind: 'user', online: grp.user.online });
+      const ring = el('div', { class: `status-ring ${grp.hasUnseen ? 'unseen' : ''}` }, a);
+      scroll.appendChild(el('button', { class: 'urow', onClick: () => view(grp.items, 0, false) }, [
+        ring,
         el('div', { class: 'meta' }, [
-          el('div', { class: 'uname', text: 'Mein Status' }),
-          el('div', { class: 'uabout', text: mineCount ? `${mineCount} Update(s)` : 'Tippe, um zu posten' }),
+          el('div', { class: 'uname', text: grp.user.displayName }),
+          el('div', { class: 'uabout', text: chatTime(grp.updatedAt) }),
         ]),
-        el('button', { class: 'iconbtn', title: 'Status hinzufügen',
-          onClick: (e) => { e.stopPropagation(); addStatus(m, refresh); } }, icon('plus')),
-      ]),
-    );
-    if (data.others?.length) {
-      body.appendChild(el('div', { class: 'list-section', text: 'Letzte Updates' }));
-      for (const grp of data.others) {
-        const a = avatar(grp.user, 50, { kind: 'user', online: grp.user.online });
-        if (grp.hasUnseen) { a.style.outline = '2.5px solid var(--accent)'; a.style.outlineOffset = '2px'; }
-        body.appendChild(el('div', { class: 'urow', onClick: () => view(grp.items, 0) }, [
-          a,
-          el('div', { class: 'meta' }, [
-            el('div', { class: 'uname', text: grp.user.displayName }),
-            el('div', { class: 'uabout', text: chatTime(grp.updatedAt) }),
-          ]),
-        ]));
-      }
+      ]));
     }
-  }
-  async function refresh() {
-    try { data = await api.get('/status'); render(m.body); store.emit('chats'); } catch {}
+  } else {
+    scroll.appendChild(el('div', { class: 'pane-empty', text: 'Noch keine Status-Updates deiner Kontakte.' }));
   }
 }
 
 // ---- full-screen viewer ---------------------------------------------------
-function view(items, start) {
+function view(items, start, mine) {
   let i = start;
   const root = document.getElementById('call-root');
   const overlay = el('div', { class: 'call-overlay', style: { background: '#000' } });
   const content = el('div', { style: { position: 'relative', width: 'min(440px,92vw)',
-    height: 'min(80vh,760px)', borderRadius: '14px', overflow: 'hidden', display: 'flex',
+    height: 'min(80vh,760px)', borderRadius: '16px', overflow: 'hidden', display: 'flex',
     alignItems: 'center', justifyContent: 'center' } });
   const bars = el('div', { style: { position: 'absolute', top: '10px', left: '10px', right: '10px',
     display: 'flex', gap: '4px', zIndex: '3' } });
-  const closeBtn = el('button', { class: 'call-btn', style: { position: 'absolute', top: '18px',
-    right: '18px', width: '44px', height: '44px', zIndex: '4' }, onClick: close }, icon('close'));
-  overlay.append(content, closeBtn);
+  const topBtns = el('div', { style: { position: 'absolute', top: '16px', right: '16px',
+    display: 'flex', gap: '8px', zIndex: '4' } });
+  if (mine) {
+    topBtns.append(
+      el('button', { class: 'call-btn', style: { width: '42px', height: '42px' },
+        onClick: (e) => { e.stopPropagation(); showViewers(items[i]); } }, icon('eye')),
+      el('button', { class: 'call-btn', style: { width: '42px', height: '42px' },
+        onClick: (e) => { e.stopPropagation(); delItem(items[i]); } }, icon('trash')),
+    );
+  }
+  topBtns.append(el('button', { class: 'call-btn', style: { width: '42px', height: '42px' }, onClick: close }, icon('close')));
+  overlay.append(content);
   content.append(bars);
+  overlay.append(topBtns);
   content.addEventListener('click', (e) => {
     const left = e.clientX - content.getBoundingClientRect().left < content.clientWidth / 2;
     left ? prev() : next();
@@ -88,45 +113,66 @@ function view(items, start) {
       fontWeight: '600' } });
     if (it.attachment) {
       node.style.background = '#000';
-      const img = el('img', { style: { maxWidth: '100%', maxHeight: '100%', borderRadius: '8px' } });
-      authedObjectUrl(it.attachment.url).then((u) => u && (img.src = u));
-      node.appendChild(it.attachment.kind === 'video'
+      const media = it.attachment.kind === 'video'
         ? (() => { const v = el('video', { controls: 'controls', autoplay: 'autoplay',
             style: { maxWidth: '100%', maxHeight: '100%' } });
             authedObjectUrl(it.attachment.url).then((u) => u && (v.src = u)); return v; })()
-        : img);
+        : (() => { const img = el('img', { style: { maxWidth: '100%', maxHeight: '100%', borderRadius: '8px' } });
+            authedObjectUrl(it.attachment.url).then((u) => u && (img.src = u)); return img; })();
+      node.appendChild(media);
       if (it.body) node.appendChild(el('div', { style: { position: 'absolute', bottom: '20px',
         left: '20px', right: '20px', fontSize: '18px' }, text: it.body }));
-    } else {
-      node.textContent = it.body || '';
-    }
+    } else { node.textContent = it.body || ''; }
     content.appendChild(node);
-    if (it.id && !it.seen) api.post(`/status/${it.id}/view`).catch(() => {});
+    if (it.id && !it.seen && !mine) api.post(`/status/${it.id}/view`).catch(() => {});
   }
   function next() { if (i < items.length - 1) { i++; show(); } else close(); }
   function prev() { if (i > 0) { i--; show(); } }
-  function close() { overlay.remove(); }
+  function close() { overlay.remove(); refresh(); }
+  async function delItem(it) {
+    if (!it?.id) return;
+    try { await api.del(`/status/${it.id}`); toast('Status gelöscht.', 'ok');
+      items.splice(i, 1); if (!items.length) return close();
+      i = Math.min(i, items.length - 1); show(); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+}
+
+async function showViewers(it) {
+  if (!it?.id) return;
+  const mdl = modal({ title: 'Betrachter', body: (b) => b.append(el('div', { class: 'hint', text: 'Lade …' })) });
+  try {
+    const { viewers } = await api.get(`/status/${it.id}/viewers`);
+    clear(mdl.body);
+    if (!viewers?.length) { mdl.body.append(el('div', { class: 'pane-empty', text: 'Noch niemand.' })); return; }
+    for (const v of viewers) mdl.body.append(el('div', { class: 'urow' }, [
+      avatar(v.user || v, 42, { kind: 'user' }),
+      el('div', { class: 'meta' }, [
+        el('div', { class: 'uname', text: (v.user || v).displayName }),
+        v.viewedAt ? el('div', { class: 'uabout', text: new Date(v.viewedAt).toLocaleString('de-DE') }) : null,
+      ].filter(Boolean)),
+    ]));
+  } catch (e) { clear(mdl.body); mdl.body.append(el('div', { class: 'formerr', text: e.message })); }
 }
 
 // ---- compose --------------------------------------------------------------
-function addStatus(parentModal, onDone) {
+function addStatus(onDone) {
   let bg = BG[0];
   const text = el('textarea', { class: 'input', rows: '3', placeholder: 'Was gibt es Neues?' });
-  const preview = el('div', { style: { borderRadius: '12px', minHeight: '120px', display: 'flex',
+  const preview = el('div', { style: { borderRadius: '14px', minHeight: '130px', display: 'flex',
     alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '20px',
     fontWeight: '600', background: bg, padding: '16px', textAlign: 'center', marginBottom: '12px' },
     text: 'Vorschau' });
   text.addEventListener('input', () => { preview.textContent = text.value || 'Vorschau'; });
-  const swatches = el('div', { style: { display: 'flex', gap: '8px', marginBottom: '12px' } },
-    BG.map((c) => el('button', { style: { width: '30px', height: '30px', borderRadius: '50%',
-      background: c, border: '0', cursor: 'pointer' }, onClick: () => { bg = c;
-      preview.style.background = c; } })));
+  const swatches = el('div', { class: 'swatches' },
+    BG.map((c) => el('button', { class: 'swatch', style: { background: c },
+      onClick: () => { bg = c; preview.style.background = c; } })));
 
   const m = modal({
     title: 'Status hinzufügen',
     body: (b) => b.append(preview, swatches,
       el('div', { class: 'field' }, [el('label', { text: 'Text' }), text]),
-      el('button', { class: 'btn block', onClick: postImage }, [icon('image'), 'Stattdessen Bild posten'])),
+      el('button', { class: 'btn block', onClick: postImage }, [icon('image'), 'Stattdessen Bild/Video posten'])),
     foot: [el('button', { class: 'btn primary', onClick: postText }, 'Posten')],
   });
   async function postText() {

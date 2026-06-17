@@ -162,8 +162,10 @@ function streamApk(res, info) {
 // The Windows installer, hosted locally just like the APK. Returns the newest
 // *.exe found in config.windowsDir with its size + a version (from the filename,
 // e.g. "Ping-Setup-0.13.0.exe", or the WINDOWS_VERSION override), or null when
-// none has been uploaded yet.
-function windowsInfo() {
+// none has been uploaded yet. Exported so the API (/api/desktop/version) can
+// advertise the latest desktop build to the running Windows shell for its
+// background auto-updater.
+export function windowsInfo() {
   let entries = [];
   try {
     entries = fs.readdirSync(config.windowsDir);

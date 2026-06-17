@@ -46,6 +46,22 @@ export async function sendAttachment(chatId, file, { caption = '', replyTo = nul
   return r.message;
 }
 
+// Upload a recorded voice clip and post it as a `voice` message. Duration is
+// carried in the attachment so the bubble can show it without decoding audio.
+export async function sendVoice(chatId, file, durationMs, { replyTo = null } = {}) {
+  const meta = await uploadFile(file);
+  const body = {
+    type: 'voice',
+    attachment: {
+      url: meta.url, mime: meta.mime, name: meta.name, size: meta.size,
+      kind: 'voice', durationMs: Math.round(durationMs || 0),
+    },
+  };
+  if (replyTo) body.replyTo = replyTo;
+  const r = await api.post(`/chats/${chatId}/messages`, body);
+  return r.message;
+}
+
 // Render an attachment object into a DOM node for a bubble.
 export function renderAttachment(att, { onImageClick } = {}) {
   if (!att) return null;

@@ -1,7 +1,7 @@
 /* contacts.js — start new chats (look a person up by phone, open a direct chat)
    and show a read-only profile card for a user. */
 
-import { api } from './api.js';
+import { api, authedObjectUrl } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, lastSeenLabel } from './ui.js';
 
@@ -68,27 +68,53 @@ export function userRow(user, onClick, { selected = null } = {}) {
 
 export function openProfile(user) {
   if (!user) return;
-  modal({
+  let blocked = false;
+  const blockBtn = el('button', { class: 'btn ghost', onClick: toggleBlock }, [icon('block'), 'Blockieren']);
+
+  const m = modal({
     title: 'Profil',
     body: (body) => {
+      if (user.hasBanner) {
+        const banner = el('div', { class: 'profile-banner' });
+        authedObjectUrl(`/users/${user.id}/banner`, user.bannerVersion || 0)
+          .then((u) => u && (banner.style.backgroundImage = `url(${u})`));
+        body.appendChild(banner);
+      }
       body.appendChild(el('div', { class: 'profile-pane' }, [
         avatar(user, 110, { kind: 'user', online: store.isOnline(user.id) }),
-        el('h3', { text: user.displayName, style: { margin: '4px 0 0' } }),
+        el('h3', { text: user.displayName }),
         user.about ? el('p', { class: 'hint', text: user.about }) : null,
         store.isOnline(user.id)
           ? el('div', { class: 'hint', text: 'online' })
           : el('div', { class: 'hint', text: lastSeenLabel(store.state.lastSeen.get(user.id)) }),
-        user.city ? row('Ort', user.city) : null,
-        user.pronouns ? row('Pronomen', user.pronouns) : null,
       ].filter(Boolean)));
+      if (user.phone) body.appendChild(row('Telefon', user.phone));
+      if (user.city) body.appendChild(row('Ort', user.city));
+      if (user.pronouns) body.appendChild(row('Pronomen', user.pronouns));
     },
     foot: [
-      el('button', { class: 'btn primary', onClick: async (e) => {
-        try { await startDirect(user.id);
-          e.target.closest('.modal-back')?.remove(); } catch (err) { toast(err.message, 'err'); }
+      blockBtn,
+      el('button', { class: 'btn primary', onClick: async () => {
+        try { await startDirect(user.id); m.close(); } catch (err) { toast(err.message, 'err'); }
       } }, [icon('edit'), 'Nachricht senden']),
     ],
   });
-  function row(k, v) { return el('div', { class: 'profile-row' },
+
+  // Reflect the current block state on the button.
+  api.get('/blocks').then(({ blocked: ids }) => { blocked = (ids || []).includes(user.id); paintBlock(); }).catch(() => {});
+  function paintBlock() {
+    clear(blockBtn).append(icon(blocked ? 'unblock' : 'block'),
+      document.createTextNode(blocked ? 'Entsperren' : 'Blockieren'));
+    blockBtn.classList.toggle('danger', !blocked);
+    blockBtn.classList.toggle('ghost', blocked);
+  }
+  async function toggleBlock() {
+    try {
+      await api.post(`/users/${user.id}/${blocked ? 'unblock' : 'block'}`);
+      blocked = !blocked; paintBlock();
+      toast(blocked ? 'Blockiert.' : 'Entsperrt.', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  }
+  function row(k, v) { return el('div', { class: 'profile-row inline' },
     [el('span', { class: 'k', text: k }), el('span', { class: 'v', text: v })]); }
 }

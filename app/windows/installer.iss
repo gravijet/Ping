@@ -72,7 +72,10 @@ Source: "{#WV2Bootstrapper}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check
 #if FileExists(WV2Bootstrapper)
 Filename: "{tmp}\{#WV2Bootstrapper}"; Parameters: "/silent /install"; StatusMsg: "Installiere Microsoft Edge WebView2-Laufzeit ..."; Check: WebView2Missing; Flags: waituntilterminated
 #endif
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Re-launch Ping after install. Deliberately NOT skipifsilent: the desktop
+; shell's background auto-updater runs this installer with /SILENT, and we want
+; Ping to come back up on its own once the in-place upgrade finishes.
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall runascurrentuser
 
 [Code]
 // True when the WebView2 Evergreen runtime is not registered (per-machine or

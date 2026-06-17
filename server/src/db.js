@@ -314,6 +314,23 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+
+  -- Developer API keys. External integrations authenticate with a secret token
+  -- (shown once at creation) that acts on behalf of [user_id]. We never store
+  -- the secret itself — only its sha256 hash — plus a short prefix so the owner
+  -- can tell their keys apart in a list. scopes is a JSON array of grant strings.
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL DEFAULT '',
+    prefix       TEXT NOT NULL,
+    key_hash     TEXT NOT NULL UNIQUE,
+    scopes       TEXT NOT NULL DEFAULT '[]',
+    created_at   INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked_at   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 `);
 
 // ---- Migrations ------------------------------------------------------------

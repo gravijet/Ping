@@ -169,6 +169,47 @@ export const messageSendSchema = z
     { message: 'Die Nachricht braucht Text oder einen Anhang.' }
   );
 
+// ---- Developer API (/api/v1) ----------------------------------------------
+// English copy here on purpose: these errors surface to integration developers,
+// not end users.
+
+// Sending via the public API. Same content rules as messageSendSchema, plus an
+// optional `to` (user id / phone / email) used by POST /api/v1/messages to
+// address a recipient directly. `to` is ignored when posting into a known chat.
+export const apiSendSchema = z
+  .object({
+    to: z.string().trim().min(1).max(160).optional(),
+    body: z.string().max(4000, 'The message is too long (max 4000 characters).').optional(),
+    type: z.enum(mediaTypes).optional(),
+    attachment: attachmentSchema.optional(),
+    replyTo: z.string().min(1).optional(),
+  })
+  .refine(
+    (d) => {
+      const t = d.type || 'text';
+      return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
+    },
+    { message: 'A message needs text or an attachment.' }
+  );
+
+// Opening a direct chat via the public API: at least one identifier required.
+export const apiDirectSchema = z
+  .object({
+    to: z.string().trim().min(1).max(160).optional(),
+    userId: z.string().trim().min(1).max(80).optional(),
+    phone: phoneInputSchema.optional(),
+    email: emailSchema.optional(),
+  })
+  .refine((d) => d.to || d.userId || d.phone || d.email, {
+    message: 'Provide a "to", "userId", "phone" or "email".',
+  });
+
+// Minting a developer API key from the in-app/account settings.
+export const apiKeyCreateSchema = z.object({
+  name: z.string().trim().max(60, 'The key name is too long.').optional(),
+  scopes: z.array(z.string().max(40)).max(10).optional(),
+});
+
 // A "send later" message: the same content as a normal message plus the epoch
 // millisecond timestamp it should go out at (validated as future in the route).
 export const scheduleSchema = z

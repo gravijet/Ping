@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ping Developer API</title>
+    <meta
+      name="description"
+      content="Build integrations on Ping. A simple, key-authenticated HTTP API for sending and reading messages."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #07090e;
+        --bg-soft: #0b0e15;
+        --surface: #0e121b;
+        --surface-2: #131825;
+        --border: #1d2433;
+        --text: #eef2f8;
+        --muted: #9aa7bd;
+        --faint: #677188;
+        --accent: #4d9bff;
+        --accent-press: #2f7df0;
+        --accent-soft: rgba(77, 155, 255, 0.14);
+        --accent-ink: #bcd8ff;
+        --mint: #3fe0bd;
+        --ok: #3ddc84;
+        --warn: #ffb454;
+        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+      body {
+        margin: 0;
+        background: radial-gradient(1200px 600px at 80% -10%, #0d1422 0%, var(--bg) 55%);
+        color: var(--text);
+        font-family: "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: var(--accent-ink); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      code, pre { font-family: var(--mono); font-size: 0.86rem; }
+
+      .layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1180px; margin: 0 auto; }
+
+      /* Sidebar */
+      aside {
+        position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+        padding: 2rem 1.25rem; border-right: 1px solid var(--border);
+      }
+      .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; margin-bottom: 0.25rem; }
+      .brand .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 16px var(--accent); }
+      .brand small { display: block; font-weight: 600; font-size: 0.7rem; color: var(--faint); letter-spacing: 0.14em; text-transform: uppercase; }
+      nav { margin-top: 1.75rem; display: flex; flex-direction: column; gap: 0.1rem; }
+      nav .group { color: var(--faint); font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; margin: 1.1rem 0 0.35rem; }
+      nav a { color: var(--muted); padding: 0.3rem 0.6rem; border-radius: 8px; font-size: 0.9rem; }
+      nav a:hover { background: var(--surface); color: var(--text); text-decoration: none; }
+
+      /* Content */
+      main { padding: 2.5rem clamp(1.25rem, 4vw, 3.5rem) 6rem; min-width: 0; }
+      header.hero { padding-bottom: 1.5rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border); }
+      header.hero h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.05; letter-spacing: -0.03em; margin: 0.2rem 0 0.6rem; }
+      header.hero p { color: var(--muted); font-size: 1.08rem; max-width: 60ch; margin: 0; }
+      .pill { display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent-soft); border: 1px solid rgba(77,155,255,0.3); padding: 0.25rem 0.6rem; border-radius: 999px; }
+
+      section { margin: 0 0 3rem; }
+      h2 { font-size: 1.5rem; letter-spacing: -0.02em; margin: 0 0 0.8rem; padding-top: 0.5rem; }
+      h3 { font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
+      p { color: #d4dcea; }
+      ul { color: #d4dcea; padding-left: 1.2rem; }
+      li { margin: 0.25rem 0; }
+
+      .card { background: linear-gradient(180deg, var(--surface) 0%, var(--bg-soft) 100%); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.25rem; }
+      .grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      .scope { font-family: var(--mono); color: var(--mint); }
+
+      /* Endpoint blocks */
+      .endpoint { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin: 1rem 0; background: var(--bg-soft); }
+      .endpoint > .head { display: flex; align-items: center; gap: 0.7rem; padding: 0.8rem 1.1rem; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+      .method { font-family: var(--mono); font-weight: 600; font-size: 0.74rem; padding: 0.22rem 0.55rem; border-radius: 6px; letter-spacing: 0.04em; }
+      .method.get { color: #8fd0ff; background: rgba(77,155,255,0.14); }
+      .method.post { color: #87f0cf; background: rgba(63,224,189,0.14); }
+      .method.delete { color: #ff9ba6; background: rgba(255,90,110,0.14); }
+      .path { font-family: var(--mono); font-size: 0.92rem; color: var(--text); }
+      .endpoint .scopechip { margin-left: auto; font-size: 0.72rem; color: var(--faint); }
+      .endpoint .body { padding: 0.9rem 1.1rem 1.1rem; }
+      .endpoint .body p:first-child { margin-top: 0; }
+
+      pre { background: #05070b; border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; overflow-x: auto; margin: 0.6rem 0; position: relative; }
+      pre code { color: #cdd7e6; }
+      .tok-key { color: #8fd0ff; }
+      .tok-str { color: #b6e3a7; }
+      .tok-num { color: #ffcf8f; }
+      .tok-com { color: var(--faint); }
+      p code, li code, td code { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0.08rem 0.38rem; color: var(--accent-ink); }
+
+      table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 0.92rem; }
+      th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--faint); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+      td.k { font-family: var(--mono); color: var(--accent-ink); white-space: nowrap; }
+      td.t { font-family: var(--mono); color: var(--mint); font-size: 0.82rem; white-space: nowrap; }
+
+      .note { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; padding: 0.7rem 1rem; margin: 1rem 0; color: #dbe8fb; }
+      .note.warn { border-left-color: var(--warn); background: rgba(255,180,84,0.1); color: #f3ddb8; }
+
+      .copy { position: absolute; top: 0.5rem; right: 0.5rem; font-family: inherit; font-size: 0.7rem; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0.2rem 0.5rem; cursor: pointer; }
+      .copy:hover { color: var(--text); border-color: var(--accent); }
+
+      footer { color: var(--faint); font-size: 0.85rem; border-top: 1px solid var(--border); padding-top: 1.5rem; margin-top: 3rem; }
+
+      @media (max-width: 860px) {
+        .layout { grid-template-columns: 1fr; }
+        aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+        nav { flex-flow: row wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside>
+        <div class="brand"><span class="dot"></span> Ping <small>Developer&nbsp;API</small></div>
+        <nav>
+          <span class="group">Getting started</span>
+          <a href="#intro">Overview</a>
+          <a href="#auth">Authentication</a>
+          <a href="#keys">Creating a key</a>
+          <a href="#scopes">Scopes</a>
+          <a href="#conventions">Conventions</a>
+          <span class="group">Endpoints</span>
+          <a href="#me">Identity</a>
+          <a href="#chats">Chats</a>
+          <a href="#messages">Messages</a>
+          <span class="group">Reference</span>
+          <a href="#objects">Object shapes</a>
+          <a href="#errors">Errors</a>
+        </nav>
+      </aside>
+
+      <main>
+        <header class="hero">
+          <span class="pill">v1 · stable</span>
+          <h1>Ping Developer API</h1>
+          <p>
+            A small, predictable HTTP API for building on Ping — send and read
+            messages, open conversations and act on behalf of your own account.
+            JSON in, JSON out, authenticated with a single API key.
+          </p>
+        </header>
+
+        <section id="intro">
+          <h2>Overview</h2>
+          <p>Every endpoint lives under a versioned base URL:</p>
+          <pre><code class="base-url">https://example.invalid/api/v1</code><button class="copy" data-copy=".base-url">Copy</button></pre>
+          <p>
+            The API is REST-ish: resources are addressed by path, actions use the
+            obvious HTTP verb, request and response bodies are JSON. Each key acts
+            <strong>as a Ping account</strong> — your own — so anything the API
+            sends appears to recipients exactly as if you'd sent it from the app,
+            delivered live and via push notification.
+          </p>
+        </section>
+
+        <section id="auth">
+          <h2>Authentication</h2>
+          <p>
+            Send your secret key as a bearer token on every request. A key looks
+            like <code>ping_sk_…</code> and is shown to you <strong>only once</strong>,
+            when you create it.
+          </p>
+          <pre><code><span class="tok-key">Authorization</span>: Bearer ping_sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
+          <p>The <code>X-API-Key</code> header is accepted as an alternative.</p>
+          <div class="note warn">
+            Treat the key like a password. It grants access to your messages.
+            Never embed it in client-side code or commit it to a repository.
+            Lost or leaked a key? Revoke it (see below) and mint a new one.
+          </div>
+        </section>
+
+        <section id="keys">
+          <h2>Creating a key</h2>
+          <p>
+            Keys are minted from your own signed-in session. Authenticate as you
+            normally would (the same login the app uses) to obtain a session
+            token, then call the key-management endpoints with it.
+          </p>
+          <h3>1 · Log in to get a session token</h3>
+          <pre><code><span class="tok-com"># returns { "token": "&lt;session-jwt&gt;", "user": {…} }</span>
+curl -X POST <span class="base-url-i">https://example.invalid</span>/api/auth/login \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"login":"+4366012345678","password":"••••••"}'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+          <h3>2 · Mint an API key</h3>
+          <pre><code>curl -X POST <span class="base-url-i">https://example.invalid</span>/api/dev/keys \
+  -H <span class="tok-str">'authorization: Bearer &lt;session-jwt&gt;'</span> \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"name":"My bot","scopes":["profile","chats:read","messages:write"]}'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+          <pre><code><span class="tok-com">// 201 Created — copy "key" now; it is never shown again.</span>
+{
+  <span class="tok-key">"key"</span>: {
+    <span class="tok-key">"id"</span>: <span class="tok-str">"b2c1…"</span>,
+    <span class="tok-key">"name"</span>: <span class="tok-str">"My bot"</span>,
+    <span class="tok-key">"prefix"</span>: <span class="tok-str">"ping_sk_a1b2…"</span>,
+    <span class="tok-key">"scopes"</span>: [<span class="tok-str">"profile"</span>, <span class="tok-str">"chats:read"</span>, <span class="tok-str">"messages:write"</span>],
+    <span class="tok-key">"key"</span>: <span class="tok-str">"ping_sk_a1b2c3d4e5f6…"</span>
+  }
+}</code></pre>
+          <h3>Managing keys</h3>
+          <table>
+            <tr><th>Method</th><th>Path</th><th>Does</th></tr>
+            <tr><td class="t">GET</td><td><code>/api/dev/keys</code></td><td>List your keys (prefixes only, never secrets).</td></tr>
+            <tr><td class="t">POST</td><td><code>/api/dev/keys</code></td><td>Create a key. Body: <code>name</code>, optional <code>scopes</code>.</td></tr>
+            <tr><td class="t">DELETE</td><td><code>/api/dev/keys/:id</code></td><td>Revoke a key immediately.</td></tr>
+          </table>
+          <p class="note">These three endpoints use your <em>session token</em>, not an API key.</p>
+        </section>
+
+        <section id="scopes">
+          <h2>Scopes</h2>
+          <p>A key only grants what you ask for. Request the narrowest set that gets the job done.</p>
+          <div class="grid">
+            <div class="card"><span class="scope">profile</span><p style="margin:.4rem 0 0">Read the key owner's own identity (<code>GET /me</code>).</p></div>
+            <div class="card"><span class="scope">chats:read</span><p style="margin:.4rem 0 0">List chats and read message history.</p></div>
+            <div class="card"><span class="scope">messages:write</span><p style="margin:.4rem 0 0">Send messages and open direct chats.</p></div>
+          </div>
+          <p style="margin-top:1rem">Omit <code>scopes</code> at creation to get the default set: <code>profile</code>, <code>chats:read</code>, <code>messages:write</code>.</p>
+        </section>
+
+        <section id="conventions">
+          <h2>Conventions</h2>
+          <ul>
+            <li><strong>Format.</strong> Send <code>Content-Type: application/json</code>; all responses are JSON.</li>
+            <li><strong>Timestamps</strong> are integer epoch milliseconds (UTC).</li>
+            <li><strong>IDs</strong> are opaque strings — don't parse them.</li>
+            <li><strong>Rate limits.</strong> Requests are throttled per client. On <code>429</code>, back off and retry. <code>RateLimit-*</code> headers describe your budget.</li>
+            <li><strong>Errors</strong> always look like <code>{ "error": "…" }</code> with a meaningful status code.</li>
+          </ul>
+        </section>
+
+        <section id="me">
+          <h2>Identity</h2>
+          <div class="endpoint">
+            <div class="head"><span class="method get">GET</span><span class="path">/api/v1/me</span><span class="scopechip">scope: profile</span></div>
+            <div class="body">
+              <p>Returns the account this key acts as, including its phone number.</p>
+              <pre><code>curl <span class="base-url-i">https://example.invalid</span>/api/v1/me \
+  -H <span class="tok-str">'authorization: Bearer ping_sk_…'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+              <pre><code>{
+  <span class="tok-key">"user"</span>: {
+    <span class="tok-key">"id"</span>: <span class="tok-str">"a1b2…"</span>,
+    <span class="tok-key">"displayName"</span>: <span class="tok-str">"My bot"</span>,
+    <span class="tok-key">"phone"</span>: <span class="tok-str">"+4366012345678"</span>,
+    <span class="tok-key">"about"</span>: <span class="tok-str">""</span>,
+    <span class="tok-key">"avatarColor"</span>: <span class="tok-str">"#4d9bff"</span>
+  }
+}</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="chats">
+          <h2>Chats</h2>
+
+          <div class="endpoint">
+            <div class="head"><span class="method get">GET</span><span class="path">/api/v1/chats</span><span class="scopechip">scope: chats:read</span></div>
+            <div class="body">
+              <p>List every chat (direct &amp; group) the account is in, most-recent first.</p>
+              <pre><code>{ <span class="tok-key">"chats"</span>: [ <span class="tok-com">/* Chat objects */</span> ] }</code></pre>
+            </div>
+          </div>
+
+          <div class="endpoint">
+            <div class="head"><span class="method get">GET</span><span class="path">/api/v1/chats/:id</span><span class="scopechip">scope: chats:read</span></div>
+            <div class="body"><p>Fetch a single chat you belong to. <code>404</code> if it doesn't exist, <code>403</code> if you're not a member.</p></div>
+          </div>
+
+          <div class="endpoint">
+            <div class="head"><span class="method get">GET</span><span class="path">/api/v1/chats/:id/messages</span><span class="scopechip">scope: chats:read</span></div>
+            <div class="body">
+              <p>Message history, newest last. Paginate backwards with query params:</p>
+              <table>
+                <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+                <tr><td class="k">limit</td><td class="t">number</td><td>1–100, default 40.</td></tr>
+                <tr><td class="k">before</td><td class="t">number</td><td>Return messages created before this timestamp (ms). Use the oldest <code>createdAt</code> you have to page back.</td></tr>
+              </table>
+              <pre><code>curl <span class="base-url-i">https://example.invalid</span>/api/v1/chats/CHAT_ID/messages?limit=20 \
+  -H <span class="tok-str">'authorization: Bearer ping_sk_…'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+            </div>
+          </div>
+
+          <div class="endpoint">
+            <div class="head"><span class="method post">POST</span><span class="path">/api/v1/chats/direct</span><span class="scopechip">scope: messages:write</span></div>
+            <div class="body">
+              <p>Open (or reopen) a one-to-one chat with a user. Idempotent. Address them by any one of:</p>
+              <table>
+                <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+                <tr><td class="k">to</td><td class="t">string</td><td>User id, phone (E.164) or email — whichever you have.</td></tr>
+                <tr><td class="k">userId</td><td class="t">string</td><td>Explicit user id.</td></tr>
+                <tr><td class="k">phone</td><td class="t">string</td><td>Phone number, any common format.</td></tr>
+                <tr><td class="k">email</td><td class="t">string</td><td>Account email.</td></tr>
+              </table>
+              <pre><code>{ <span class="tok-key">"chat"</span>: { <span class="tok-com">/* Chat object */</span> } }</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="messages">
+          <h2>Messages</h2>
+
+          <div class="endpoint">
+            <div class="head"><span class="method post">POST</span><span class="path">/api/v1/chats/:id/messages</span><span class="scopechip">scope: messages:write</span></div>
+            <div class="body">
+              <p>Send a message into a chat you belong to.</p>
+              <table>
+                <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+                <tr><td class="k">body</td><td class="t">string</td><td>Message text (≤ 4000 chars). Required for text messages.</td></tr>
+                <tr><td class="k">replyTo</td><td class="t">string</td><td>Optional id of a message in this chat to quote.</td></tr>
+              </table>
+              <pre><code>curl -X POST <span class="base-url-i">https://example.invalid</span>/api/v1/chats/CHAT_ID/messages \
+  -H <span class="tok-str">'authorization: Bearer ping_sk_…'</span> \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"body":"Hello from the API 👋"}'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+              <pre><code><span class="tok-com">// 201 Created</span>
+{ <span class="tok-key">"message"</span>: { <span class="tok-com">/* Message object */</span> } }</code></pre>
+            </div>
+          </div>
+
+          <div class="endpoint">
+            <div class="head"><span class="method post">POST</span><span class="path">/api/v1/messages</span><span class="scopechip">scope: messages:write</span></div>
+            <div class="body">
+              <p>
+                Shortcut: open the direct chat with <code>to</code> and post a
+                message in a single call — the quickest way to DM someone.
+              </p>
+              <pre><code>curl -X POST <span class="base-url-i">https://example.invalid</span>/api/v1/messages \
+  -H <span class="tok-str">'authorization: Bearer ping_sk_…'</span> \
+  -H <span class="tok-str">'content-type: application/json'</span> \
+  -d <span class="tok-str">'{"to":"+4366012345678","body":"Your build is done ✅"}'</span></code><button class="copy" data-copy-parent>Copy</button></pre>
+              <pre><code>{ <span class="tok-key">"message"</span>: { <span class="tok-com">/* Message object */</span> } }</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <section id="objects">
+          <h2>Object shapes</h2>
+
+          <h3>Message</h3>
+          <table>
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="k">id</td><td class="t">string</td><td>Message id.</td></tr>
+            <tr><td class="k">chatId</td><td class="t">string</td><td>The chat it belongs to.</td></tr>
+            <tr><td class="k">senderId</td><td class="t">string</td><td>Author's user id.</td></tr>
+            <tr><td class="k">type</td><td class="t">string</td><td><code>text</code>, <code>image</code>, <code>system</code>, …</td></tr>
+            <tr><td class="k">body</td><td class="t">string</td><td>Text content (empty for deleted).</td></tr>
+            <tr><td class="k">replyTo</td><td class="t">string·null</td><td>Quoted message id, if any.</td></tr>
+            <tr><td class="k">createdAt</td><td class="t">number</td><td>Epoch ms.</td></tr>
+            <tr><td class="k">editedAt</td><td class="t">number·null</td><td>Epoch ms of last edit.</td></tr>
+            <tr><td class="k">deleted</td><td class="t">boolean</td><td>Whether it was deleted for everyone.</td></tr>
+          </table>
+
+          <h3>Chat</h3>
+          <table>
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="k">id</td><td class="t">string</td><td>Chat id — use it in message endpoints.</td></tr>
+            <tr><td class="k">type</td><td class="t">string</td><td><code>direct</code> or <code>group</code>.</td></tr>
+            <tr><td class="k">title</td><td class="t">string</td><td>Display title from the caller's perspective.</td></tr>
+            <tr><td class="k">memberIds</td><td class="t">string[]</td><td>Everyone in the chat.</td></tr>
+            <tr><td class="k">locked</td><td class="t">boolean</td><td>Read-only channel — sends are rejected.</td></tr>
+            <tr><td class="k">updatedAt</td><td class="t">number</td><td>Last activity (epoch ms).</td></tr>
+          </table>
+
+          <h3>User</h3>
+          <table>
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="k">id</td><td class="t">string</td><td>User id.</td></tr>
+            <tr><td class="k">displayName</td><td class="t">string</td><td>Shown name.</td></tr>
+            <tr><td class="k">about</td><td class="t">string</td><td>Bio line.</td></tr>
+            <tr><td class="k">avatarColor</td><td class="t">string</td><td>Hex fallback colour.</td></tr>
+            <tr><td class="k">phone</td><td class="t">string</td><td>Only on <code>/me</code>.</td></tr>
+          </table>
+        </section>
+
+        <section id="errors">
+          <h2>Errors</h2>
+          <table>
+            <tr><th>Status</th><th>Meaning</th></tr>
+            <tr><td class="t">400</td><td>Malformed request or failed validation.</td></tr>
+            <tr><td class="t">401</td><td>Missing, invalid or revoked API key.</td></tr>
+            <tr><td class="t">403</td><td>Key lacks the required scope, account disabled, or no access to the chat.</td></tr>
+            <tr><td class="t">404</td><td>The chat or user doesn't exist.</td></tr>
+            <tr><td class="t">409</td><td>Conflict (e.g. too many keys).</td></tr>
+            <tr><td class="t">429</td><td>Rate limited — back off and retry.</td></tr>
+            <tr><td class="t">500</td><td>Something went wrong on our side.</td></tr>
+          </table>
+          <pre><code>{ <span class="tok-key">"error"</span>: <span class="tok-str">"This API key is missing the required scope \"messages:write\"."</span> }</code></pre>
+        </section>
+
+        <footer>
+          Ping Developer API · v1 · Questions? <a href="/legal">Contact</a>.
+        </footer>
+      </main>
+    </div>
+
+    <script>
+      // Rewrite every documented base URL to the host this page is actually
+      // served from, so copy-pasted examples target the right server.
+      (function () {
+        var origin = location.origin;
+        document.querySelectorAll('.base-url').forEach(function (el) {
+          el.textContent = origin + '/api/v1';
+        });
+        document.querySelectorAll('.base-url-i').forEach(function (el) {
+          el.textContent = origin;
+        });
+      })();
+
+      // Copy buttons: copy the sibling <code> (or a named selector) to clipboard.
+      document.querySelectorAll('.copy').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var text;
+          if (btn.hasAttribute('data-copy')) {
+            var t = document.querySelector(btn.getAttribute('data-copy'));
+            text = t ? t.textContent : '';
+          } else {
+            var code = btn.parentElement.querySelector('code');
+            text = code ? code.textContent : '';
+          }
+          navigator.clipboard.writeText(text).then(function () {
+            var old = btn.textContent;
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = old; }, 1200);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

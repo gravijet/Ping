@@ -43,6 +43,28 @@ const PATHS = {
   micOff: 'M1 1l22 22M9 9v3a3 3 0 0 0 5 2M15 9.3V6a3 3 0 0 0-5.9-.7M19 11a7 7 0 0 1-1 3.5M12 18.9V21',
   bolt: 'M13 2 4 14h6l-1 8 9-12h-6l1-8Z',
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10ZM9 12l2 2 4-4',
+  chat: 'M21 11.5a8.4 8.4 0 0 1-12 7.5L3 21l2-6a8.4 8.4 0 1 1 16-3.5Z',
+  forward: 'M15 17l5-5-5-5M20 12H9a5 5 0 0 0-5 5v2',
+  star: 'M12 3l2.9 5.9 6.6 1-4.8 4.6 1.1 6.5L12 18l-5.8 3 1.1-6.5L2.5 9.9l6.6-1L12 3Z',
+  bell: 'M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+  palette: 'M12 21a9 9 0 1 1 0-18c4.9 0 9 3.6 9 8 0 3-2.5 4-4 4h-2a2 2 0 0 0-1.5 3.3A2 2 0 0 1 12 21ZM7.5 11.5h.01M10.5 7.5h.01M14.5 7.5h.01',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7ZM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
+  stop: 'M7 7h10v10H7z',
+  play: 'M7 4l13 8-13 8V4Z',
+  pause: 'M7 5h3v14H7zM14 5h3v14h-3z',
+  chevron: 'M9 6l6 6-6 6',
+  callIn: 'M16 2v6h6M16 8l6-6M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z',
+  callOut: 'M23 7V1h-6M23 1l-6 6M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z',
+  callMissed: 'M23 1l-6 6-4-4M17 1h6v6M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z',
+  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5',
+  copy: 'M9 9h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1ZM5 15H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1',
+  contrast: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 3v18',
+  type: 'M4 7V5h16v2M9 19h6M12 5v14',
+  schedule: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2',
+  paint: 'M19 11V7a2 2 0 0 0-2-2h-1V3H8v2H7a2 2 0 0 0-2 2v4h14ZM5 11v3a2 2 0 0 0 2 2h4v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3a2 2 0 0 0 2-2v-3',
+  unblock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8 12l3 3 5-6',
+  refresh: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5',
+  poll: 'M7 16v-5M12 16V8M17 16v-3M4 21h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1Z',
 };
 
 export function icon(name, cls = '') {
@@ -253,4 +275,40 @@ export function openMenu(ev, items) {
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---- reusable controls ----------------------------------------------------
+// A toggle switch. onChange(next) may be async; if it throws, the switch flips
+// back. Returns the button element.
+export function switchEl(on, onChange) {
+  const sw = el('button', { class: `switch ${on ? 'on' : ''}`,
+    role: 'switch', 'aria-checked': on ? 'true' : 'false' }, el('i'));
+  let cur = !!on;
+  sw.addEventListener('click', async () => {
+    const next = !cur;
+    cur = next;
+    sw.classList.toggle('on', next);
+    sw.setAttribute('aria-checked', next ? 'true' : 'false');
+    try { await onChange(next); }
+    catch (e) {
+      cur = !next;
+      sw.classList.toggle('on', cur);
+      sw.setAttribute('aria-checked', cur ? 'true' : 'false');
+      toast(e.message || 'Fehler', 'err');
+    }
+  });
+  return sw;
+}
+
+// A settings/list row: icon tile + title + optional subtitle + trailing control.
+export function setRow(iconName, title, { sub = null, trailing = null, onClick = null } = {}) {
+  const row = el('div', { class: `set-row ${onClick ? 'clickable' : ''}`, onClick }, [
+    el('div', { class: 'set-ic' }, icon(iconName, 'sm')),
+    el('div', { class: 'set-main' }, [
+      el('div', { class: 'set-title', text: title }),
+      sub != null ? el('div', { class: 'set-sub', text: sub }) : null,
+    ].filter(Boolean)),
+    trailing,
+  ].filter(Boolean));
+  return row;
 }
