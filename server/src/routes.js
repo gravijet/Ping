@@ -62,8 +62,11 @@ import {
   joinSchema,
   callLogSchema,
   apiKeyCreateSchema,
+  telemetrySchema,
+  clientErrorSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
+import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
 import {
   createScheduled,
   listScheduled,
@@ -414,6 +417,29 @@ router.get(
   '/config',
   h(async (_req, res) => {
     res.json(getRemoteConfig());
+  })
+);
+
+// ---- Anonymous, opt-in client diagnostics ---------------------------------
+// Unauthenticated by design: clients send these via sendBeacon (which can't
+// carry an auth header) and the payload is anonymous. Abuse is bounded by the
+// /api rate limiter, the 64 kB body limit and the strict schemas. Always 202
+// so a client never blocks or retries on these — they are fire-and-forget.
+router.post(
+  '/telemetry',
+  h(async (req, res) => {
+    const data = parse(telemetrySchema, req.body);
+    recordEvents(data.app, data.events);
+    res.status(202).json({ ok: true });
+  })
+);
+
+router.post(
+  '/client-error',
+  h(async (req, res) => {
+    const data = parse(clientErrorSchema, req.body);
+    recordError(data);
+    res.status(202).json({ ok: true });
   })
 );
 
@@ -2438,6 +2464,18 @@ router.get(
   requireAdmin,
   h(async (_req, res) => {
     res.json(getRemoteConfig());
+  })
+);
+
+// Anonymous client diagnostics summary: top events + recent crash reports.
+// Read-only; honours ?days= (1..90). Reachable from the in-app admin console
+// (via /api/console) and the web portal alike.
+router.get(
+  '/admin/diagnostics',
+  requireAdmin,
+  h(async (req, res) => {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+    res.json(telemetrySummary({ days }));
   })
 );
 

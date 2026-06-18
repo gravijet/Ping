@@ -17,9 +17,19 @@ import { wireCalls } from './calls.js';
 import { openPalette, paletteOpen } from './palette.js';
 import { initLock } from './lock.js';
 import * as native from './native.js';
+import * as telemetry from './telemetry.js';
+import * as outbox from './outbox.js';
+import { flag } from './flags.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
+
+// Boot the cross-cutting client services once, before anything renders:
+// privacy-first diagnostics (local unless opted in), the offline send-queue,
+// and the service worker that makes Ping installable + offline-capable.
+telemetry.install();
+outbox.install();
+registerServiceWorker();
 
 const root = document.getElementById('app');
 
@@ -92,6 +102,9 @@ async function enterApp() {
     store.setChats(chats);
   } catch (e) { toast(e.message || 'Chats konnten nicht geladen werden.', 'err'); }
   refreshBadges();
+  updateConnectionBanner();
+  handleDeepLink();
+  telemetry.track('app_ready', { chats: store.state.chats.size });
 }
 
 function buildShell() {
@@ -276,8 +289,10 @@ export function openCommandPalette() {
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
     { title: 'Gerät verknüpfen', icon: 'link', keywords: 'device link qr handy', run: () => import('./devices.js').then((m) => m.linkDeviceModal()) },
+    flag('shareButtons') ? { title: 'Ping teilen / einladen', icon: 'forward', keywords: 'share invite teilen einladen link freunde', run: () => import('./share.js').then((m) => m.shareInvite()) } : null,
+    flag('debugPanel') ? { title: 'Debug & Diagnose', icon: 'bolt', hint: 'Strg ⇧ D', keywords: 'debug diagnose entwickler flags logs absturz', run: () => import('./debug.js').then((m) => m.openDebugPanel()) } : null,
     { title: 'Abmelden', icon: 'logout', keywords: 'logout signout', run: () => doLogout(false) },
-  ];
+  ].filter(Boolean);
   openPalette({ commands: cmds, onOpenChat: openChatInShell });
 }
 
@@ -296,6 +311,11 @@ function wireShortcuts() {
     // Ctrl/⌘+F — search within the open conversation.
     if (mod && (e.key === 'f' || e.key === 'F')) {
       if (store.state.activeId) { e.preventDefault(); toggleChatSearch(); }
+      return;
+    }
+    // Ctrl/⌘+Shift+D — developer & diagnostics panel.
+    if (mod && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+      if (flag('debugPanel')) { e.preventDefault(); import('./debug.js').then((m) => m.openDebugPanel()); }
       return;
     }
     // Alt+↑/↓ — move to the previous / next chat.
@@ -400,6 +420,11 @@ function wireSocket() {
   socket.on('user-updated', (p) => { if (p.user) store.emit('user:' + p.user.id, p.user); });
   socket.on('force-logout', () => { toast('Du wurdest abgemeldet.', 'err'); doLogout(true); });
   socket.onStatus((connected) => store.emit('connection', connected));
+
+  // Connection banner reacts to realtime status + the browser's own online/offline.
+  store.on('connection', updateConnectionBanner);
+  window.addEventListener('online', updateConnectionBanner);
+  window.addEventListener('offline', updateConnectionBanner);
 }
 
 function applyIncomingMessage(msg) {
@@ -473,6 +498,65 @@ function playChime() {
       osc.stop(now + at + 0.24);
     });
   } catch { /* audio not available */ }
+}
+
+// ---- service worker -------------------------------------------------------
+// Registers /sw.js for offline support + installability. The worker is a pure
+// enhancement: if registration fails the app still works, just online-only.
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  if (!/^https?:$/.test(location.protocol)) return; // not file:// or odd shells
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          // A fresh build installed while an old worker controls the page —
+          // activate it now so the next load serves the new assets.
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            sw.postMessage('skip-waiting');
+          }
+        });
+      });
+    }).catch(() => { /* enhancement only */ });
+  });
+}
+
+// ---- connection banner ----------------------------------------------------
+// A slim bar that surfaces "offline" / "reconnecting" so a dropped connection
+// never feels like the app silently broke. Hidden while fully connected.
+let connBanner = null;
+function updateConnectionBanner() {
+  if (!flag('connectionBanner')) return;
+  if (!connBanner) {
+    connBanner = el('div', { class: 'conn-banner', role: 'status', 'aria-live': 'polite' });
+    document.body.appendChild(connBanner);
+  }
+  const online = typeof navigator === 'undefined' ? true : navigator.onLine;
+  const connected = socket.isConnected();
+  if (!store.state.me) { connBanner.className = 'conn-banner'; return; }
+  if (!online) {
+    connBanner.textContent = 'Offline – neue Nachrichten werden gesendet, sobald du wieder verbunden bist.';
+    connBanner.className = 'conn-banner show offline';
+  } else if (!connected) {
+    connBanner.textContent = 'Verbindung wird wiederhergestellt …';
+    connBanner.className = 'conn-banner show reconnecting';
+  } else {
+    connBanner.className = 'conn-banner';
+  }
+}
+
+// ---- deep links -----------------------------------------------------------
+// Supports ?chat=<id> (open a conversation you're a member of) for shareable
+// links. The query is cleared from the URL afterwards so a refresh is clean.
+function handleDeepLink() {
+  try {
+    const params = new URLSearchParams(location.search);
+    const chatId = params.get('chat');
+    if (chatId && store.getChat(chatId)) openChatInShell(chatId);
+    if (chatId || params.get('invite')) history.replaceState(null, '', location.pathname);
+  } catch { /* malformed URL — ignore */ }
 }
 
 boot();

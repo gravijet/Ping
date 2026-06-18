@@ -20,6 +20,17 @@ class ApiError extends Error {
   constructor(status, message, body) { super(message); this.status = status; this.body = body; }
 }
 
+// ---- request inspector ----------------------------------------------------
+// A small ring buffer of recent requests powers the debug panel's API inspector.
+// It stores only method/path/status/timing — never bodies or auth headers.
+const REQ_LOG_MAX = 60;
+const reqLog = [];
+function logRequest(method, path, status, ms) {
+  reqLog.push({ t: Date.now(), method, path, status, ms, ok: status >= 200 && status < 400 });
+  if (reqLog.length > REQ_LOG_MAX) reqLog.splice(0, reqLog.length - REQ_LOG_MAX);
+}
+export function recentRequests() { return reqLog.slice(); }
+
 async function request(method, path, body, { raw = false, headers = {} } = {}) {
   const opts = { method, headers: { ...headers } };
   if (token) opts.headers.Authorization = `Bearer ${token}`;
@@ -29,12 +40,16 @@ async function request(method, path, body, { raw = false, headers = {} } = {}) {
   } else if (raw && body !== undefined) {
     opts.body = body;
   }
+  const started = performance.now();
+  const logPath = path.split('?')[0]; // drop query strings (may carry ids/tokens)
   let res;
   try {
     res = await fetch(BASE + path, opts);
   } catch {
+    logRequest(method, logPath, 0, Math.round(performance.now() - started));
     throw new ApiError(0, 'Keine Verbindung zum Server.');
   }
+  logRequest(method, logPath, res.status, Math.round(performance.now() - started));
   if (res.status === 401 && token) {
     // Session died server-side — let the app drop back to login.
     for (const cb of onUnauthorizedCbs) cb();

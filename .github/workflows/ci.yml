@@ -1,0 +1,57 @@
+name: CI
+
+# Fast, no-secret checks that run on every push + PR: the Node server's test
+# suite and headless web-client smoke test, plus `flutter analyze` + the Dart
+# unit/widget tests. Building release binaries lives in the dedicated
+# android-build / windows-build workflows (they need signing + a Windows runner).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server tests + web-client smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+      - name: Run test suite
+        working-directory: server
+        run: npm test
+      - name: Web-client smoke test
+        working-directory: server
+        run: node test/webclient-smoke.mjs
+
+  flutter:
+    name: Flutter analyze + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.2
+          cache: true
+      - name: Install packages
+        working-directory: app
+        run: flutter pub get
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+      - name: Test
+        working-directory: app
+        run: flutter test

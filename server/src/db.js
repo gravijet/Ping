@@ -331,6 +331,33 @@ db.exec(`
     revoked_at   INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+
+  -- Anonymous, opt-in client diagnostics. client_events keeps aggregate counts
+  -- per (event name, day, app) — never per-user rows — so it can't grow without
+  -- bound and carries no identity. client_errors keeps the most recent crash
+  -- reports for debugging (pruned to a fixed cap on insert); the only id stored
+  -- is the caller-supplied anonymous device id, never a user id.
+  CREATE TABLE IF NOT EXISTS client_events (
+    name  TEXT NOT NULL,
+    day   TEXT NOT NULL,
+    app   TEXT NOT NULL DEFAULT 'web',
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (name, day, app)
+  );
+  CREATE INDEX IF NOT EXISTS idx_client_events_day ON client_events(day);
+
+  CREATE TABLE IF NOT EXISTS client_errors (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,
+    app        TEXT NOT NULL DEFAULT 'web',
+    aid        TEXT,
+    context    TEXT,
+    message    TEXT,
+    stack      TEXT,
+    ua         TEXT,
+    url        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_client_errors_created ON client_errors(created_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------

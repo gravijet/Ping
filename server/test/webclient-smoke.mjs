@@ -135,6 +135,7 @@ const byId = new Map();
 const document = {
   createElement: (t) => new El(t),
   createElementNS: (_ns, t) => new El(t, _ns),
+  createDocumentFragment: () => new El('fragment'),
   createTextNode: (t) => new TextNode(t),
   getElementById: (id) => byId.get(id) || null,
   querySelector: (s) => document.body.querySelector(s),
@@ -256,9 +257,11 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 console.log('webclient smoke test');
 
 // Phase A: import every module (catches import/TDZ errors). app.js auto-boots.
+// sw.js is the service worker — the browser loads it in a worker scope (with
+// `self`/`caches`), never as an app module, so it's not importable here.
 const files = readdirSync(tmp).filter((f) => f.endsWith('.js'));
 const mods = {};
-for (const f of files.filter((f) => f !== 'app.js')) {
+for (const f of files.filter((f) => f !== 'app.js' && f !== 'sw.js')) {
   await step('import ' + f, async () => { mods[f] = await imp(f); });
 }
 await step('import app.js (boot → shell)', async () => { mods['app.js'] = await imp('app.js'); });
@@ -305,6 +308,44 @@ await step('in-chat search toggle', async () => {
 await step('forward multiple messages', async () => {
   (await imp('forward.js')).forwardMessages([{ id: 'm1', type: 'text', body: 'hi' }, { id: 'x', type: 'text', body: 'yo' }]);
 });
+
+// Phase C: the 0.20.0 offline / diagnostics / dev-tools modules.
+await step('feature flags resolve + override + reset', async () => {
+  const flags = await imp('flags.js');
+  if (flags.flag('outbox') !== true) throw new Error('default flag wrong');
+  flags.setFlag('outbox', false);
+  if (flags.flag('outbox') !== false) throw new Error('override not applied');
+  if (!flags.allFlags().some((f) => f.name === 'outbox' && f.overridden)) throw new Error('override not reported');
+  flags.clearOverrides();
+  if (flags.flag('outbox') !== true) throw new Error('reset failed');
+});
+await step('outbox enqueue → list → cancel', async () => {
+  const outbox = await imp('outbox.js');
+  const item = outbox.enqueue({ chatId: 'c1', body: 'offline hi' });
+  if (!item.clientId || !item.tempId) throw new Error('no client/temp id');
+  if (outbox.count() < 1) throw new Error('not queued');
+  if (!outbox.pendingFor('c1').length) throw new Error('pendingFor empty');
+  outbox.cancel(item.clientId);
+  if (outbox.pendingFor('c1').length) throw new Error('cancel failed');
+});
+await step('telemetry track + crash capture (local)', async () => {
+  const tel = await imp('telemetry.js');
+  tel.track('smoke_event', { a: 1 });
+  tel.recordError(new Error('smoke boom'), 'test');
+  if (!tel.getEvents().some((e) => e.name === 'smoke_event')) throw new Error('event not recorded');
+  if (!tel.getErrors().some((e) => e.message === 'smoke boom')) throw new Error('error not recorded');
+});
+await step('skeleton builders render nodes', async () => {
+  const sk = await imp('skeleton.js');
+  if (!sk.skeletonChatList(4).childNodes.length) throw new Error('chat skeleton empty');
+  if (!sk.skeletonMessages(4)) throw new Error('msg skeleton missing');
+});
+await step('share canShare + clipboard fallback', async () => {
+  const share = await imp('share.js');
+  if (typeof share.canShare() !== 'boolean') throw new Error('canShare not boolean');
+  await share.shareOrCopy({ text: 'hi', url: 'https://web.test/' }); // clipboard path
+});
+await step('debug panel opens', async () => { (await imp('debug.js')).openDebugPanel(); await tick(); });
 
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');
 process.exit(failures ? 1 : 0);

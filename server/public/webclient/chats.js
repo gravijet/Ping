@@ -8,6 +8,8 @@ import * as store from './store.js';
 import * as prefs from './prefs.js';
 import { el, clear, icon, avatar, chatTime, openMenu, toast, confirmModal } from './ui.js';
 import { messagePreview } from './format.js';
+import { skeletonChatList } from './skeleton.js';
+import { flag } from './flags.js';
 
 let archiveOpen = false;
 
@@ -51,6 +53,12 @@ function passesFilter(c) {
 
 function paint(container, onSelect) {
   clear(container);
+  // First load: show shimmering skeleton rows instead of a blank pane or a
+  // premature "no chats" message while the /chats request is still in flight.
+  if (!store.state.chatsLoaded && !store.state.chats.size) {
+    if (flag('skeletons')) container.appendChild(skeletonChatList(8));
+    return;
+  }
   const all = store.chatsSorted();
   const q = store.state.search.trim().toLowerCase();
   const filtering = store.state.chatFilter !== 'all';

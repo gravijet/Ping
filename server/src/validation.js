@@ -405,6 +405,34 @@ export const officialMessageSchema = z.object({
     .max(2000, 'Die Nachricht ist zu lang.'),
 });
 
+// ---- anonymous client diagnostics (opt-in) --------------------------------
+// Deliberately strict + tightly bounded: these endpoints are unauthenticated,
+// so caps on counts and string lengths are the main abuse defence (alongside
+// the /api rate limiter and the 64 kB body limit). No PII is accepted.
+const appField = z.enum(['web', 'android', 'windows', 'ios']).default('web');
+
+export const telemetrySchema = z.object({
+  aid: z.string().trim().max(64).optional(),
+  app: appField,
+  ua: z.string().max(200).optional(),
+  events: z
+    .array(z.object({
+      name: z.string().trim().min(1).max(60),
+      t: z.number().int().nonnegative().optional(),
+    }))
+    .max(50),
+});
+
+export const clientErrorSchema = z.object({
+  aid: z.string().trim().max(64).optional(),
+  app: appField,
+  context: z.string().trim().max(40).optional(),
+  message: z.string().trim().max(500).optional(),
+  stack: z.string().max(4000).optional(),
+  ua: z.string().max(200).optional(),
+  url: z.string().max(300).optional(),
+});
+
 // An official status ("story") an admin posts so every user sees it.
 export const adminStatusSchema = z
   .object({

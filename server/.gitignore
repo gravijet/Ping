@@ -2,6 +2,9 @@ node_modules/
 *.db
 *.db-shm
 *.db-wal
+# Pre-deploy DB snapshots — contain live user data, never commit them.
+*.bak
+*.predeploy-*
 .env
 uploads/
 data/

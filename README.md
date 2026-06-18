@@ -75,6 +75,24 @@ Online-Status, Lesebestätigungen).
   (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
   eigenen Nachrichten erscheinen dort nur noch als „Gelöschtes Konto".
 
+### Ping Web & Desktop (PWA, seit 0.20.0)
+
+Der PC-Client (und damit auch die Windows-App, die ihn umhüllt) ist eine echte,
+installierbare **Progressive Web App**:
+
+- **Offline-fähig** – ein Service Worker cached die App-Hülle; Ping startet und
+  läuft ohne Verbindung (API/WS/Medien werden nie gecacht – kein Datenleck).
+- **Offline senden** – während du offline bist getippte Nachrichten landen in
+  einer persistenten Warteschlange, erscheinen als „⧗ ausstehend" und werden
+  automatisch zugestellt, sobald die Verbindung zurück ist (mit Wiederholung).
+- **Ladezustände** – Skeleton-Screens für Chatliste und Verlauf, ein
+  Verbindungs-Banner für „offline/wird wiederhergestellt".
+- **Teilen** – Nachrichten, Chat-Links und Einladungen über das System-Teilen
+  oder die Zwischenablage; `?chat=`-Deeplinks öffnen ein Gespräch direkt.
+- **Diagnose (optional, anonym)** – standardmäßig **aus**; kein Tracking, keine
+  Inhalte. Plus ein Entwickler-Panel (`Strg/⌘ + ⇧ + D`) mit Verbindung,
+  Feature-Flags, API-Inspektor und Absturzprotokoll.
+
 ---
 
 ## Datenschutz
@@ -263,12 +281,17 @@ Admin-Portal unter **Inhalte** gepflegt. Eine Startbefüllung gibt es per
 ```bash
 # Backend
 cd server && npm test
+cd server && node test/webclient-smoke.mjs   # headless Ping-Web Import/Boot-Smoke
 
 # App
 cd app && flutter analyze && flutter test
 ```
 
-- **Backend:** 81 Tests decken Registrierung (Nummer + E-Mail + Passwort,
+Alles oben läuft zusätzlich automatisch in **GitHub Actions** (`.github/workflows/ci.yml`)
+bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
+**Windows** (`windows-build.yml`) erzeugst du manuell über den Actions-Tab.
+
+- **Backend:** 100+ Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
   schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
   Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,

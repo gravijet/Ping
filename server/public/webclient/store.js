@@ -16,6 +16,7 @@ export const state = {
   typing: new Map(),    // chatId -> Map<userId, timeoutHandle>
   search: '',
   chatFilter: 'all',    // 'all' | 'unread' | 'fav' | 'groups'
+  chatsLoaded: false,   // false until the first /chats fetch resolves (skeletons)
 };
 
 export function on(event, fn) {
@@ -31,6 +32,7 @@ export function emit(event, data) {
 // ---- chats ----------------------------------------------------------------
 export function setChats(list) {
   state.chats = new Map(list.map((c) => [c.id, c]));
+  state.chatsLoaded = true;
   emit('chats');
 }
 export function upsertChat(chat) {

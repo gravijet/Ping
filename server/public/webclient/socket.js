@@ -22,6 +22,9 @@ function emit(type, payload) {
 
 export function onStatus(cb) { statusCb = cb; }
 
+/** Is the realtime socket currently open? (Used by the debug panel + banner.) */
+export function isConnected() { return !!ws && ws.readyState === WebSocket.OPEN; }
+
 export function connect(jwt) {
   token = jwt;
   closedByUs = false;

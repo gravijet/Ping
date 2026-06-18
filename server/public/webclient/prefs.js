@@ -37,6 +37,7 @@ const DEFAULTS = {
   lockTimeoutMs: 120000,  // auto-lock after this much inactivity
   desktopAutostart: false,    // Windows shell: launch Ping at login
   desktopCloseToTray: true,   // Windows shell: closing hides to the tray
+  diagnostics: false,     // opt-in: send anonymous diagnostics + crash reports
   pinned: [],             // chatId[]
   markedUnread: [],       // chatId[]
   starred: {},            // chatId -> messageId[]   (fast membership lookup)

@@ -17,6 +17,9 @@ import { openEmojiPicker, closeEmoji } from './emoji.js';
 import { startRecorder } from './voice.js';
 import { forwardMessage, forwardMessages } from './forward.js';
 import { openInfoPanel, closeInfoPanel } from './infopanel.js';
+import * as outbox from './outbox.js';
+import { flag } from './flags.js';
+import { skeletonMessages } from './skeleton.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -24,6 +27,52 @@ const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '�
 const QUICK_REACTIONS = ['👍', '❤️', '😂'];
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|️|‍){1,8}$/u;
 let cur = null;
+
+// Outbox (offline send-queue) ↔ conversation glue. Registered once at import:
+// when a queued message finally reaches the server, swap its optimistic
+// "pending" bubble for the real one; if it ultimately fails, mark it so the
+// user can retry. These fire regardless of which chat is currently open.
+store.on('outbox-sent', ({ chatId, tempId, message }) => {
+  store.removeMessage(chatId, tempId);
+  store.addMessage(chatId, message);
+  const chat = store.getChat(chatId);
+  if (chat) { chat.lastMessage = message; chat.updatedAt = message.createdAt; store.emit('chats'); }
+});
+store.on('outbox-failed', ({ chatId, tempId }) => {
+  const m = store.getHistory(chatId).find((x) => x.id === tempId);
+  if (m) { m.status = 'failed'; m.pending = false; m.failed = true; store.emit('messages:' + chatId); }
+});
+
+// Synthetic message shown immediately for a queued (not-yet-sent) send.
+function pendingMessage(item) {
+  return { id: item.tempId, chatId: item.chatId, senderId: store.state.me?.id,
+    type: 'text', body: item.body, createdAt: item.ts, status: 'pending', pending: true,
+    clientId: item.clientId };
+}
+
+// The delivery tick on an outgoing bubble: clock while queued, a retry arrow on
+// failure, otherwise the normal sent/delivered/read ticks.
+function statusTick(m) {
+  if (m.pending || m.status === 'pending') {
+    return el('span', { class: 'tick pending', title: 'Wird gesendet, sobald du verbunden bist …' },
+      icon('clock', 'sm'));
+  }
+  if (m.failed || m.status === 'failed') {
+    return el('span', { class: 'tick failed', title: 'Senden fehlgeschlagen – erneut versuchen',
+      onClick: () => retryPending(m) }, icon('refresh', 'sm'));
+  }
+  return el('span', { class: `tick ${m.status === 'read' ? 'read' : ''}` },
+    icon(m.status === 'sent' ? 'check' : 'doublecheck', 'sm'));
+}
+
+function retryPending(m) {
+  const chatId = m.chatId || cur?.chatId;
+  if (!chatId) return;
+  store.removeMessage(chatId, m.id);
+  const item = outbox.enqueue({ chatId, body: m.body, replyTo: m.quoted?.id || null });
+  store.addMessage(chatId, pendingMessage(item));
+  outbox.flush();
+}
 
 export function closeChat() {
   if (cur) { cur.unsubs.forEach((u) => u()); if (cur.recorder) cur.recorder.cancel(); cur = null; }
@@ -53,7 +102,8 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   cur.unsubs.push(store.on('chat:' + chatId, () => { const c = store.getChat(chatId);
     if (c) clear(head).append(...buildHead(c, onBack).childNodes); }));
 
-  thread.appendChild(el('div', { class: 'daysep', text: 'Lade …' }));
+  thread.appendChild(flag('skeletons') ? skeletonMessages(6)
+    : el('div', { class: 'daysep', text: 'Lade …' }));
   try {
     const { messages } = await api.get(`/chats/${chatId}/messages?limit=40`);
     store.setHistory(chatId, messages, { all: messages.length < 40 });
@@ -192,8 +242,7 @@ function renderMessage(m, chat, first) {
       starred ? icon('star', 'sm starred-flag fill') : null,
       m.editedAt ? el('span', { class: 'edited', text: 'bearbeitet · ' }) : null,
       el('span', { text: timeOf(m.createdAt) }),
-      mine ? el('span', { class: `tick ${m.status === 'read' ? 'read' : ''}` },
-        icon(m.status === 'sent' ? 'check' : 'doublecheck', 'sm')) : null,
+      mine ? statusTick(m) : null,
     ].filter(Boolean));
     bubble.appendChild(meta);
   }
@@ -262,6 +311,8 @@ function msgMenu(e, m, mine) {
     (m.body || m.type === 'text')
       ? { label: 'Kopieren', icon: 'copy', onClick: () => {
           navigator.clipboard?.writeText(m.body || '').then(() => toast('Kopiert.')); } } : null,
+    flag('shareButtons') && m.body
+      ? { label: 'Teilen', icon: 'forward', onClick: () => import('./share.js').then((s) => s.shareMessage(m)) } : null,
     mine ? { label: 'Info', icon: 'info', onClick: () => messageInfo(m) } : null,
     { sep: true },
     { label: 'Für mich löschen', icon: 'trash', onClick: () => hideMessage(m) },
@@ -424,7 +475,18 @@ function renderComposer() {
     try {
       const r = await api.post(`/chats/${cur.chatId}/messages`, { body: text, ...(replyTo ? { replyTo } : {}) });
       store.addMessage(cur.chatId, r.message);
-    } catch (e) { toast(e.message, 'err'); ta.value = text; refreshRight(); }
+    } catch (e) {
+      // Offline / unreachable: park the message in the persistent outbox and show
+      // an optimistic "pending" bubble instead of losing what the user typed.
+      const offline = e.status === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false);
+      if (flag('outbox') && offline) {
+        const item = outbox.enqueue({ chatId: cur.chatId, body: text, replyTo });
+        store.addMessage(cur.chatId, pendingMessage(item));
+        toast('Offline – wird gesendet, sobald du wieder verbunden bist.');
+      } else {
+        toast(e.message, 'err'); ta.value = text; refreshRight();
+      }
+    }
   }
 }
 

@@ -24,7 +24,7 @@ const CATS = [
   ['Geräte', 'link'],
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.19.0';
+const WEB_CLIENT_VERSION = '0.20.0';
 
 export function openSettings(startCat = 'Profil') {
   let cat = startCat;
@@ -178,6 +178,12 @@ function privacyTab(c) {
     el('div', { class: 'list-section', text: 'Blockiert' }),
     setRow('block', 'Blockierte Kontakte', { sub: 'Verwalten, wen du blockiert hast.',
       onClick: blockedList }),
+    el('div', { class: 'list-section', text: 'Diagnose' }),
+    setRow('shield', 'Diagnose & Absturzberichte', {
+      sub: 'Optional. Anonym, ohne Nachrichteninhalte – hilft, Fehler zu finden. Standardmäßig aus.',
+      trailing: switchEl(prefs.get('diagnostics') === true, (v) => prefs.set('diagnostics', v)) }),
+    setRow('bolt', 'Debug & Diagnose', { sub: 'Verbindung, Logs, Feature-Flags (Strg + ⇧ + D).',
+      onClick: () => import('./debug.js').then((m) => m.openDebugPanel()) }),
   );
 }
 
@@ -378,6 +384,9 @@ function moreTab(c, close) {
       onClick: backupPrefs }),
     setRow('refresh', 'Einstellungen wiederherstellen', { sub: 'Aus einer zuvor gespeicherten Sicherungsdatei laden.',
       onClick: () => restorePrefs(close) }),
+    el('div', { class: 'list-section', text: 'Teilen' }),
+    setRow('forward', 'Ping teilen / einladen', { sub: 'Lade jemanden zu Ping ein.',
+      onClick: () => import('./share.js').then((m) => m.shareInvite()) }),
     el('div', { class: 'list-section', text: 'Hilfe' }),
     setRow('bolt', 'Tastenkürzel', { sub: 'Schneller navigieren mit der Tastatur.',
       onClick: shortcutsModal }),
