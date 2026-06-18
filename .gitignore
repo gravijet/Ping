@@ -17,3 +17,6 @@ server/public/downloads/*.exe
 # The published Flutter web build ("Ping Web") is a build artifact, served from
 # disk and produced by server/scripts/build-web.sh — not tracked in git.
 server/public/webapp/
+
+server/public/downloads/
+*.apk
