@@ -17,6 +17,7 @@ export const state = {
   search: '',
   chatFilter: 'all',    // 'all' | 'unread' | 'fav' | 'groups'
   chatsLoaded: false,   // false until the first /chats fetch resolves (skeletons)
+  mentions: new Set(),  // chatIds with an unread @-mention of me
 };
 
 export function on(event, fn) {
@@ -84,6 +85,13 @@ export function updateReceiptStatus(chatId, msgId, status) {
   const m = cur.find((x) => x.id === msgId);
   if (m) { m.status = status; emit('messages:' + chatId); }
 }
+
+// ---- @-mentions (unread) --------------------------------------------------
+export function setMention(chatId) { state.mentions.add(chatId); emit('chats'); }
+export function clearMention(chatId) {
+  if (state.mentions.delete(chatId)) emit('chats');
+}
+export function hasMention(chatId) { return state.mentions.has(chatId); }
 
 // ---- presence -------------------------------------------------------------
 export function setOnline(ids) { state.online = new Set(ids); emit('presence'); }

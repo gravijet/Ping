@@ -13,6 +13,12 @@
   "background_color": "#07090e",
   "theme_color": "#07090e",
   "categories": ["social", "communication", "productivity"],
+  "shortcuts": [
+    { "name": "Neuer Chat", "short_name": "Neu", "url": "/?compose=1",
+      "description": "Eine neue Unterhaltung starten" },
+    { "name": "Aktivität", "short_name": "Aktivität", "url": "/?view=activity",
+      "description": "Reaktionen, Erwähnungen und verpasste Anrufe" }
+  ],
   "icons": [
     { "src": "/favicon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/favicon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

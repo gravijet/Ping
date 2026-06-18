@@ -20,6 +20,9 @@ import * as native from './native.js';
 import * as telemetry from './telemetry.js';
 import * as outbox from './outbox.js';
 import { flag } from './flags.js';
+import * as activity from './activity.js';
+import { mentionsUser } from './mentions.js';
+import { openShortcuts, shortcutsOpen } from './shortcuts.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
@@ -102,6 +105,7 @@ async function enterApp() {
     store.setChats(chats);
   } catch (e) { toast(e.message || 'Chats konnten nicht geladen werden.', 'err'); }
   refreshBadges();
+  refreshActivityBadge();
   updateConnectionBanner();
   handleDeepLink();
   telemetry.track('app_ready', { chats: store.state.chats.size });
@@ -136,6 +140,12 @@ function buildNavRail(me) {
     title: 'Hell/Dunkel', onClick: () => { toggleTheme(); refreshThemeNav(); } },
     icon(prefs.isLight() ? 'moon' : 'sun'));
 
+  // Activity / notifications bell — opens the feed; carries an unseen-count badge.
+  const activityBtn = flag('activityCenter')
+    ? el('button', { class: 'nav-item', id: 'nav-activity', 'data-label': 'Aktivität',
+        title: 'Aktivität', onClick: () => activity.openActivityPanel(openChatInShell) }, icon('bell'))
+    : null;
+
   const navAvatar = el('div', { class: 'nav-avatar', id: 'nav-avatar', title: 'Profil & Einstellungen',
     onClick: openSettings }, avatar(me, 42, { kind: 'user' }));
 
@@ -143,11 +153,21 @@ function buildNavRail(me) {
     el('div', { class: 'nav-logo', text: 'P' }),
     items,
     el('div', { class: 'nav-spacer' }),
+    activityBtn,
     themeBtn,
     el('button', { class: 'nav-item', 'data-label': 'Einstellungen', title: 'Einstellungen',
       onClick: openSettings }, icon('settings')),
     navAvatar,
   ]);
+}
+
+// Reflect the unseen activity count on the nav-rail bell.
+function refreshActivityBadge() {
+  const btn = document.getElementById('nav-activity');
+  if (!btn) return;
+  btn.querySelector('.nav-badge')?.remove();
+  const n = activity.unseenCount();
+  if (n > 0) btn.appendChild(el('span', { class: 'nav-badge', text: n > 99 ? '99+' : String(n) }));
 }
 
 function navItem(section, iconName, label) {
@@ -245,6 +265,7 @@ function openChatInShell(chatId) {
   if (currentSection !== 'chats') setSection('chats');
   store.state.activeId = chatId;
   prefs.setMarkedUnread(chatId, false);
+  store.clearMention(chatId);
   document.getElementById('shell')?.classList.add('has-active');
   openChat(mainSlot, chatId, { onBack: () => { store.state.activeId = null; showSplash();
     store.emit('chats'); } });
@@ -286,6 +307,8 @@ export function openCommandPalette() {
     { title: 'Anrufe', icon: 'phone', keywords: 'calls anrufverlauf', run: () => setSection('calls') },
     { title: 'Gespeichert', icon: 'star', keywords: 'saved starred markiert', run: () => setSection('saved') },
     { title: 'Einstellungen', icon: 'settings', hint: 'Strg ,', keywords: 'settings profil konto', run: () => openSettings() },
+    flag('activityCenter') ? { title: 'Aktivität', icon: 'bell', keywords: 'activity benachrichtigungen feed reaktionen erwähnungen', run: () => activity.openActivityPanel(openChatInShell) } : null,
+    { title: 'Tastenkürzel', icon: 'bolt', hint: '?', keywords: 'shortcuts keyboard tastatur hilfe', run: () => openShortcuts() },
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
     { title: 'Gerät verknüpfen', icon: 'link', keywords: 'device link qr handy', run: () => import('./devices.js').then((m) => m.linkDeviceModal()) },
@@ -302,6 +325,14 @@ function wireShortcuts() {
   if (shortcutsWired) return; shortcutsWired = true;
   document.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;
+    // "?" (Shift+/) — keyboard shortcut cheat sheet. Ignored while typing.
+    if (!mod && e.key === '?') {
+      const t = e.target;
+      const tag = (t?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || t?.isContentEditable) return;
+      if (!shortcutsOpen()) { e.preventDefault(); openShortcuts(); }
+      return;
+    }
     // Ctrl/⌘+K — open the command palette.
     if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openCommandPalette(); return; }
     // Ctrl/⌘+, — open settings.
@@ -378,6 +409,8 @@ function wireSocket() {
   store.on('open-chat', (chatId) => openChatInShell(chatId));
   store.on('open-splash', () => showSplash());
   store.on('chats', refreshBadges);
+  // Keep the nav-rail bell badge in sync as activity is recorded.
+  activity.onChange(refreshActivityBadge);
 
   // Refresh the nav-rail avatar after the user edits their own profile.
   store.on('me-updated', () => {
@@ -392,10 +425,17 @@ function wireSocket() {
   });
 
   socket.on('presence', (p) => store.setPresence(p.userId, p.online, p.lastSeen));
-  socket.on('chat-created', (p) => { if (p.chat) store.upsertChat(p.chat); });
+  socket.on('chat-created', (p) => {
+    if (!p.chat) return;
+    const fresh = !store.getChat(p.chat.id);
+    store.upsertChat(p.chat);
+    if (fresh) activity.record({ kind: 'newchat', chatId: p.chat.id, title: p.chat.title,
+      text: p.chat.type === 'group' ? 'Du wurdest zu einer Gruppe hinzugefügt' : 'Neuer Chat' });
+  });
   socket.on('message', (p) => applyIncomingMessage(p.message));
   socket.on('message-updated', (p) => {
     if (!p.message) return;
+    maybeReactionActivity(p.message); // compare BEFORE we overwrite the cached copy
     store.replaceMessage(p.message.chatId, p.message);
   });
   socket.on('typing', (p) => store.setTyping(p.chatId, p.userId, p.typing));
@@ -446,10 +486,39 @@ function applyIncomingMessage(msg) {
   }
 
   if (!isMine) {
+    // @-mention of me in a group: badge the chat (until opened) + log activity.
+    if (flag('mentions') && chat?.type === 'group' && mentionsUser(msg.body, chat, meId)) {
+      if (!isActive) store.setMention(msg.chatId);
+      activity.record({ kind: 'mention', chatId: msg.chatId, key: `mention:${msg.id}`,
+        title: chat?.title || 'Erwähnung', text: 'Du wurdest erwähnt' });
+    }
     socket.send('delivered', { chatId: msg.chatId });
     if (isActive) socket.send('read', { chatId: msg.chatId });
     maybeNotify(msg, chat, isActive);
   }
+}
+
+// When a realtime message-update lands on one of MY messages with a newly added
+// reaction, surface it in the activity feed. Runs before the store copy is
+// replaced so we can diff old vs new reaction counts.
+function maybeReactionActivity(updated) {
+  const meId = store.state.me?.id;
+  if (!meId || updated.senderId !== meId) return;
+  const prev = store.getHistory(updated.chatId).find((m) => m.id === updated.id);
+  if (!prev) return;
+  const before = prev.reactions || {};
+  const after = updated.reactions || {};
+  let emoji = null;
+  let best = 0;
+  for (const [e, n] of Object.entries(after)) {
+    const delta = n - (before[e] || 0);
+    if (delta > best) { best = delta; emoji = e; }
+  }
+  if (!emoji) return;
+  const chat = store.getChat(updated.chatId);
+  activity.record({ kind: 'reaction', chatId: updated.chatId, emoji,
+    key: `reaction:${updated.id}:${emoji}`, title: chat?.title || 'Reaktion',
+    text: `${emoji} auf deine Nachricht` });
 }
 
 // ---- desktop/browser notifications ----------------------------------------
@@ -506,21 +575,39 @@ function playChime() {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (!/^https?:$/.test(location.protocol)) return; // not file:// or odd shells
+  let reloading = false;
+  // When the new worker takes control (after the user accepts), reload once so
+  // the freshly cached assets are the ones actually running.
+  navigator.serviceWorker.addEventListener?.('controllerchange', () => {
+    if (reloading) return; reloading = true; location.reload();
+  });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // A build that finished installing before this load is already waiting.
+      if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
       reg.addEventListener('updatefound', () => {
         const sw = reg.installing;
         if (!sw) return;
         sw.addEventListener('statechange', () => {
-          // A fresh build installed while an old worker controls the page —
-          // activate it now so the next load serves the new assets.
-          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
-            sw.postMessage('skip-waiting');
-          }
+          // Installed over an existing controller → a new version is ready. Ask
+          // the user rather than silently swapping assets mid-session.
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(sw);
         });
       });
     }).catch(() => { /* enhancement only */ });
   });
+}
+
+// A slim, dismissible banner offering to load a freshly deployed version.
+let updateOffered = false;
+function offerUpdate(worker) {
+  if (updateOffered) return; updateOffered = true;
+  const bar = el('div', { class: 'update-banner', role: 'status' }, [
+    el('span', { text: 'Eine neue Version von Ping ist verfügbar.' }),
+    el('button', { class: 'btn primary sm', onClick: () => worker.postMessage('skip-waiting') }, 'Neu laden'),
+    el('button', { class: 'iconbtn', title: 'Später', onClick: () => bar.remove() }, icon('close')),
+  ]);
+  document.body.appendChild(bar);
 }
 
 // ---- connection banner ----------------------------------------------------
@@ -555,7 +642,12 @@ function handleDeepLink() {
     const params = new URLSearchParams(location.search);
     const chatId = params.get('chat');
     if (chatId && store.getChat(chatId)) openChatInShell(chatId);
-    if (chatId || params.get('invite')) history.replaceState(null, '', location.pathname);
+    // PWA app-shortcuts (manifest) land here as query params.
+    if (params.get('compose') === '1') newChatModal();
+    if (params.get('view') === 'activity' && flag('activityCenter')) activity.openActivityPanel(openChatInShell);
+    if (chatId || params.get('invite') || params.get('compose') || params.get('view')) {
+      history.replaceState(null, '', location.pathname);
+    }
   } catch { /* malformed URL — ignore */ }
 }
 

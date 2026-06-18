@@ -21,6 +21,11 @@ export const DEFAULTS = {
   connectionBanner: true,// offline / reconnecting banner
   commandPalette: true,  // Ctrl/⌘+K palette (already shipped; flag for kill-switch)
   debugPanel: true,      // Ctrl+Shift+D developer panel
+  mentions: true,        // @-mentions + member autocomplete in group chats
+  drafts: true,          // per-chat unsent message drafts
+  activityCenter: true,  // nav-rail bell + activity / notifications feed
+  themeStudio: true,     // theme presets + custom accent + shareable theme codes
+  insights: true,        // device-local usage insights in settings
 };
 
 function localOverrides() {

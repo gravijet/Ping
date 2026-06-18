@@ -78,6 +78,9 @@ CI (`.github/workflows/ci.yml`) runs all of the above on every push and PR.
   run against an in-memory DB, so they never touch real data).
 - Add a smoke-test step for any new web-client module so import/boot regressions
   are caught without a browser.
+- For **pure** web-client logic (parsing, encoding, storage helpers), add a
+  `node:test` case to `test/webclient-logic.test.js` — these run under `npm test`
+  with only a tiny in-memory `localStorage` shim, no DOM needed.
 
 ## Releasing
 

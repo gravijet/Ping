@@ -10,6 +10,7 @@ import { el, clear, icon, avatar, chatTime, openMenu, toast, confirmModal } from
 import { messagePreview } from './format.js';
 import { skeletonChatList } from './skeleton.js';
 import { flag } from './flags.js';
+import * as drafts from './drafts.js';
 
 let archiveOpen = false;
 
@@ -21,6 +22,7 @@ export function renderChatList(container, onSelect) {
   store.on('presence', draw);
   store.on('typing', draw);
   store.on('prefs', draw);
+  drafts.onChange(draw); // a saved/cleared draft updates the row indicator live
   draw();
 }
 
@@ -132,10 +134,16 @@ function row(chat, onSelect) {
 
   const typing = store.typingUsers(chat.id).filter((u) => u !== store.state.me?.id);
   const preview = el('div', { class: 'preview' });
+  const hasDraft = flag('drafts') && store.state.activeId !== chat.id && drafts.has(chat.id);
   if (typing.length) {
     preview.classList.add('typing');
     preview.style.color = 'var(--accent)';
     preview.textContent = 'tippt …';
+  } else if (hasDraft) {
+    // A parked, unsent draft takes precedence over the last message preview.
+    preview.classList.add('draft');
+    preview.append(el('span', { class: 'draft-label', text: 'Entwurf: ' }),
+      document.createTextNode(drafts.preview(chat.id)));
   } else {
     fillPreview(preview, chat);
   }
@@ -160,6 +168,7 @@ function row(chat, onSelect) {
         preview,
         prefs.isPinned(chat.id) ? icon('pin', 'sm pin-ico') : null,
         chat.muted ? icon('mute', 'sm muted-ico') : null,
+        store.hasMention(chat.id) ? el('span', { class: 'badge mention-badge', title: 'Du wurdest erwähnt', text: '@' }) : null,
         chat.unread ? el('span', { class: 'badge', text: String(chat.unread) })
           : (prefs.isMarkedUnread(chat.id) ? el('span', { class: 'badge', text: ' ' }) : null),
       ]),

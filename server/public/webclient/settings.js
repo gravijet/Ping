@@ -12,6 +12,10 @@ import { el, clear, icon, avatar, modal, toast, switchEl, setRow, confirmModal }
 import { pickFile } from './media.js';
 import { doLogout, refreshThemeNav } from './app.js';
 import { isShell, setAutostart, setCloseToTray } from './native.js';
+import { flag } from './flags.js';
+import { openThemeStudio } from './themes.js';
+import { renderInsights } from './insights.js';
+import { openShortcuts } from './shortcuts.js';
 
 // One calm settings surface: a category list on the left, the chosen section on
 // the right — no nested tab-hunting, no sub-modals for routine rows.
@@ -24,7 +28,11 @@ const CATS = [
   ['Geräte', 'link'],
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.20.0';
+const WEB_CLIENT_VERSION = '0.21.0';
+
+// A no-op placeholder for `node.append(...)` (native append would turn a bare
+// null into the literal text "null") when a row is feature-flagged off.
+const noNode = () => document.createTextNode('');
 
 export function openSettings(startCat = 'Profil') {
   let cat = startCat;
@@ -269,6 +277,8 @@ function quickRepliesEditor(onChange) {
 
 // ---- Design ---------------------------------------------------------------
 function designTab(c) {
+  if (flag('themeStudio')) c.append(setRow('paint', 'Theme Studio', {
+    sub: 'Vorlagen, eigene Akzentfarbe & teilbare Theme-Codes.', onClick: openThemeStudio }));
   c.append(
     selectRowLocal('Erscheinungsbild', prefs.get('theme'),
       [['system', 'Automatisch (System)'], ['light', 'Hell'], ['dark', 'Dunkel']],
@@ -388,8 +398,10 @@ function moreTab(c, close) {
     setRow('forward', 'Ping teilen / einladen', { sub: 'Lade jemanden zu Ping ein.',
       onClick: () => import('./share.js').then((m) => m.shareInvite()) }),
     el('div', { class: 'list-section', text: 'Hilfe' }),
-    setRow('bolt', 'Tastenkürzel', { sub: 'Schneller navigieren mit der Tastatur.',
-      onClick: shortcutsModal }),
+    flag('insights') ? setRow('status', 'Nutzungs-Insights', {
+      sub: 'Deine Aktivität – nur lokal, wird nie gesendet.', onClick: insightsModal }) : noNode(),
+    setRow('bolt', 'Tastenkürzel', { sub: 'Schneller navigieren mit der Tastatur. (Taste ?)',
+      onClick: openShortcuts }),
     setRow('info', 'Über Ping', { sub: `Ping Web ${WEB_CLIENT_VERSION}`, onClick: aboutModal }),
     ...(isShell() ? desktopRows() : []),
     el('div', { style: { marginTop: '18px' } },
@@ -409,24 +421,9 @@ function desktopRows() {
   ];
 }
 
-function shortcutsModal() {
-  const rows = [
-    ['Strg / ⌘ + K', 'Befehle & Suche (Palette)'],
-    ['Strg / ⌘ + N', 'Neuer Chat'],
-    ['Strg / ⌘ + F', 'In der Unterhaltung suchen'],
-    ['Strg / ⌘ + ,', 'Einstellungen öffnen'],
-    ['Alt + ↑ / ↓', 'Vorheriger / nächster Chat'],
-    ['Enter', 'Nachricht senden'],
-    ['Umschalt + Enter', 'Neue Zeile'],
-    ['Esc', 'Dialog / Suche schließen'],
-    ['Rechtsklick', 'Nachrichten- & Chat-Menü'],
-  ];
-  modal({ title: 'Tastenkürzel', body: (b) => {
-    for (const [k, v] of rows) b.append(el('div', { class: 'profile-row inline' }, [
-      el('span', { class: 'v', text: v }),
-      el('kbd', { class: 'kbd', text: k }),
-    ]));
-  } });
+// Local-only usage insights (messages sent, 7-day sparkline, busiest chat).
+function insightsModal() {
+  modal({ title: 'Nutzungs-Insights', width: '460px', body: (b) => renderInsights(b) });
 }
 
 function aboutModal() {

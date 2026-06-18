@@ -93,6 +93,24 @@ installierbare **Progressive Web App**:
   Inhalte. Plus ein Entwickler-Panel (`Strg/⌘ + ⇧ + D`) mit Verbindung,
   Feature-Flags, API-Inspektor und Absturzprotokoll.
 
+#### Neu in 0.21.0
+
+- **@-Erwähnungen** in Gruppen – `@` öffnet eine Mitglieder-Auswahl (Pfeiltasten,
+  Enter/Tab); Erwähnungen werden hervorgehoben, dich betreffende extra. Erwähnte
+  Chats tragen ein `@`-Abzeichen, bis du sie öffnest.
+- **Aktivitäts-Center** – die Glocke in der Navigationsleiste sammelt Reaktionen
+  auf deine Nachrichten, Erwähnungen, neue Chats und verpasste Anrufe (mit
+  Ungelesen-Zähler).
+- **Nachrichten-Entwürfe** – ungesendeter Text wird je Chat gemerkt und beim
+  erneuten Öffnen wiederhergestellt; die Liste zeigt „Entwurf: …".
+- **Theme Studio** – acht Vorlagen, eigene Akzentfarbe und ein teilbarer
+  `ping-theme:`-Code zum Mitnehmen auf andere Geräte.
+- **Nutzungs-Insights** – eine 7-Tage-Statistik deiner gesendeten Nachrichten,
+  **nur lokal**, nie übertragen.
+- **Tastenkürzel-Übersicht** – Taste `?` zeigt alle Shortcuts gruppiert an.
+- **Update-Hinweis** – nach einem Deploy bietet ein Banner „Neu laden" an, statt
+  Assets stillschweigend auszutauschen.
+
 ---
 
 ## Datenschutz

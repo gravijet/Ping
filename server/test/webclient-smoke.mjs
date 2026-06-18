@@ -347,5 +347,38 @@ await step('share canShare + clipboard fallback', async () => {
 });
 await step('debug panel opens', async () => { (await imp('debug.js')).openDebugPanel(); await tick(); });
 
+// ---- 0.21.0 surfaces ------------------------------------------------------
+await step('mentions tokenize + member autocomplete attach', async () => {
+  const m = await imp('mentions.js');
+  const chat = { type: 'group', members: [{ id: 'u1', displayName: 'Alice' }] };
+  const toks = m.tokenizeMentions('hey @Alice', chat, 'u9');
+  if (!toks.some((t) => t.mention)) throw new Error('mention not tokenized');
+  const ta = new El('textarea'); document.body.appendChild(ta);
+  const detach = m.attachAutocomplete(ta, () => chat, { meId: 'u9', anchor: document.body });
+  if (typeof detach !== 'function') throw new Error('attach did not return teardown');
+  detach();
+});
+await step('drafts set → indicator → clear', async () => {
+  const d = await imp('drafts.js');
+  d.set('c1', 'unsent text'); if (!d.has('c1')) throw new Error('draft missing');
+  if (!d.preview('c1')) throw new Error('no preview'); d.clear('c1');
+});
+await step('activity record + panel opens', async () => {
+  const a = await imp('activity.js');
+  a.record({ kind: 'mention', chatId: 'c2', title: 'Gruppe', text: 'Du wurdest erwähnt' });
+  if (a.unseenCount() < 1) throw new Error('unseen count not updated');
+  await a.openActivityPanel(() => {}); await tick();
+});
+await step('theme studio + theme-code round-trip', async () => {
+  const t = await imp('themes.js');
+  t.openThemeStudio();
+  const dec = t.decodeTheme(t.encodeTheme()); if (!dec || typeof dec !== 'object') throw new Error('bad decode');
+});
+await step('shortcuts cheat sheet opens', async () => { (await imp('shortcuts.js')).openShortcuts(); });
+await step('insights render', async () => {
+  const ins = await imp('insights.js'); ins.recordSent('c1');
+  const c = new El('div'); ins.renderInsights(c);
+});
+
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');
 process.exit(failures ? 1 : 0);

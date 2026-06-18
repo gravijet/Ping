@@ -20,6 +20,9 @@ import { openInfoPanel, closeInfoPanel } from './infopanel.js';
 import * as outbox from './outbox.js';
 import { flag } from './flags.js';
 import { skeletonMessages } from './skeleton.js';
+import * as drafts from './drafts.js';
+import { tokenizeMentions, attachAutocomplete, pickerOpen } from './mentions.js';
+import { recordSent } from './insights.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -75,7 +78,12 @@ function retryPending(m) {
 }
 
 export function closeChat() {
-  if (cur) { cur.unsubs.forEach((u) => u()); if (cur.recorder) cur.recorder.cancel(); cur = null; }
+  if (cur) {
+    cur.unsubs.forEach((u) => u());
+    cur.detachMentions?.();
+    if (cur.recorder) cur.recorder.cancel();
+    cur = null;
+  }
   closeInfoPanel();
 }
 
@@ -233,7 +241,7 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderPoll(m));
   } else {
     if (m.attachment) bubble.appendChild(renderAttachment(m.attachment, { onImageClick: () => openChatMedia(m) }));
-    if (m.body) bubble.appendChild(el('span', { html: richText(m.body) }));
+    if (m.body) bubble.appendChild(el('span', { html: richText(m.body, chat) }));
   }
 
   if (!m.deleted) {
@@ -428,6 +436,8 @@ function renderComposer() {
   const ta = el('textarea', { rows: '1', placeholder: 'Nachricht schreiben …',
     spellcheck: prefs.get('spellcheck') ? 'true' : 'false' });
   if (cur.editing) ta.value = cur.editing.body || '';
+  // Restore an unsent draft for this chat (skipped while editing an existing one).
+  else if (flag('drafts')) ta.value = drafts.get(cur.chatId) || '';
   const sendBtn = el('button', { class: 'send', title: 'Senden', onClick: submit }, icon('send'));
   const micBtn = el('button', { class: 'send', title: 'Sprachnachricht', onClick: startVoice }, icon('mic'));
   const right = el('div', { style: { display: 'contents' } });
@@ -437,8 +447,13 @@ function renderComposer() {
     right.appendChild(ta.value.trim() || cur.editing ? sendBtn : micBtn);
   };
 
-  ta.addEventListener('input', () => { autosize(ta); emitTyping(ta.value.length > 0); refreshRight(); });
+  ta.addEventListener('input', () => {
+    autosize(ta); emitTyping(ta.value.length > 0); refreshRight();
+    if (!cur.editing && flag('drafts')) drafts.set(cur.chatId, ta.value);
+  });
   ta.addEventListener('keydown', (e) => {
+    // While the @-mention picker is open it owns Enter/Tab (insert a member).
+    if (pickerOpen() && (e.key === 'Enter' || e.key === 'Tab')) return;
     const enterSends = prefs.get('enterToSend');
     if (e.key === 'Enter' && !e.shiftKey && enterSends) { e.preventDefault(); submit(); }
     if (e.key === 'Enter' && e.ctrlKey && !enterSends) { e.preventDefault(); submit(); }
@@ -459,6 +474,13 @@ function renderComposer() {
   refreshRight();
   setTimeout(() => ta.focus(), 0);
 
+  // Wire @-mention autocomplete for group chats (detach any prior instance first).
+  cur.detachMentions?.();
+  cur.detachMentions = (flag('mentions') && chat?.type === 'group')
+    ? attachAutocomplete(ta, () => store.getChat(cur.chatId),
+        { meId: store.state.me?.id, anchor: cur.composerWrap })
+    : null;
+
   async function submit() {
     closeEmoji();
     const text = ta.value.trim();
@@ -470,21 +492,27 @@ function renderComposer() {
       catch (e) { toast(e.message, 'err'); }
       return;
     }
+    const chatId = cur.chatId;
     const replyTo = cur.replyTo?.id || null;
-    cur.replyTo = null; renderComposer();
+    cur.replyTo = null;
+    drafts.clear(chatId);          // the draft has been committed
+    renderComposer();
     try {
-      const r = await api.post(`/chats/${cur.chatId}/messages`, { body: text, ...(replyTo ? { replyTo } : {}) });
-      store.addMessage(cur.chatId, r.message);
+      const r = await api.post(`/chats/${chatId}/messages`, { body: text, ...(replyTo ? { replyTo } : {}) });
+      store.addMessage(chatId, r.message);
+      recordSent(chatId);          // device-local insights tally
     } catch (e) {
       // Offline / unreachable: park the message in the persistent outbox and show
       // an optimistic "pending" bubble instead of losing what the user typed.
       const offline = e.status === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false);
       if (flag('outbox') && offline) {
-        const item = outbox.enqueue({ chatId: cur.chatId, body: text, replyTo });
-        store.addMessage(cur.chatId, pendingMessage(item));
+        const item = outbox.enqueue({ chatId, body: text, replyTo });
+        store.addMessage(chatId, pendingMessage(item));
+        recordSent(chatId);
         toast('Offline – wird gesendet, sobald du wieder verbunden bist.');
       } else {
         toast(e.message, 'err'); ta.value = text; refreshRight();
+        if (flag('drafts')) drafts.set(chatId, text); // restore the draft on hard failure
       }
     }
   }
@@ -919,14 +947,28 @@ function openChatMedia(msg) {
 // Render a message body to safe HTML: escape, protect URLs, optionally apply
 // lightweight text formatting (*bold* _italic_ ~strike~ `code` ||spoiler||),
 // then restore the URLs as links. Mirrors the native app's formatting set.
-function richText(text) {
+function richText(text, chat) {
   const fmt = prefs.get('messageFormatting');
+  const meId = store.state.me?.id;
+  const doMentions = flag('mentions') && chat?.type === 'group';
   // Split on URLs so formatting never touches a link (underscores in a URL
   // aren't mistaken for italics); only the non-URL parts get formatted.
   return String(text).split(/(https?:\/\/[^\s<]+)/g).map((seg, i) => {
-    const safe = escapeHtml(seg);
-    if (i % 2 === 1) return `<a href="${safe}" target="_blank" rel="noopener">${safe}</a>`;
-    return fmt ? applyFormatting(safe) : safe;
+    if (i % 2 === 1) {
+      const safe = escapeHtml(seg);
+      return `<a href="${safe}" target="_blank" rel="noopener">${safe}</a>`;
+    }
+    if (!doMentions) {
+      const safe = escapeHtml(seg);
+      return fmt ? applyFormatting(safe) : safe;
+    }
+    // Tokenize @mentions on the RAW text, then escape each token — a mention can
+    // never inject markup because the name is escaped before it's wrapped.
+    return tokenizeMentions(seg, chat, meId).map((tok) => {
+      if (tok.mention) return `<span class="mention${tok.me ? ' me' : ''}">@${escapeHtml(tok.name)}</span>`;
+      const safe = escapeHtml(tok.text);
+      return fmt ? applyFormatting(safe) : safe;
+    }).join('');
   }).join('');
 }
 function applyFormatting(s) {

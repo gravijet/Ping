@@ -53,7 +53,13 @@ A modular ES-module SPA — no framework, no bundler. Served as static files.
 | `debug.js` | developer & diagnostics panel |
 | `share.js` | Web-Share / clipboard sharing |
 | `skeleton.js` | loading skeletons |
-| `sw.js` | service worker (app-shell precache + runtime cache) |
+| `mentions.js` | @-mention tokeniser, "mentions me" detection, composer autocomplete |
+| `drafts.js` | per-chat unsent message drafts (localStorage) |
+| `activity.js` | activity / notifications feed + slide-over panel |
+| `shortcuts.js` | keyboard-shortcut cheat sheet (the canonical binding list) |
+| `themes.js` | Theme Studio: presets, custom accent, `ping-theme:` codes |
+| `insights.js` | device-local usage insights (never transmitted) |
+| `sw.js` | service worker (app-shell precache + runtime cache + update prompt) |
 
 State flows one way: socket/REST events mutate the **store**, the store emits,
 views re-render. UI is built with `el()` (text nodes, never `innerHTML`).
