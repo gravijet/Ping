@@ -66,6 +66,23 @@ jobs:
             echo "::warning::No ANDROID_KEYSTORE_BASE64 secret — building DEBUG-signed APKs (not an OTA update)."
           fi
 
+      - name: Tune Gradle for the CI runner (avoid OOM / exit 143)
+        # The committed app/android/gradle.properties asks for -Xmx8G + 4G
+        # metaspace — right for a big dev box, but it OOM-kills assembleRelease on
+        # a hosted runner (the JVM is SIGTERM'd → Gradle exit 143). Properties in
+        # GRADLE_USER_HOME override the project file, so cap memory + drop the
+        # daemon/parallelism here without touching the dev-tuned committed file.
+        run: |
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'EOF'
+          org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError
+          org.gradle.daemon=false
+          org.gradle.parallel=false
+          org.gradle.workers.max=2
+          org.gradle.vfs.watch=false
+          kotlin.daemon.jvmargs=-Xmx1536m
+          EOF
+
       - name: Install packages
         working-directory: app
         run: flutter pub get
