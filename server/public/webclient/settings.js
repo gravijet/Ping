@@ -26,9 +26,10 @@ const CATS = [
   ['Design', 'palette'],
   ['Mitteilungen', 'bell'],
   ['Geräte', 'link'],
+  ...(flag('deviceDiagnostics') ? [['Gerät', 'bolt']] : []),
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.22.0';
+const WEB_CLIENT_VERSION = '0.24.0';
 
 // A no-op placeholder for `node.append(...)` (native append would turn a bare
 // null into the literal text "null") when a row is feature-flagged off.
@@ -56,6 +57,7 @@ export function openSettings(startCat = 'Profil') {
       else if (cat === 'Design') designTab(content);
       else if (cat === 'Mitteilungen') notifyTab(content);
       else if (cat === 'Geräte') devicesTab(content);
+      else if (cat === 'Gerät') deviceTab(content);
       else moreTab(content, closeModal);
     }
     render();
@@ -208,6 +210,109 @@ function devicesTab(c) {
       text: 'Öffne Ping auf dem neuen Gerät, wähle „Mit dem Handy verknüpfen“ und ' +
         'gib den dort angezeigten Code hier ein.' }),
   );
+}
+
+// ---- Gerät (live diagnostics) ---------------------------------------------
+// A read-only, self-refreshing view of the browser's hardware-near signals:
+// battery, network, storage budget and the device's RAM/cores. Everything is
+// best-effort — an API the browser doesn't expose simply reads "nicht
+// verfügbar". The same readings (coarsely bucketed) feed the opt-in fleet
+// telemetry; nothing here is sent unless the user enabled diagnostics.
+function deviceTab(c) {
+  const host = el('div', { class: 'diag' });
+  c.append(host);
+  let unsub = null;
+
+  const pct = (n) => `${Math.max(0, Math.min(100, Math.round(n)))}%`;
+  const bar = (value, { tone = '' } = {}) =>
+    el('div', { class: 'diag-bar' }, el('span', { class: `diag-fill ${tone}`, style: { width: pct(value) } }));
+
+  function metric(label, value, extra) {
+    return el('div', { class: 'diag-metric' }, [
+      el('div', { class: 'diag-row' }, [
+        el('span', { class: 'diag-label', text: label }),
+        el('span', { class: 'diag-value', text: value }),
+      ]),
+      extra || null,
+    ].filter(Boolean));
+  }
+
+  async function paint() {
+    let d;
+    try { d = await (await import('./device.js')).collect(); }
+    catch { clear(host); host.append(el('div', { class: 'hint', text: 'Diagnose nicht verfügbar.' })); return; }
+    clear(host);
+
+    // Online + summary header
+    host.append(el('div', { class: 'diag-head' }, [
+      el('span', { class: `diag-dot ${d.online ? 'on' : 'off'}` }),
+      el('span', { text: d.online ? 'Online' : 'Offline' }),
+      el('button', { class: 'btn ghost sm', style: { marginLeft: 'auto' },
+        onClick: paint, 'aria-label': 'Aktualisieren' }, [icon('refresh', 'sm'), el('span', { text: 'Aktualisieren' })]),
+    ]));
+
+    // Battery
+    host.append(el('div', { class: 'list-section', text: 'Akku' }));
+    if (d.battery && d.battery.level != null) {
+      const tone = d.battery.level < 20 ? 'low' : d.battery.charging ? 'good' : '';
+      host.append(metric(
+        d.battery.charging ? 'Lädt' : 'Ladestand',
+        `${d.battery.level}%${d.battery.charging ? ' ⚡' : ''}`,
+        bar(d.battery.level, { tone }),
+      ));
+    } else {
+      host.append(el('div', { class: 'hint', text: 'Akkustand stellt dieser Browser nicht bereit.' }));
+    }
+
+    // Network
+    host.append(el('div', { class: 'list-section', text: 'Netzwerk' }));
+    const net = d.connection;
+    if (net) {
+      if (net.type) host.append(metric('Verbindung', net.type));
+      if (net.effectiveType) host.append(metric('Güte', net.effectiveType.toUpperCase()));
+      if (net.downlink != null) host.append(metric('Geschätzte Bandbreite', `${net.downlink} Mbit/s`));
+      if (net.rtt != null) host.append(metric('Latenz', `${net.rtt} ms`));
+      host.append(metric('Datensparmodus', net.saveData ? 'An — Prefetch pausiert' : 'Aus'));
+    } else {
+      host.append(el('div', { class: 'hint', text: 'Netzwerkdetails stellt dieser Browser nicht bereit.' }));
+    }
+
+    // Storage budget
+    host.append(el('div', { class: 'list-section', text: 'Speicher (Browser-Budget)' }));
+    if (d.storage && d.storage.quota) {
+      const usedMb = Math.round((d.storage.usage || 0) / 1048576);
+      const quotaMb = Math.round(d.storage.quota / 1048576);
+      const ratio = d.storage.quota ? (d.storage.usage || 0) / d.storage.quota * 100 : 0;
+      host.append(metric(
+        'Belegt',
+        `${usedMb} MB / ${quotaMb >= 1024 ? (quotaMb / 1024).toFixed(1) + ' GB' : quotaMb + ' MB'}`,
+        bar(ratio, { tone: ratio > 90 ? 'low' : '' }),
+      ));
+    } else {
+      host.append(el('div', { class: 'hint', text: 'Speicherbudget stellt dieser Browser nicht bereit.' }));
+    }
+
+    // Hardware + display
+    host.append(el('div', { class: 'list-section', text: 'Hardware' }));
+    if (d.hardware.memoryGb != null) host.append(metric('Arbeitsspeicher', `≈ ${d.hardware.memoryGb} GB`));
+    if (d.hardware.cores != null) host.append(metric('CPU-Kerne', String(d.hardware.cores)));
+    host.append(metric('Bildschirm', `${d.display.width}×${d.display.height} @ ${d.display.dpr}×`));
+    host.append(metric('Fenster', d.display.viewport));
+    if (d.language) host.append(metric('Sprache', d.language));
+
+    host.append(el('p', { class: 'hint', style: { lineHeight: '1.6', marginTop: '14px' },
+      text: 'Diese Werte bleiben auf dem Gerät. Nur wenn du in „Datenschutz → Diagnose“ ' +
+        'zugestimmt hast, wird eine anonyme, grob gerundete Zusammenfassung (z. B. Akku-Bereich, ' +
+        'Verbindungsart) zur Verbesserung von Ping übertragen.' }));
+  }
+
+  // Live updates: re-paint on battery/connection/online change while the tab
+  // is mounted. Cleaned up when the section is replaced (next clear()).
+  import('./device.js').then((m) => {
+    unsub = m.onChange(() => { if (host.isConnected) paint(); else if (unsub) unsub(); });
+  }).catch(() => {});
+
+  paint();
 }
 
 async function blockedList() {

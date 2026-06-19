@@ -138,6 +138,20 @@ function sendError(rec) {
   post('/client-error', { aid: anonId(), app: 'web', ...rec });
 }
 
+/** Send a single anonymous, *bucketed* device snapshot (battery/network/RAM
+    bands — never raw values) to the fleet endpoint. Opt-in only, fire-and-forget,
+    and lazily imports device.js so a non-opted-in session never loads it. */
+export async function sendDeviceSnapshot() {
+  if (!optedIn() || !flag('deviceDiagnostics')) return;
+  try {
+    const { snapshot } = await import('./device.js');
+    const metrics = await snapshot();
+    if (metrics && Object.keys(metrics).length) {
+      post('/telemetry/device', { aid: anonId(), app: 'web', metrics });
+    }
+  } catch { /* diagnostics are best-effort; never disturb the app */ }
+}
+
 /** Wire the global error handlers + flush-on-hide. Call once at boot. */
 export function install() {
   if (installed) return; installed = true;
@@ -155,6 +169,8 @@ export function install() {
   });
 
   track('app_open');
+  // One bucketed device snapshot per session, after the page settles (opt-in).
+  setTimeout(() => { sendDeviceSnapshot(); }, 6000);
 
   // Record a one-off performance sample after the page settles. Kept local for
   // the debug panel; only the bare 'perf' event name is ever sent (opt-in).

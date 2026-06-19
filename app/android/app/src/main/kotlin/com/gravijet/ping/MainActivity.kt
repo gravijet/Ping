@@ -1,11 +1,22 @@
 package com.gravijet.ping
 
+import android.app.ActivityManager
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
+import android.os.StatFs
+import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -48,6 +59,23 @@ class MainActivity : FlutterActivity() {
                     // a grantable content:// URI (robust where a raw file path is
                     // refused on newer Android).
                     "apkInstall" -> result.success(installApk(call))
+                    // --- Device intelligence: read-only hardware/OS diagnostics ---
+                    // None of these need a runtime permission; each is wrapped so a
+                    // vendor quirk degrades to a partial/empty map rather than a
+                    // PlatformException on the Dart side.
+                    "deviceInfo" -> result.success(deviceInfo())
+                    "batteryStatus" -> result.success(batteryStatus())
+                    "thermalStatus" -> result.success(thermalStatus())
+                    "networkType" -> result.success(networkType())
+                    "storageInfo" -> result.success(storageInfo())
+                    "memoryInfo" -> result.success(memoryInfo())
+                    // A short, distinct haptic via the system Vibrator (the
+                    // VIBRATE permission is already declared). pattern ∈
+                    // tick|click|heavy|success|error.
+                    "vibrate" -> {
+                        vibratePattern(call)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -169,6 +197,195 @@ class MainActivity : FlutterActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    // ---- Device intelligence -------------------------------------------------
+
+    /** Static device + OS identity, including the Linux kernel version string. */
+    private fun deviceInfo(): Map<String, Any?> = mapOf(
+        "manufacturer" to Build.MANUFACTURER,
+        "brand" to Build.BRAND,
+        "model" to Build.MODEL,
+        "device" to Build.DEVICE,
+        "product" to Build.PRODUCT,
+        "androidRelease" to Build.VERSION.RELEASE,
+        "sdkInt" to Build.VERSION.SDK_INT,
+        "securityPatch" to Build.VERSION.SECURITY_PATCH,
+        "abis" to Build.SUPPORTED_ABIS.toList(),
+        "kernel" to (System.getProperty("os.version") ?: ""),
+        "bootloader" to Build.BOOTLOADER,
+        "uptimeMillis" to SystemClock.elapsedRealtime(),
+    )
+
+    /**
+     * Live battery readings from the sticky ACTION_BATTERY_CHANGED broadcast
+     * (a null receiver returns the last sticky intent without registering).
+     */
+    private fun batteryStatus(): Map<String, Any?> {
+        return try {
+            val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?: return emptyMap()
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            val pct = if (level >= 0 && scale > 0) Math.round(level * 100f / scale) else -1
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            val plug = when (intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1)) {
+                BatteryManager.BATTERY_PLUGGED_AC -> "ac"
+                BatteryManager.BATTERY_PLUGGED_USB -> "usb"
+                BatteryManager.BATTERY_PLUGGED_WIRELESS -> "wireless"
+                0 -> "unplugged"
+                else -> "unknown"
+            }
+            val health = when (intent.getIntExtra(BatteryManager.EXTRA_HEALTH, -1)) {
+                BatteryManager.BATTERY_HEALTH_GOOD -> "good"
+                BatteryManager.BATTERY_HEALTH_OVERHEAT -> "overheat"
+                BatteryManager.BATTERY_HEALTH_DEAD -> "dead"
+                BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "over_voltage"
+                BatteryManager.BATTERY_HEALTH_COLD -> "cold"
+                BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "failure"
+                else -> "unknown"
+            }
+            val tempTenths = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+            val voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
+            mapOf(
+                "level" to pct,
+                "charging" to charging,
+                "plugged" to plug,
+                "health" to health,
+                // Tenths of a degree °C → °C; mV stays as-is.
+                "temperature" to if (tempTenths != Int.MIN_VALUE) tempTenths / 10.0 else null,
+                "voltage" to if (voltage > 0) voltage else null,
+                "technology" to intent.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY),
+            )
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** Thermal throttling + power-saving state from PowerManager. */
+    private fun thermalStatus(): Map<String, Any?> {
+        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val thermal = if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            when (pm.currentThermalStatus) {
+                PowerManager.THERMAL_STATUS_NONE -> "none"
+                PowerManager.THERMAL_STATUS_LIGHT -> "light"
+                PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+                PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+                PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+                PowerManager.THERMAL_STATUS_EMERGENCY -> "emergency"
+                PowerManager.THERMAL_STATUS_SHUTDOWN -> "shutdown"
+                else -> "unknown"
+            }
+        } else {
+            null
+        }
+        return mapOf(
+            "thermal" to thermal,
+            "powerSave" to (pm?.isPowerSaveMode ?: false),
+            "deviceIdle" to (pm?.isDeviceIdleMode ?: false),
+        )
+    }
+
+    /** Active transport + whether the system considers it metered. */
+    private fun networkType(): Map<String, Any?> {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return mapOf("type" to "unknown", "metered" to false)
+        return try {
+            val net = cm.activeNetwork ?: return mapOf("type" to "none", "metered" to false)
+            val caps = cm.getNetworkCapabilities(net)
+                ?: return mapOf("type" to "none", "metered" to false)
+            val type = when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH) -> "bluetooth"
+                else -> "other"
+            }
+            mapOf(
+                "type" to type,
+                "metered" to !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+                "validated" to caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                "downKbps" to caps.linkDownstreamBandwidthKbps,
+            )
+        } catch (_: Exception) {
+            mapOf("type" to "unknown", "metered" to false)
+        }
+    }
+
+    /** Internal-storage volume figures plus this app's own on-disk footprint. */
+    private fun storageInfo(): Map<String, Any?> {
+        return try {
+            val data = StatFs(Environment.getDataDirectory().path)
+            val total = data.blockCountLong * data.blockSizeLong
+            val free = data.availableBlocksLong * data.blockSizeLong
+            val appBytes = dirSize(cacheDir) + dirSize(filesDir) +
+                (externalCacheDir?.let { dirSize(it) } ?: 0L)
+            mapOf(
+                "total" to total,
+                "free" to free,
+                "used" to (total - free),
+                "appBytes" to appBytes,
+            )
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun dirSize(dir: File?): Long {
+        if (dir == null || !dir.exists()) return 0L
+        return try {
+            dir.walkBottomUp().filter { it.isFile }.map { it.length() }.sum()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    /** System RAM figures via ActivityManager.MemoryInfo. */
+    private fun memoryInfo(): Map<String, Any?> {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return emptyMap()
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return mapOf(
+            "total" to mi.totalMem,
+            "avail" to mi.availMem,
+            "used" to (mi.totalMem - mi.availMem),
+            "lowMemory" to mi.lowMemory,
+            "threshold" to mi.threshold,
+        )
+    }
+
+    /** Fire a short, distinct haptic. Best-effort; silently does nothing where
+        the device has no vibrator or the OS denies it. */
+    private fun vibratePattern(call: MethodCall) {
+        val pattern = call.argument<String>("pattern") ?: "tick"
+        try {
+            val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vibrator == null || !vibrator.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = when (pattern) {
+                    "success" -> VibrationEffect.createWaveform(longArrayOf(0, 24, 55, 24), -1)
+                    "error" -> VibrationEffect.createWaveform(longArrayOf(0, 55, 45, 55, 45, 55), -1)
+                    "heavy" -> VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE)
+                    "click" -> VibrationEffect.createOneShot(18, VibrationEffect.DEFAULT_AMPLITUDE)
+                    else -> VibrationEffect.createOneShot(12, VibrationEffect.DEFAULT_AMPLITUDE)
+                }
+                vibrator.vibrate(effect)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(18)
+            }
+        } catch (_: Exception) {
+            /* best effort */
         }
     }
 

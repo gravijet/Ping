@@ -21,6 +21,7 @@ import 'app_lock_service.dart';
 import 'audio_player_service.dart';
 import 'call_service.dart';
 import 'chat_cache_store.dart';
+import 'device_info_service.dart';
 import 'feedback_service.dart';
 import 'media_service.dart';
 import 'local_message_store.dart';
@@ -125,8 +126,13 @@ class AppState extends ChangeNotifier {
   final AudioController audio = AudioController();
   final MediaService media = MediaService();
 
-  /// Asset-free haptic + sound cues, gated by the user's settings.
-  late final FeedbackService feedback = FeedbackService(() => settings);
+  /// Read-only device diagnostics + native haptics (Android bridge).
+  final DeviceInfoService deviceInfo = DeviceInfoService();
+
+  /// Asset-free haptic + sound cues, gated by the user's settings. The native
+  /// vibrator (when present) gives crisper, distinct patterns; otherwise it
+  /// falls back to the platform's built-in haptic channels.
+  late final FeedbackService feedback = FeedbackService(() => settings, deviceInfo);
   final LocalMessageStore localStore = LocalMessageStore();
   final StarredStore starredStore = StarredStore();
   final ChatCacheStore chatCache = ChatCacheStore();
@@ -720,6 +726,17 @@ class AppState extends ChangeNotifier {
     checkForUpdate();
     // If the app was just updated, arm the one-time "what's new" changelog.
     _checkWhatsNew();
+    // Send one anonymous, bucketed device snapshot for the fleet dashboard
+    // (kill-switchable via the remote `deviceTelemetry` flag). Best-effort.
+    _reportDeviceSnapshot();
+  }
+
+  /// Fire-and-forget anonymous device-fleet snapshot. Respects the server-side
+  /// `deviceTelemetry` flag and never throws (see [DeviceInfoService]).
+  void _reportDeviceSnapshot() {
+    if (!deviceInfo.supported) return;
+    if (!feature('deviceTelemetry', fallback: true)) return;
+    deviceInfo.reportSnapshot(baseUrl);
   }
 
   /// Sign-in path when the server is unreachable at cold-start but we have a

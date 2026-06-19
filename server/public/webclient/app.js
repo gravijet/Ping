@@ -127,10 +127,18 @@ async function enterApp() {
 
 // Once interactive, warm the lazily-imported section modules during idle time so
 // the first navigation to Status / Anrufe / Gespeichert / Gruppen feels instant.
-// Pure prefetch into the module + HTTP cache — any failure is ignored.
+// Pure prefetch into the module + HTTP cache — any failure is ignored. Skipped
+// entirely when the connection asks us to save data (Data-Saver / slow / 2g):
+// the warm-up is a nicety, not worth a metered byte.
 let prefetched = false;
-function prefetchModules() {
+async function prefetchModules() {
   if (prefetched) return; prefetched = true;
+  if (flag('adaptiveData')) {
+    try {
+      const { prefersDataSaver } = await import('./device.js');
+      if (prefersDataSaver()) { telemetry.track('prefetch_skipped_datasaver'); return; }
+    } catch { /* device.js unavailable — prefetch as usual */ }
+  }
   const mods = ['./status.js', './calls-view.js', './saved.js', './groups.js', './devices.js'];
   const run = () => { for (const m of mods) import(m).catch(() => {}); };
   if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 4000 });

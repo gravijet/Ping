@@ -13,6 +13,7 @@ import '../widgets/verified_badge.dart';
 import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
+import 'device_screen.dart';
 import 'link_device_screen.dart';
 import 'profile_view_screen.dart';
 import 'saved_messages_screen.dart';
@@ -158,6 +159,10 @@ class SettingsScreen extends StatelessWidget {
           _navTile(context, Icons.sd_storage_outlined, 'Speicher & Daten',
               'Datensparmodus & Zwischenspeicher',
               () => const StorageSettingsScreen()),
+          if (isAndroidPlatform)
+            _navTile(context, Icons.monitor_heart_outlined, 'Geräte & Diagnose',
+                'Akku, Netzwerk, Speicher & System',
+                () => const DeviceScreen()),
           _navTile(context, Icons.backup_outlined, 'Backup',
               'Tägliche Server-Sicherung & eigener Export',
               () => const BackupScreen()),
@@ -179,7 +184,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const PingLogo(size: 40),
             title: const Text('Ping'),
-            subtitle: const Text('Version 0.13.0 — schnell, sicher, in Blau.'),
+            subtitle: const Text('Version 0.24.0 — schnell, sicher, in Blau.'),
           ),
           ListTile(
             leading: Icon(
@@ -216,7 +221,7 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '0.13.0',
+              applicationVersion: '0.24.0',
             ),
           ),
           const SizedBox(height: 8),

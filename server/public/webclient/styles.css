@@ -1402,3 +1402,26 @@ a { color: var(--accent-ink); }
   color: var(--muted); font-size: 13.5px; }
 .insights-busiest .icon { width: 16px; height: 16px; color: var(--accent-ink); flex: 0 0 auto; }
 .insights-busiest strong { color: var(--text); font-weight: 650; }
+
+/* ---- Gerät: live device diagnostics (settings.js · deviceTab) -------------
+   A calm read-out of battery / network / storage / hardware. Respects the
+   reduced-motion preference for the fill animations. */
+.diag { display: flex; flex-direction: column; }
+.diag-head { display: flex; align-items: center; gap: 9px; font-weight: 600;
+  font-size: 14px; margin-bottom: 4px; }
+.diag-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.diag-dot.off { background: var(--muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 22%, transparent); }
+.diag-metric { padding: 9px 0; border-bottom: 1px solid var(--line); }
+.diag-metric:last-child { border-bottom: 0; }
+.diag-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.diag-label { color: var(--muted); font-size: 13.5px; }
+.diag-value { color: var(--text); font-weight: 640; font-size: 14px; font-variant-numeric: tabular-nums;
+  text-align: right; }
+.diag-bar { margin-top: 8px; height: 7px; border-radius: 999px; background: var(--surface-2);
+  overflow: hidden; }
+.diag-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent);
+  transition: width .45s cubic-bezier(.2,.7,.2,1); }
+.diag-fill.good { background: var(--ok); }
+.diag-fill.low { background: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .diag-fill { transition: none; } }

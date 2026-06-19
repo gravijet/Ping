@@ -31,6 +31,8 @@ export const DEFAULTS = {
   profileLinks: true,    // shareable ?u=<id> profile/start-chat deep links
   perfMetrics: true,     // opt-in performance metrics (navigation/paint timing)
   amoledTheme: true,     // AMOLED true-black dark-mode variant
+  deviceDiagnostics: true, // "Gerät" settings panel (battery/network/storage)
+  adaptiveData: true,    // throttle prefetch on save-data / slow connections
 };
 
 function localOverrides() {

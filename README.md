@@ -138,6 +138,15 @@ installierbare **Progressive Web App**:
   verlässt oder schließt**, zeigt eine System-Benachrichtigung mit Fortschritt
   und wird beim erneuten Öffnen fortgesetzt; abgebrochene Downloads setzen dank
   Range-Requests am Server dort fort, wo sie waren – statt neu zu starten.
+- **Geräte & Diagnose (Android)** – ein eigener Bereich in den Einstellungen
+  zeigt **live** Akku (mit Temperatur, Zustand, Spannung), Energie-/Temperatur-
+  und Energiesparzustand, Netzwerk (Typ, getaktet, Bandbreite), Arbeits- und
+  Gerätespeicher sowie System-Infos **bis hin zur Linux-Kernel-Version** – über
+  eine native Brücke (`BatteryManager`, `PowerManager`, `ConnectivityManager`,
+  `ActivityManager`, `StatFs`). Damit hält Ping bei wenig Akku, im Energiespar-
+  modus oder im getakteten Mobilfunk **automatisch** große Downloads zurück und
+  gibt klar unterscheidbares **Vibrations-Feedback**. (Web: ein kompakter
+  „Gerät"-Bereich nutzt die Browser-APIs für Akku, Verbindung und Speicher.)
 
 ---
 

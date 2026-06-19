@@ -433,6 +433,17 @@ export const clientErrorSchema = z.object({
   url: z.string().max(300).optional(),
 });
 
+// Anonymous, opt-in device-fleet snapshot. `metrics` is a flat map of
+// metric→bucket *labels* (coarse strings, never raw readings), e.g.
+// { android: '14', net: 'wifi', battery: '40-59', ram: '6-8' }. Both keys and
+// values are short strings; the record-side also re-caps them. No PII.
+const metricLabel = z.string().trim().min(1).max(24);
+export const deviceStatsSchema = z.object({
+  aid: z.string().trim().max(64).optional(),
+  app: appField,
+  metrics: z.record(metricLabel, metricLabel).default({}),
+});
+
 // An official status ("story") an admin posts so every user sees it.
 export const adminStatusSchema = z
   .object({

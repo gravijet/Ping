@@ -358,6 +358,23 @@ db.exec(`
     url        TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_client_errors_created ON client_errors(created_at);
+
+  -- Anonymous, opt-in device-fleet telemetry. A single tall, fully aggregated
+  -- table: one counter per (day, app, metric, bucket). Clients never send raw
+  -- readings — only coarse *buckets* (e.g. battery '40-59', android '14',
+  -- net 'wifi', ram '6-8') — so there is nothing here to tie back to a person,
+  -- and the row count is bounded by metrics × buckets × days. Powers the admin
+  -- "Geräteflotte" dashboard (Android-version spread, network mix, RAM/battery
+  -- distribution) without any per-user storage.
+  CREATE TABLE IF NOT EXISTS device_metrics (
+    day    TEXT NOT NULL,
+    app    TEXT NOT NULL DEFAULT 'android',
+    metric TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    count  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, app, metric, bucket)
+  );
+  CREATE INDEX IF NOT EXISTS idx_device_metrics_day ON device_metrics(day);
 `);
 
 // ---- Migrations ------------------------------------------------------------

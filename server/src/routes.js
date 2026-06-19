@@ -64,9 +64,11 @@ import {
   apiKeyCreateSchema,
   telemetrySchema,
   clientErrorSchema,
+  deviceStatsSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
+import { recordDeviceSnapshot, deviceFleet } from './deviceStatsRepo.js';
 import {
   createScheduled,
   listScheduled,
@@ -439,6 +441,17 @@ router.post(
   h(async (req, res) => {
     const data = parse(clientErrorSchema, req.body);
     recordError(data);
+    res.status(202).json({ ok: true });
+  })
+);
+
+// Anonymous, opt-in device-fleet snapshot (bucketed readings only — see
+// deviceStatsRepo). Same fire-and-forget contract as /telemetry: always 202.
+router.post(
+  '/telemetry/device',
+  h(async (req, res) => {
+    const data = parse(deviceStatsSchema, req.body);
+    recordDeviceSnapshot(data.app, data.metrics);
     res.status(202).json({ ok: true });
   })
 );
@@ -2475,7 +2488,7 @@ router.get(
   requireAdmin,
   h(async (req, res) => {
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
-    res.json(telemetrySummary({ days }));
+    res.json({ ...telemetrySummary({ days }), fleet: deviceFleet({ days }) });
   })
 );
 

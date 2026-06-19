@@ -16,6 +16,11 @@ export const DEFAULT_CONFIG = {
     reactions: true,
     communities: false,
     calls: false,
+    // Device-Intelligence (0.24.0): live diagnostics surface, adaptive
+    // data/battery behaviour, and the anonymous device-fleet telemetry.
+    deviceDiagnostics: true,
+    adaptiveData: true,
+    deviceTelemetry: true,
   },
   values: {
     maxStatusSeconds: 30,

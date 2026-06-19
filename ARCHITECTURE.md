@@ -125,6 +125,27 @@ anonymous batches to `POST /api/telemetry` / `POST /api/client-error`
 (`telemetryRepo.js` aggregates counts + caps crash storage). Admins read a
 summary at `GET /api/admin/diagnostics`.
 
+## Device intelligence (0.24.0)
+A read-only hardware/OS layer. On Android, `MainActivity.kt` exposes diagnostics
+methods over the existing `ping/native` MethodChannel — `deviceInfo`,
+`batteryStatus`, `thermalStatus`, `networkType`, `storageInfo`, `memoryInfo`
+(from `BatteryManager`/`PowerManager`/`ConnectivityManager`/`ActivityManager`/
+`StatFs`, incl. the `os.version` kernel string) and a `vibrate` haptic. The
+Dart `DeviceInfoService` wraps them into the typed, null-safe `DeviceStatus`
+model (`models/device_status.dart`); the **Geräte & Diagnose** screen renders a
+live view, and `shouldConserveData()` drives adaptive back-off (metered network /
+battery-saver / low battery). The web client's `device.js` mirrors this via the
+Battery/Network-Information/Storage browser APIs and gates idle prefetch on
+Save-Data.
+
+Both clients can emit one **bucketed** snapshot (coarse labels only — e.g.
+battery `40-59`, android `14`, net `wifi`, ram `6-8`) to `POST
+/api/telemetry/device`. `deviceStatsRepo.js` aggregates it into the
+`device_metrics` table (a counter per day × app × metric × bucket — no per-user
+rows, no identity), surfaced as `fleet` inside `GET /api/admin/diagnostics`.
+Kill-switchable via the `deviceDiagnostics` / `adaptiveData` / `deviceTelemetry`
+remote flags.
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new
