@@ -18,6 +18,8 @@ import { startRecorder } from './voice.js';
 import { forwardMessage, forwardMessages } from './forward.js';
 import { openInfoPanel, closeInfoPanel } from './infopanel.js';
 import * as outbox from './outbox.js';
+import * as cache from './cache.js';
+import * as syncqueue from './syncqueue.js';
 import { flag } from './flags.js';
 import { skeletonMessages } from './skeleton.js';
 import * as drafts from './drafts.js';
@@ -98,9 +100,11 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   const head = buildHead(chat, onBack);
   const chev = icon('chevron');
   chev.style.transform = 'rotate(90deg)';
-  const jump = el('button', { class: 'jump-btn', title: 'Nach unten',
-    onClick: () => { thread.scrollTop = thread.scrollHeight; } }, chev);
+  const jump = el('button', { class: 'jump-btn', title: 'Nach unten', 'aria-label': 'Zu den neuesten Nachrichten',
+    onClick: () => { thread.scrollTop = thread.scrollHeight; markBottomSeen(); } }, chev);
   clear(slot).append(head, thread, jump, composerWrap);
+  // Subtle, reduced-motion-safe entrance when switching conversations.
+  slot.classList.remove('fade-in'); void slot.offsetWidth; slot.classList.add('fade-in');
   cur.thread = thread; cur.head = head; cur.composerWrap = composerWrap; cur.jump = jump;
   renderComposer();
 
@@ -110,12 +114,27 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   cur.unsubs.push(store.on('chat:' + chatId, () => { const c = store.getChat(chatId);
     if (c) clear(head).append(...buildHead(c, onBack).childNodes); }));
 
-  thread.appendChild(flag('skeletons') ? skeletonMessages(6)
-    : el('div', { class: 'daysep', text: 'Lade …' }));
+  // Offline-first: paint the cached history (if any) before the network answers,
+  // so the conversation opens instantly and stays readable with no connection.
+  let hadCache = false;
+  if (!store.getHistory(chatId).length) {
+    const cached = await cache.loadMessages(chatId);
+    if (cur?.chatId !== chatId) return; // user switched chats during the await
+    if (cached?.length) { store.setHistory(chatId, cached); hadCache = true; renderThread(true); }
+  }
+  if (!hadCache) {
+    thread.appendChild(flag('skeletons') ? skeletonMessages(6)
+      : el('div', { class: 'daysep', text: 'Lade …' }));
+  }
   try {
     const { messages } = await api.get(`/chats/${chatId}/messages?limit=40`);
+    if (cur?.chatId !== chatId) return;
     store.setHistory(chatId, messages, { all: messages.length < 40 });
-  } catch (e) { toast(e.message || 'Nachrichten konnten nicht geladen werden.', 'err'); }
+  } catch (e) {
+    if (cur?.chatId !== chatId) return;
+    // Offline with cached history is fine — keep it on screen, no scary toast.
+    if (!hadCache) toast(e.message || 'Nachrichten konnten nicht geladen werden.', 'err');
+  }
   renderThread(true);
   markRead();
 
@@ -124,7 +143,7 @@ export async function openChat(slot, chatId, { onBack } = {}) {
 }
 
 function markRead() {
-  socket.send('read', { chatId: cur.chatId });
+  syncqueue.markRead(cur.chatId);
   const chat = store.getChat(cur.chatId);
   if (chat && chat.unread) { chat.unread = 0; store.emit('chats'); }
 }
@@ -194,12 +213,24 @@ function renderThread(forceBottom) {
     thread.appendChild(el('div', { class: 'daysep', text: 'Noch keine Nachrichten' }));
     return;
   }
+  // A "Neue Nachrichten" divider marks the first message that arrived (from
+  // someone else) while the user was scrolled up — shown only when not stuck to
+  // the bottom, so it never flickers during normal reading.
+  const meId = store.state.me?.id;
+  const seenUpTo = cur.seenUpTo || 0;
+  let dividerDone = false;
   let lastDay = '', lastSender = null, lastTs = 0;
   const chat = store.getChat(cur.chatId);
   for (const m of msgs) {
     const day = dayLabel(m.createdAt);
     if (day !== lastDay) { thread.appendChild(el('div', { class: 'daysep', text: day }));
       lastDay = day; lastSender = null; }
+    if (!stick && !dividerDone && m.type !== 'system'
+        && m.senderId !== meId && m.createdAt > seenUpTo) {
+      thread.appendChild(el('div', { class: 'newsep', role: 'separator' },
+        el('span', { text: 'Neue Nachrichten' })));
+      dividerDone = true; lastSender = null;
+    }
     if (m.type === 'system') {
       thread.appendChild(el('div', { class: 'msg sys' },
         el('div', { class: 'bubble system', text: messagePreview(m) })));
@@ -209,7 +240,10 @@ function renderThread(forceBottom) {
     thread.appendChild(renderMessage(m, chat, !grouped));
     lastSender = m.senderId; lastTs = m.createdAt;
   }
-  if (stick) thread.scrollTop = thread.scrollHeight;
+  // Count unseen incoming messages for the scroll-to-bottom pill.
+  cur.unseen = stick ? 0
+    : msgs.filter((m) => m.type !== 'system' && m.senderId !== meId && m.createdAt > seenUpTo).length;
+  if (stick) { thread.scrollTop = thread.scrollHeight; cur.seenUpTo = lastTs || seenUpTo; }
   else thread.scrollTop = prevTop + (thread.scrollHeight - prevH);
   updateJump();
   if (cur.search?.q) applySearchHighlights();
@@ -723,11 +757,27 @@ function autosize(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.
 function updateJump() {
   if (!cur?.jump) return;
   cur.jump.classList.toggle('show', !nearBottom(cur.thread));
+  let badge = cur.jump.querySelector('.badge');
+  if (cur.unseen > 0) {
+    if (!badge) { badge = el('span', { class: 'badge' }); cur.jump.appendChild(badge); }
+    badge.textContent = cur.unseen > 99 ? '99+' : String(cur.unseen);
+  } else if (badge) badge.remove();
+}
+
+// The user is caught up: drop the unseen pill + the "Neue Nachrichten" divider.
+function markBottomSeen() {
+  if (!cur) return;
+  const msgs = store.getHistory(cur.chatId);
+  cur.seenUpTo = msgs.length ? msgs[msgs.length - 1].createdAt : Date.now();
+  cur.unseen = 0;
+  cur.thread?.querySelectorAll('.newsep').forEach((n) => n.remove());
+  updateJump();
 }
 
 async function onScroll(e) {
   const thread = e.target;
   updateJump();
+  if (nearBottom(thread) && cur.unseen) markBottomSeen();
   if (thread.scrollTop > 60 || store.state.loadedAll.has(cur.chatId) || cur.loadingOlder) return;
   const msgs = store.getHistory(cur.chatId);
   if (!msgs.length) return;

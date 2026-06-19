@@ -4,6 +4,7 @@
 import { api, authedObjectUrl } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, lastSeenLabel } from './ui.js';
+import { flag } from './flags.js';
 
 // Look a user up by phone (POST /users/lookup). Returns the publicUser or throws.
 export async function lookup(phone) {
@@ -94,10 +95,14 @@ export function openProfile(user) {
     },
     foot: [
       blockBtn,
+      (flag('profileLinks') && flag('shareButtons'))
+        ? el('button', { class: 'btn ghost', title: 'Profil-Link teilen',
+            onClick: () => import('./share.js').then((s) => s.shareProfile(user)) }, [icon('forward'), 'Teilen'])
+        : null,
       el('button', { class: 'btn primary', onClick: async () => {
         try { await startDirect(user.id); m.close(); } catch (err) { toast(err.message, 'err'); }
       } }, [icon('edit'), 'Nachricht senden']),
-    ],
+    ].filter(Boolean),
   });
 
   // Reflect the current block state on the button.

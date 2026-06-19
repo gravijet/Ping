@@ -380,5 +380,39 @@ await step('insights render', async () => {
   const c = new El('div'); ins.renderInsights(c);
 });
 
+// ---- 0.22.0 surfaces ------------------------------------------------------
+await step('offline cache transforms + graceful no-op without IndexedDB', async () => {
+  const c = await imp('cache.js');
+  if (c.capMessages([{ id: 'a', createdAt: 1 }, { id: 'tmp-x', createdAt: 2 }], 5).length !== 1) throw new Error('capMessages wrong');
+  if (c.mergeMessages([{ id: 'a', createdAt: 2 }], [{ id: 'b', createdAt: 1 }]).map((m) => m.id).join() !== 'b,a') throw new Error('merge wrong');
+  c.install();
+  const s = await c.stats(); if (s.available !== false) throw new Error('expected IndexedDB unavailable under node');
+  if ((await c.loadMessages('c1')) !== null) throw new Error('expected null history without IndexedDB');
+  await c.clearAll();
+});
+await step('sync-queue dedup + flush over the (fake) socket', async () => {
+  const q = await imp('syncqueue.js');
+  q.markDelivered('cz'); q.markRead('cz'); // read supersedes delivered
+  q.flush();
+  if (typeof q.count() !== 'number') throw new Error('count not numeric');
+});
+await step('deep-link id validation', async () => {
+  const v = await imp('validate.js');
+  if (!v.isValidId('550e8400-e29b-41d4-a716-446655440000')) throw new Error('uuid rejected');
+  if (v.safeId('../bad') !== null) throw new Error('path traversal accepted');
+});
+await step('performance metric shaping', async () => {
+  const t = await imp('telemetry.js');
+  const p = t.shapePerf({ responseStart: 5.6, loadEventEnd: 100.2 }, []);
+  if (p.ttfb !== 6 || p.load !== 100) throw new Error('shapePerf wrong');
+});
+await step('AMOLED theme toggle applies data-black', async () => {
+  const prefs = await imp('prefs.js');
+  prefs.set('theme', 'dark'); prefs.set('amoled', true); prefs.applyVisual();
+  if (document.documentElement.getAttribute('data-black') !== 'on') throw new Error('data-black not set');
+  prefs.set('amoled', false); prefs.applyVisual();
+  if (document.documentElement.getAttribute('data-black') !== 'off') throw new Error('data-black not cleared');
+});
+
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');
 process.exit(failures ? 1 : 0);

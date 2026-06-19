@@ -66,6 +66,21 @@
   --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
+/* AMOLED true-black variant of the dark theme. Pure-black canvas + panes save
+   power on OLED panels and read as deeper; lines/elevations are lifted a touch
+   so structure stays legible against the black. Only ever applied in dark mode
+   (see prefs.applyVisual). */
+:root[data-black="on"][data-theme="dark"] {
+  --bg: #000000; --bg-2: #000000;
+  --glass-2: #000000;          /* list pane + conversation header */
+  --glass: #08090c;            /* nav rail · composer · modals · menus */
+  --elevated: #0e1014;         /* popovers above a surface */
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-3: rgba(255, 255, 255, 0.11);
+  --line: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(255, 255, 255, 0.17);
+}
+
 :root[data-theme="light"] {
   --bg: #ffffff;
   --bg-2: #ffffff;
@@ -413,6 +428,18 @@ a { color: var(--accent-ink); }
 .daysep { align-self: center; margin: 14px 0 10px; padding: 5px 14px;
   background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 999px; font-size: 12px; color: var(--muted); font-weight: 600; }
+
+/* "Neue Nachrichten" divider — marks the first unseen incoming message. */
+.newsep { align-self: stretch; display: flex; align-items: center; gap: 10px;
+  margin: 12px 0 6px; color: var(--accent); font-size: 12px; font-weight: 700; }
+.newsep::before, .newsep::after { content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: .45; }
+.newsep span { padding: 2px 12px; border-radius: 999px; background: var(--accent-soft);
+  white-space: nowrap; animation: ping-fade-in .2s ease both; }
+
+/* Reusable, reduced-motion-safe entrance (disabled by the data-motion rule). */
+@keyframes ping-fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: ping-fade-in .16s ease both; }
 
 .msg { display: flex; flex-direction: column; max-width: min(640px, 76%); position: relative; }
 .msg.out { align-self: flex-end; align-items: flex-end; }

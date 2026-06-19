@@ -48,8 +48,11 @@ A modular ES-module SPA — no framework, no bundler. Served as static files.
 | `ui.js` | DOM builder `el()`, icons, avatars, toasts, modals, menus |
 | `chat.js` / `chats.js` | conversation pane + chat list |
 | `flags.js` | feature flags (defaults → remote → local override) |
-| `outbox.js` | persistent offline send-queue |
-| `telemetry.js` | privacy-first, opt-in diagnostics + crash capture |
+| `outbox.js` | persistent offline send-queue (queues message *sends*) |
+| `idb.js` · `cache.js` | offline read-through cache (chat list + recent messages) in IndexedDB |
+| `syncqueue.js` | persists & replays read/delivered acks across reconnects |
+| `validate.js` | id guards for deep-link params (`?chat=`, `?u=`) |
+| `telemetry.js` | privacy-first, opt-in diagnostics + crash + performance capture |
 | `debug.js` | developer & diagnostics panel |
 | `share.js` | Web-Share / clipboard sharing |
 | `skeleton.js` | loading skeletons |
@@ -74,11 +77,23 @@ views re-render. UI is built with `el()` (text nodes, never `innerHTML`).
   dedicated vanilla-JS client above.
 
 ## Request lifecycle (web client)
-1. `app.js` boots, registers `sw.js`, installs telemetry + outbox.
-2. `GET /api/me` restores the session; the shell renders; the socket connects.
-3. REST loads chats/messages; socket events stream updates into the store.
+1. `app.js` boots, registers `sw.js`, installs telemetry, outbox, cache + sync-queue.
+2. `GET /api/me` restores the session; the **cache hydrates** the last chat list
+   from IndexedDB before the first paint; the shell renders; the socket connects.
+3. REST loads chats/messages (reconciling the cache); socket events stream
+   updates into the store, which the cache persists passively as they flow.
 4. Sends `POST /api/chats/:id/messages`; on network failure the **outbox** queues
-   and shows a pending bubble, flushing on reconnect.
+   and shows a pending bubble, flushing on reconnect. Read/delivered acks that
+   can't reach a downed socket are parked in the **sync-queue** and replayed.
+
+## Offline-first
+The app stays useful with no network. Three independent layers cooperate:
+**cache.js** (read-through IndexedDB store of the chat list + the newest ~80
+messages per chat, replayed instantly on boot and on chat-open), **outbox.js**
+(durable send-queue for outgoing messages), and **syncqueue.js** (deduped
+read/delivered acks). The cache is scoped to one account via an `owner` record
+and wiped on logout, so a shared device never leaks one account's data to the
+next. All three degrade gracefully when IndexedDB/localStorage is unavailable.
 
 ## Diagnostics pipeline (opt-in)
 `telemetry.js` keeps a **local** event/crash buffer for the debug panel. Only

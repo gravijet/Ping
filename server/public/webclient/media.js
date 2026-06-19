@@ -62,18 +62,39 @@ export async function sendVoice(chatId, file, durationMs, { replyTo = null } = {
   return r.message;
 }
 
+// A single shared observer lazily fetches each image's (authed) blob only once
+// it nears the viewport, so a long thread full of photos doesn't fetch them all
+// at once. IntersectionObserver holds weak references to its targets, so the
+// img nodes discarded on every thread re-render are collected without leaking.
+let imgObserver = null;
+function lazyImageObserver() {
+  if (imgObserver || typeof IntersectionObserver === 'undefined') return imgObserver;
+  imgObserver = new IntersectionObserver((entries, obs) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const img = e.target;
+      obs.unobserve(img);
+      const url = img.dataset.lazy;
+      if (url) authedObjectUrl(url).then((u) => { if (u) img.src = u; });
+    }
+  }, { rootMargin: '600px 0px' });
+  return imgObserver;
+}
+
 // Render an attachment object into a DOM node for a bubble.
 export function renderAttachment(att, { onImageClick } = {}) {
   if (!att) return null;
   const kind = att.kind || 'file';
 
   if (kind === 'image' || kind === 'gif') {
-    const img = el('img', { class: 'att-img', alt: att.name || '' });
+    const img = el('img', { class: 'att-img', alt: att.name || '', loading: 'lazy', decoding: 'async' });
     if (att.width && att.height) {
       img.style.aspectRatio = `${att.width} / ${att.height}`;
       img.style.width = Math.min(320, att.width) + 'px';
     }
-    authedObjectUrl(att.url).then((u) => { if (u) img.src = u; });
+    const obs = lazyImageObserver();
+    if (obs && att.url) { img.dataset.lazy = att.url; obs.observe(img); }
+    else authedObjectUrl(att.url).then((u) => { if (u) img.src = u; });
     img.addEventListener('click', () => onImageClick ? onImageClick(att) : openLightbox(att));
     return img;
   }

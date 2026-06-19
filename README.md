@@ -81,7 +81,9 @@ Der PC-Client (und damit auch die Windows-App, die ihn umhüllt) ist eine echte,
 installierbare **Progressive Web App**:
 
 - **Offline-fähig** – ein Service Worker cached die App-Hülle; Ping startet und
-  läuft ohne Verbindung (API/WS/Medien werden nie gecacht – kein Datenleck).
+  läuft ohne Verbindung (API/WS/Medien werden nie gecacht – kein Datenleck). Seit
+  0.22.0 hält ein **IndexedDB-Cache** zusätzlich die Chatliste und die letzten
+  Nachrichten je Chat vor, sodass alte Gespräche auch offline lesbar bleiben.
 - **Offline senden** – während du offline bist getippte Nachrichten landen in
   einer persistenten Warteschlange, erscheinen als „⧗ ausstehend" und werden
   automatisch zugestellt, sobald die Verbindung zurück ist (mit Wiederholung).
@@ -92,6 +94,27 @@ installierbare **Progressive Web App**:
 - **Diagnose (optional, anonym)** – standardmäßig **aus**; kein Tracking, keine
   Inhalte. Plus ein Entwickler-Panel (`Strg/⌘ + ⇧ + D`) mit Verbindung,
   Feature-Flags, API-Inspektor und Absturzprotokoll.
+
+#### Neu in 0.22.0
+
+- **Offline-First, echt** – ein **IndexedDB-Cache** hält Chatliste und die
+  letzten ~80 Nachrichten je Chat vor: Ping öffnet sofort und bleibt ohne
+  Verbindung lesbar; die Live-Daten gleichen sich danach ab. Der Cache ist pro
+  Konto abgesichert und wird beim Abmelden gelöscht.
+- **Sync-Queue für Lesebestätigungen** – „gelesen/zugestellt", die ein getrennter
+  Socket nicht annehmen konnte, werden gepuffert und bei der nächsten Verbindung
+  nachgereicht (entdoppelt pro Chat).
+- **„Neue Nachrichten"-Trenner & Zähler** – kommen Nachrichten herein, während du
+  oben liest, markiert ein Trenner die erste neue Nachricht und der
+  Nach-unten-Knopf trägt einen Ungelesen-Zähler.
+- **AMOLED-Schwarz** – ein echtes Schwarz für das dunkle Design (OLED-schonend),
+  umschaltbar in Einstellungen → Design.
+- **Profil-Links zum Teilen** – `?u=<id>` öffnet die Profilkarte einer Person und
+  bietet direkt „Nachricht senden"; teilbar aus der Profilkarte.
+- **Schneller** – ungenutzte Bereiche werden im Leerlauf vorgeladen, Bilder erst
+  beim Sichtbarwerden (Lazy-Loading) geholt.
+- **Mehr Entwickler-Werkzeuge** – das Debug-Panel zeigt Leistungswerte, einen
+  Cache-Inspektor und einen „Offline simulieren"-Schalter.
 
 #### Neu in 0.21.0
 
@@ -309,7 +332,7 @@ Alles oben läuft zusätzlich automatisch in **GitHub Actions** (`.github/workfl
 bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
 **Windows** (`windows-build.yml`) erzeugst du manuell über den Actions-Tab.
 
-- **Backend:** 100+ Tests decken Registrierung (Nummer + E-Mail + Passwort,
+- **Backend:** 130+ Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
   schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
   Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,
@@ -319,6 +342,9 @@ bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
   **Newsroom-/Changelog-Verwaltung** (Entwürfe bleiben privat, öffentliche
   Listen zeigen nur Veröffentlichtes) und die öffentlichen **Live-Statistiken**.
   Geprüft wird außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
+  Dazu kommen Unit-Tests für die **Ping-Web-Logik** (Erwähnungen, Theme-Codes,
+  Entwürfe, Insights sowie seit 0.22.0 der **Offline-Cache**, die **Sync-Queue**,
+  die **Deeplink-Validierung** und die **Leistungsmetriken**).
 - **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt.
 
 ---

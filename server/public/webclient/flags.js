@@ -26,6 +26,11 @@ export const DEFAULTS = {
   activityCenter: true,  // nav-rail bell + activity / notifications feed
   themeStudio: true,     // theme presets + custom accent + shareable theme codes
   insights: true,        // device-local usage insights in settings
+  offlineCache: true,    // IndexedDB read-through cache (chat list + recent messages)
+  syncReceipts: true,    // persist & replay read/delivered acks across reconnects
+  profileLinks: true,    // shareable ?u=<id> profile/start-chat deep links
+  perfMetrics: true,     // opt-in performance metrics (navigation/paint timing)
+  amoledTheme: true,     // AMOLED true-black dark-mode variant
 };
 
 function localOverrides() {

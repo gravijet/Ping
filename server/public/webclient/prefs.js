@@ -8,6 +8,7 @@ const KEY = 'ping.prefs';
 
 const DEFAULTS = {
   theme: 'system',        // 'dark' | 'light' | 'system' (follows the OS)
+  amoled: false,          // AMOLED true-black variant of the dark theme
   accent: '#4d9bff',
   wallpaper: '',          // '' | preset id | data URL
   fontScale: 1,           // 0.9 .. 1.3
@@ -81,7 +82,7 @@ export function get(k) { return prefs[k]; }
 export function set(k, v) { prefs[k] = v; persist(); if (VISUAL.has(k)) applyVisual(); }
 export function all() { return { ...prefs }; }
 
-const VISUAL = new Set(['theme', 'accent', 'wallpaper', 'fontScale', 'highContrast',
+const VISUAL = new Set(['theme', 'amoled', 'accent', 'wallpaper', 'fontScale', 'highContrast',
   'reduceMotion', 'bubbleStyle', 'fontFamily', 'underlineLinks', 'bigTargets']);
 
 // Resolve 'system' to a concrete scheme by asking the OS; 'dark'/'light' pass
@@ -105,6 +106,8 @@ try {
 export function applyVisual() {
   const r = document.documentElement;
   r.setAttribute('data-theme', effectiveTheme());
+  // AMOLED true-black only applies on top of the dark theme.
+  r.setAttribute('data-black', prefs.amoled && effectiveTheme() === 'dark' ? 'on' : 'off');
   r.setAttribute('data-contrast', prefs.highContrast ? 'high' : 'normal');
   r.setAttribute('data-motion', prefs.reduceMotion ? 'reduce' : 'full');
   r.setAttribute('data-underline', prefs.underlineLinks ? 'on' : 'off');

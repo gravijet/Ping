@@ -10,7 +10,7 @@
    Bump CACHE_VERSION on every web release; the activate handler purges old
    caches so stale assets can never linger after a deploy. */
 
-const CACHE_VERSION = 'ping-web-v0.21.0';
+const CACHE_VERSION = 'ping-web-v0.22.0';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -50,6 +50,10 @@ const SHELL_ASSETS = [
   '/shortcuts.js',
   '/themes.js',
   '/insights.js',
+  '/idb.js',
+  '/cache.js',
+  '/syncqueue.js',
+  '/validate.js',
 ];
 
 self.addEventListener('install', (event) => {

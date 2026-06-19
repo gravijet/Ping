@@ -28,7 +28,7 @@ const CATS = [
   ['Geräte', 'link'],
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.21.0';
+const WEB_CLIENT_VERSION = '0.22.0';
 
 // A no-op placeholder for `node.append(...)` (native append would turn a bare
 // null into the literal text "null") when a row is feature-flagged off.
@@ -283,6 +283,9 @@ function designTab(c) {
     selectRowLocal('Erscheinungsbild', prefs.get('theme'),
       [['system', 'Automatisch (System)'], ['light', 'Hell'], ['dark', 'Dunkel']],
       (v) => { prefs.set('theme', v); refreshThemeNav(); refreshDesign(c); }),
+    flag('amoledTheme') ? setRow('moon', 'AMOLED-Schwarz', {
+      sub: 'Reines Schwarz im dunklen Design – schont OLED-Displays.',
+      trailing: switchEl(prefs.get('amoled'), (v) => { prefs.set('amoled', v); refreshDesign(c); }) }) : noNode(),
     el('div', { class: 'list-section', text: 'Akzentfarbe' }),
     el('div', { class: 'swatches' }, [
       ...prefs.ACCENTS.map((color) =>

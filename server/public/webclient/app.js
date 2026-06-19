@@ -19,10 +19,13 @@ import { initLock } from './lock.js';
 import * as native from './native.js';
 import * as telemetry from './telemetry.js';
 import * as outbox from './outbox.js';
+import * as cache from './cache.js';
+import * as syncqueue from './syncqueue.js';
 import { flag } from './flags.js';
 import * as activity from './activity.js';
 import { mentionsUser } from './mentions.js';
 import { openShortcuts, shortcutsOpen } from './shortcuts.js';
+import { safeId } from './validate.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
@@ -32,6 +35,8 @@ prefs.applyVisual();
 // and the service worker that makes Ping installable + offline-capable.
 telemetry.install();
 outbox.install();
+cache.install();
+syncqueue.install();
 registerServiceWorker();
 
 const root = document.getElementById('app');
@@ -76,6 +81,7 @@ export async function doLogout(silent) {
   socket.disconnect();
   setToken(null);
   clearBlobCache();
+  cache.clearAll(); // never leave one account's chats cached for the next
   store.state.chats.clear();
   store.state.messages.clear();
   store.state.me = null;
@@ -92,6 +98,10 @@ let currentSection = 'chats';
 
 async function enterApp() {
   root.setAttribute('aria-busy', 'false');
+  // Offline-first: replay the cached chat list before the first paint so the app
+  // opens instantly (and works with no network); the live /chats fetch below
+  // reconciles it a moment later.
+  const hydrated = await cache.hydrateChats();
   buildShell();
   wireSocket();
   wireShortcuts();
@@ -103,12 +113,28 @@ async function enterApp() {
   try {
     const { chats } = await api.get('/chats');
     store.setChats(chats);
-  } catch (e) { toast(e.message || 'Chats konnten nicht geladen werden.', 'err'); }
+  } catch (e) {
+    // With a cache we stay usable offline — don't alarm the user.
+    if (!hydrated) toast(e.message || 'Chats konnten nicht geladen werden.', 'err');
+  }
   refreshBadges();
   refreshActivityBadge();
   updateConnectionBanner();
   handleDeepLink();
   telemetry.track('app_ready', { chats: store.state.chats.size });
+  prefetchModules();
+}
+
+// Once interactive, warm the lazily-imported section modules during idle time so
+// the first navigation to Status / Anrufe / Gespeichert / Gruppen feels instant.
+// Pure prefetch into the module + HTTP cache — any failure is ignored.
+let prefetched = false;
+function prefetchModules() {
+  if (prefetched) return; prefetched = true;
+  const mods = ['./status.js', './calls-view.js', './saved.js', './groups.js', './devices.js'];
+  const run = () => { for (const m of mods) import(m).catch(() => {}); };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 4000 });
+  else setTimeout(run, 2500);
 }
 
 function buildShell() {
@@ -189,6 +215,8 @@ function setSection(name) {
 function renderSection() {
   if (!sideHead) return;
   clear(sideHead); clear(sideBody);
+  // Subtle, reduced-motion-safe entrance on section switch.
+  sideBody.classList.remove('fade-in'); void sideBody.offsetWidth; sideBody.classList.add('fade-in');
   if (currentSection === 'chats') return renderChatsSection();
   if (currentSection === 'status') {
     sideBody.append(loading());
@@ -492,8 +520,8 @@ function applyIncomingMessage(msg) {
       activity.record({ kind: 'mention', chatId: msg.chatId, key: `mention:${msg.id}`,
         title: chat?.title || 'Erwähnung', text: 'Du wurdest erwähnt' });
     }
-    socket.send('delivered', { chatId: msg.chatId });
-    if (isActive) socket.send('read', { chatId: msg.chatId });
+    syncqueue.markDelivered(msg.chatId);
+    if (isActive) syncqueue.markRead(msg.chatId);
     maybeNotify(msg, chat, isActive);
   }
 }
@@ -640,15 +668,29 @@ function updateConnectionBanner() {
 function handleDeepLink() {
   try {
     const params = new URLSearchParams(location.search);
-    const chatId = params.get('chat');
+    const chatId = safeId(params.get('chat'));
     if (chatId && store.getChat(chatId)) openChatInShell(chatId);
+    // ?u=<userId> — open a person's profile card (and offer to start a chat).
+    const userId = safeId(params.get('u'));
+    if (userId && flag('profileLinks')) openProfileById(userId);
     // PWA app-shortcuts (manifest) land here as query params.
     if (params.get('compose') === '1') newChatModal();
     if (params.get('view') === 'activity' && flag('activityCenter')) activity.openActivityPanel(openChatInShell);
-    if (chatId || params.get('invite') || params.get('compose') || params.get('view')) {
+    if (chatId || userId || params.get('invite') || params.get('compose') || params.get('view')) {
       history.replaceState(null, '', location.pathname);
     }
   } catch { /* malformed URL — ignore */ }
+}
+
+// Resolve a shared ?u=<id> to its public profile card. Auth is already
+// established here (handleDeepLink runs after the session is up).
+async function openProfileById(userId) {
+  try {
+    const { user } = await api.get('/users/' + userId);
+    if (user) { const c = await import('./contacts.js'); c.openProfile(user); }
+  } catch (e) {
+    toast(e.status === 404 ? 'Dieses Profil gibt es nicht.' : (e.message || 'Profil konnte nicht geladen werden.'), 'err');
+  }
 }
 
 boot();

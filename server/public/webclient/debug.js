@@ -9,11 +9,19 @@ import * as store from './store.js';
 import * as prefs from './prefs.js';
 import * as telemetry from './telemetry.js';
 import * as outbox from './outbox.js';
+import * as cache from './cache.js';
+import * as syncqueue from './syncqueue.js';
 import { allFlags, setFlag, clearOverrides } from './flags.js';
-import { recentRequests } from './api.js';
+import { recentRequests, setOfflineSim, isOfflineSim } from './api.js';
 import * as socket from './socket.js';
 
 const fmtTime = (t) => new Date(t).toLocaleTimeString('de-DE', { hour12: false });
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 function section(title, body) {
   return el('div', { class: 'dbg-sec' }, [
@@ -61,6 +69,43 @@ function buildBody(rerender) {
     kv('Outbox', outbox.count()),
     kv('Aktiver Chat', store.state.activeId || '–'),
   ])));
+
+  // --- Performance --------------------------------------------------------
+  const perf = telemetry.getPerf();
+  const ms = (v) => (v != null ? `${v} ms` : '–');
+  wrap.appendChild(section('Leistung', el('div', { class: 'dbg-grid' }, perf ? [
+    kv('TTFB', ms(perf.ttfb)),
+    kv('DOM interaktiv', ms(perf.domInteractive)),
+    kv('First Paint', ms(perf.fcp)),
+    kv('Vollständig geladen', ms(perf.load)),
+    kv('Übertragen', perf.transferKb != null ? `${perf.transferKb} KB` : '–'),
+  ] : [kv('Status', 'nicht verfügbar')])));
+
+  // --- Cache & Offline ----------------------------------------------------
+  const offSim = el('div', { class: 'dbg-row' }, [
+    el('div', {}, [
+      el('div', { text: 'Offline simulieren' }),
+      el('div', { class: 'hint', text: 'Lässt alle Anfragen fehlschlagen – zum Testen von Outbox & Cache.' }),
+    ]),
+    switchEl(isOfflineSim(), (on) => {
+      setOfflineSim(on);
+      try { window.dispatchEvent(new Event(on ? 'offline' : 'online')); } catch { /* ignore */ }
+      toast(on ? 'Offline-Simulation aktiv.' : 'Offline-Simulation aus.');
+    }),
+  ]);
+  const cacheInfo = el('div', { class: 'dbg-grid' }, [el('div', { class: 'hint', text: 'Lade …' })]);
+  cache.stats().then((s) => cacheInfo.replaceChildren(
+    kv('IndexedDB', s.available ? 'verfügbar' : 'nicht verfügbar', s.available ? 'ok' : 'bad'),
+    kv('Chats (Cache)', s.chats),
+    kv('Verläufe', s.threads),
+    kv('Nachrichten', s.messages),
+    kv('Cache-Größe', fmtBytes(s.bytes)),
+    kv('Sync-Queue', syncqueue.count()),
+  )).catch(() => {});
+  const cacheFoot = el('button', { class: 'btn ghost sm', onClick: async () => {
+    await cache.clearAll(); rerender(); toast('Offline-Cache geleert.');
+  } }, 'Offline-Cache leeren');
+  wrap.appendChild(section('Cache & Offline', el('div', {}, [offSim, cacheInfo, cacheFoot])));
 
   // --- Diagnostics opt-in -------------------------------------------------
   const diag = el('div', { class: 'dbg-row' }, [
@@ -143,6 +188,9 @@ async function copyDiagnostics() {
     ua: navigator.userAgent,
     chats: store.state.chats.size,
     outbox: outbox.count(),
+    syncQueue: syncqueue.count(),
+    perf: telemetry.getPerf(),
+    offlineSim: isOfflineSim(),
     events: telemetry.getEvents().slice(-50),
     errors: telemetry.getErrors().slice(-20),
     requests: recentRequests().slice(-30),

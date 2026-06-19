@@ -30,6 +30,14 @@ export function emit(event, data) {
   if (set) for (const fn of [...set]) { try { fn(data); } catch (e) { console.error(e); } }
 }
 
+// Fire both the per-chat message event (views) and a generic 'messages' event
+// (cross-cutting listeners like the offline cache that can't subscribe to a
+// dynamic per-chat name). Keep these in lockstep.
+function messagesChanged(chatId) {
+  emit('messages:' + chatId);
+  emit('messages', chatId);
+}
+
 // ---- chats ----------------------------------------------------------------
 export function setChats(list) {
   state.chats = new Map(list.map((c) => [c.id, c]));
@@ -52,14 +60,14 @@ export function setHistory(chatId, msgs, { all = false } = {}) {
   const asc = [...msgs].sort((a, b) => a.createdAt - b.createdAt);
   state.messages.set(chatId, asc);
   if (all) state.loadedAll.add(chatId);
-  emit('messages:' + chatId);
+  messagesChanged(chatId);
 }
 export function prependHistory(chatId, older, { all = false } = {}) {
   const cur = state.messages.get(chatId) || [];
   const asc = [...older].sort((a, b) => a.createdAt - b.createdAt);
   state.messages.set(chatId, [...asc, ...cur]);
   if (all) state.loadedAll.add(chatId);
-  emit('messages:' + chatId);
+  messagesChanged(chatId);
 }
 export function getHistory(chatId) { return state.messages.get(chatId) || []; }
 
@@ -68,12 +76,12 @@ export function addMessage(chatId, msg) {
   const i = cur.findIndex((m) => m.id === msg.id);
   if (i >= 0) cur[i] = msg; else cur.push(msg);
   state.messages.set(chatId, cur);
-  emit('messages:' + chatId);
+  messagesChanged(chatId);
 }
 export function replaceMessage(chatId, msg) {
   const cur = state.messages.get(chatId) || [];
   const i = cur.findIndex((m) => m.id === msg.id);
-  if (i >= 0) { cur[i] = msg; emit('messages:' + chatId); }
+  if (i >= 0) { cur[i] = msg; messagesChanged(chatId); }
 }
 export function removeMessage(chatId, msgId) {
   const cur = state.messages.get(chatId) || [];

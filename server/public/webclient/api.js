@@ -8,6 +8,13 @@ const TOKEN_KEY = 'ping.token';
 let token = localStorage.getItem(TOKEN_KEY) || null;
 const onUnauthorizedCbs = [];
 
+// Developer offline simulation (debug panel): when on, every request fails as if
+// the network were down, so the offline-first paths (outbox, cache) can be
+// exercised on demand without actually pulling the cable.
+let offlineSim = false;
+export function setOfflineSim(on) { offlineSim = !!on; }
+export function isOfflineSim() { return offlineSim; }
+
 export function getToken() { return token; }
 export function setToken(t) {
   token = t || null;
@@ -42,6 +49,10 @@ async function request(method, path, body, { raw = false, headers = {} } = {}) {
   }
   const started = performance.now();
   const logPath = path.split('?')[0]; // drop query strings (may carry ids/tokens)
+  if (offlineSim) {
+    logRequest(method, logPath, 0, 0);
+    throw new ApiError(0, 'Offline (Simulation).');
+  }
   let res;
   try {
     res = await fetch(BASE + path, opts);
@@ -91,6 +102,7 @@ export function authedObjectUrl(path, version = 0) {
   const key = `${path}@${version}`;
   if (blobCache.has(key)) return blobCache.get(key);
   const p = (async () => {
+    if (offlineSim) return null;
     try {
       const res = await fetch(BASE + path.replace(/^\/api/, ''), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},

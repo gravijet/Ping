@@ -62,13 +62,20 @@ export function shareMessage(msg) {
   return shareOrCopy({ title: 'Ping', text });
 }
 
-/** Share a link to a person (their name + the Ping invite). */
+/** A deep link that opens a person's profile card (handled by app.js on load). */
+export function profileUrl(userId) {
+  return `${location.origin}/?u=${encodeURIComponent(userId)}`;
+}
+
+/** Share a link to a person. Uses a ?u= deep link that opens their profile (and
+    offers to start a chat) when the recipient already uses Ping; falls back to
+    the generic invite when we don't have an id. */
 export function shareProfile(user) {
   const name = user?.displayName || 'jemandem';
   return shareOrCopy({
     title: `${name} auf Ping`,
     text: `Schreib ${name} auf Ping.`,
-    url: inviteUrl(),
+    url: user?.id ? profileUrl(user.id) : inviteUrl(),
   });
 }
 

@@ -81,6 +81,33 @@ export function getEvents() { return events.slice(); }
 export function getErrors() { return errors.slice(); }
 export function clearAll() { events.length = 0; errors = []; persistErrors(); }
 
+// ---- performance metrics --------------------------------------------------
+// Reduce the browser's Navigation + Paint timing entries to a few human numbers
+// (milliseconds, rounded). Pure — exported for unit testing — so the collection
+// in getPerf() is a thin wrapper around the real Performance API.
+export function shapePerf(nav, paintEntries = []) {
+  if (!nav) return null;
+  const fcp = (paintEntries.find((p) => p.name === 'first-contentful-paint') || {}).startTime;
+  const ms = (v) => (typeof v === 'number' && isFinite(v) && v >= 0 ? Math.round(v) : null);
+  return {
+    ttfb: ms(nav.responseStart),                                  // time to first byte
+    domContentLoaded: ms(nav.domContentLoadedEventEnd),
+    domInteractive: ms(nav.domInteractive),
+    load: ms(nav.loadEventEnd),
+    fcp: ms(fcp),                                                 // first contentful paint
+    transferKb: typeof nav.transferSize === 'number' ? Math.round(nav.transferSize / 1024) : null,
+  };
+}
+
+/** Collect the current page's performance metrics, or null if unavailable. */
+export function getPerf() {
+  try {
+    const nav = performance.getEntriesByType?.('navigation')?.[0];
+    const paint = performance.getEntriesByType?.('paint') || [];
+    return shapePerf(nav, paint);
+  } catch { return null; }
+}
+
 // ---- sending (opt-in only) ------------------------------------------------
 function post(path, body) {
   try {
@@ -128,4 +155,12 @@ export function install() {
   });
 
   track('app_open');
+
+  // Record a one-off performance sample after the page settles. Kept local for
+  // the debug panel; only the bare 'perf' event name is ever sent (opt-in).
+  if (flag('perfMetrics')) {
+    const sample = () => { const perf = getPerf(); if (perf) track('perf', perf); };
+    if (document.readyState === 'complete') setTimeout(sample, 0);
+    else window.addEventListener('load', () => setTimeout(sample, 0), { once: true });
+  }
 }
