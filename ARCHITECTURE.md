@@ -95,6 +95,29 @@ read/delivered acks). The cache is scoped to one account via an `owner` record
 and wiped on logout, so a shared device never leaks one account's data to the
 next. All three degrade gracefully when IndexedDB/localStorage is unavailable.
 
+## In-app updates (Android OTA)
+The Android client self-updates from the same host that serves the marketing
+site. The server exposes `GET /download/info` (universal build + per-ABI splits,
+each with size, sha256 and a version code) and streams the APKs from
+`server/public/downloads/`.
+
+The app's `UpdateService` (`update_service_io.dart`) picks the split matching the
+device's primary ABI (a much smaller download), compares version codes, and hands
+the download to **Android's system `DownloadManager`** through the `ping/native`
+MethodChannel (`MainActivity.kt`). Because DownloadManager runs in the system
+process, the download **survives the app being backgrounded or killed**, shows a
+system progress notification, and resumes across connectivity changes. The
+in-flight id is persisted (`shared_preferences`), so reopening the update sheet
+**rejoins** a running download or offers to install a finished one. Before
+launching the installer, the downloaded bytes are verified against the manifest's
+size + sha256; install goes through a grantable `content://` URI. An in-process
+HTTP stream remains as a fallback when DownloadManager can't enqueue.
+
+Downloads are **resumable**: `download.js` answers `Range:` requests with `206
+Partial Content` (plus `Accept-Ranges`, `ETag`, `Last-Modified`) for the APK,
+its splits and the Windows `.exe`. The updater also emits an anonymous OTA funnel
+(`update_offered/started/downloaded/install_launched/failed`) to `/api/telemetry`.
+
 ## Diagnostics pipeline (opt-in)
 `telemetry.js` keeps a **local** event/crash buffer for the debug panel. Only
 when the user enables *Diagnose & Absturzberichte* does it `sendBeacon`

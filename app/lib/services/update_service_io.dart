@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -7,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'update_info.dart';
 
@@ -16,8 +18,16 @@ import 'update_info.dart';
 class UpdateService {
   static const _native = MethodChannel('ping/native');
 
+  /// SharedPreferences key holding the JSON of the one in-flight background
+  /// download (id + which build it's for), so it survives the app being killed.
+  static const _kPending = 'ping_pending_apk';
+
   bool get supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Whether downloads can be handed to the OS to run in the background. True on
+  /// Android (system DownloadManager); the in-process [download] is the fallback.
+  bool get supportsBackgroundDownload => supported;
 
   PackageInfo? _package;
   String? _abi;
@@ -236,6 +246,178 @@ class UpdateService {
       return result.type == ResultType.done;
     } catch (_) {
       return false;
+    }
+  }
+
+  // ---- Background download (system DownloadManager) ------------------------
+  //
+  // Unlike [download], which streams bytes inside the app's own isolate (and so
+  // stalls the moment the app is backgrounded or killed), these hand the fetch
+  // to Android's DownloadManager. It runs in the system process, shows its own
+  // progress notification, retries across connectivity changes, and is still
+  // there to be rejoined when the user returns — even after a cold start.
+
+  /// The stable on-disk filename for [info]'s APK in the DownloadManager dir.
+  String _fileNameFor(UpdateInfo info) =>
+      'ping-${info.build.replaceAll('+', '-')}.apk';
+
+  /// Start a background download of [info] and remember it. Returns the
+  /// DownloadManager id, or null if it couldn't be enqueued.
+  Future<int?> startBackgroundDownload(
+    UpdateInfo info, {
+    bool allowMetered = true,
+  }) async {
+    if (!supported) return null;
+    try {
+      final raw = await _native.invokeMethod<dynamic>('apkDownloadStart', {
+        'url': info.downloadUrl,
+        'fileName': _fileNameFor(info),
+        'title': 'Ping ${info.version}',
+        'allowMetered': allowMetered,
+      });
+      final id = raw is int ? raw : int.tryParse('${raw ?? ''}');
+      if (id == null || id < 0) return null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _kPending,
+        jsonEncode({
+          'id': id,
+          'build': info.build,
+          'version': info.version,
+          'sha256': info.sha256,
+          'size': info.size,
+        }),
+      );
+      return id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Current progress of background download [id].
+  Future<ApkDownloadProgress> backgroundStatus(int id) async {
+    if (!supported) return ApkDownloadProgress.none;
+    try {
+      final res =
+          await _native.invokeMethod<dynamic>('apkDownloadStatus', {'id': id});
+      if (res is! Map) return ApkDownloadProgress.none;
+      return ApkDownloadProgress(
+        state: apkStateFromString(res['status']?.toString()),
+        bytes: (res['bytes'] as num?)?.toInt() ?? 0,
+        total: (res['total'] as num?)?.toInt() ?? 0,
+        reason: (res['reason'] as num?)?.toInt() ?? 0,
+        path: res['path']?.toString(),
+      );
+    } catch (_) {
+      return ApkDownloadProgress.none;
+    }
+  }
+
+  /// A download from an earlier session that's still relevant to [info]. Stale
+  /// records (a different build than the one now on offer) are dropped. Returns
+  /// null when there's nothing to rejoin.
+  Future<PendingApkDownload?> pendingDownload(UpdateInfo info) async {
+    if (!supported) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kPending);
+      if (raw == null) return null;
+      final j = jsonDecodeSafe(raw);
+      final id = (j?['id'] as num?)?.toInt();
+      final build = j?['build']?.toString();
+      if (id == null || build == null) {
+        await prefs.remove(_kPending);
+        return null;
+      }
+      if (build != info.build) {
+        // The user is now being offered a newer build than the one we were
+        // fetching; the old download is irrelevant — cancel and forget it.
+        await cancelBackground(id);
+        return null;
+      }
+      return PendingApkDownload(id: id, build: build);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Verify a *finished* download's bytes against the advertised size/sha256 and
+  /// return its local path. Null when the file is missing or fails the check —
+  /// the same integrity guarantee the in-process [download] gives.
+  Future<String?> verifiedPath(
+      ApkDownloadProgress status, UpdateInfo info) async {
+    if (!supported) return null;
+    final path = status.path;
+    if (path == null) return null;
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      if (info.size > 0 && await file.length() != info.size) return null;
+      if (info.sha256.isNotEmpty && !await _matchesHash(file, info.sha256)) {
+        return null;
+      }
+      return path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Hand a finished background download to the system package installer using a
+  /// grantable content:// URI (more reliable than a raw path on newer Android).
+  Future<bool> installBackground(int id) async {
+    if (!supported) return false;
+    try {
+      final ok = await _native.invokeMethod<bool>('apkInstall', {'id': id});
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Abort an in-flight background download and forget it.
+  Future<void> cancelBackground(int id) async {
+    if (supported) {
+      try {
+        await _native.invokeMethod('apkDownloadCancel', {'id': id});
+      } catch (_) {
+        /* best effort */
+      }
+    }
+    await clearPending();
+  }
+
+  /// Best-effort, fire-and-forget OTA funnel event (anonymous aggregate count on
+  /// the server). Never throws and never blocks the update flow.
+  Future<void> reportEvent(String baseUrl, String name) async {
+    if (!supported) return;
+    final root = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    try {
+      await http
+          .post(
+            Uri.parse('$root/api/telemetry'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'app': 'android',
+              'events': [
+                {'name': name}
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      /* telemetry is best-effort */
+    }
+  }
+
+  /// Forget the persisted pending-download record (without touching the file).
+  Future<void> clearPending() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kPending);
+    } catch (_) {
+      /* best effort */
     }
   }
 }

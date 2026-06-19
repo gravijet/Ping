@@ -97,3 +97,48 @@ test('a per-ABI download serves that split; unknown ABI is 404', async () => {
   const miss = await fetch(base + '/download/abi/x86_64');
   assert.equal(miss.status, 404);
 });
+
+test('the apk download advertises range support', async () => {
+  const res = await fetch(base + '/download');
+  assert.equal(res.headers.get('accept-ranges'), 'bytes');
+  // A validator lets a client confirm the file is unchanged before resuming.
+  assert.ok(res.headers.get('etag'));
+  assert.ok(res.headers.get('last-modified'));
+  await res.arrayBuffer();
+});
+
+test('a byte range returns 206 with the requested slice', async () => {
+  const res = await fetch(base + '/download', { headers: { Range: 'bytes=0-3' } });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('content-range'), `bytes 0-3/${uni.size}`);
+  assert.equal(res.headers.get('content-length'), '4');
+  const body = Buffer.from(await res.arrayBuffer());
+  assert.equal(body.toString(), 'UNIV');
+});
+
+test('a suffix range returns the final bytes', async () => {
+  const res = await fetch(base + '/download', { headers: { Range: 'bytes=-4' } });
+  assert.equal(res.status, 206);
+  assert.equal(res.headers.get('content-range'), `bytes ${uni.size - 4}-${uni.size - 1}/${uni.size}`);
+  const body = Buffer.from(await res.arrayBuffer());
+  assert.equal(body.toString(), 'YTES');
+});
+
+test('an unsatisfiable range is rejected with 416', async () => {
+  const res = await fetch(base + '/download', { headers: { Range: 'bytes=999999-' } });
+  assert.equal(res.status, 416);
+  assert.equal(res.headers.get('content-range'), `bytes */${uni.size}`);
+  await res.arrayBuffer();
+});
+
+test('a resumed download (two ranges) reassembles the whole apk', async () => {
+  const first = await fetch(base + '/download', { headers: { Range: 'bytes=0-9' } });
+  const rest = await fetch(base + '/download', { headers: { Range: 'bytes=10-' } });
+  assert.equal(first.status, 206);
+  assert.equal(rest.status, 206);
+  const joined = Buffer.concat([
+    Buffer.from(await first.arrayBuffer()),
+    Buffer.from(await rest.arrayBuffer()),
+  ]);
+  assert.equal(crypto.createHash('sha256').update(joined).digest('hex'), uni.sha256);
+});

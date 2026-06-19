@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -5,8 +7,10 @@ import '../services/app_state.dart';
 import '../services/update_service.dart';
 import 'changelog_view.dart';
 
-/// Show the in-app update flow: checks for the newest build, then downloads and
-/// launches the Android package installer with a live progress bar.
+/// Show the in-app update flow: checks for the newest build, then downloads it in
+/// the background (Android's DownloadManager) and launches the package installer.
+/// The download keeps running if the user leaves the app, and is rejoined the
+/// next time this sheet opens.
 Future<void> showUpdateSheet(BuildContext context) {
   return showModalBottomSheet(
     context: context,
@@ -28,9 +32,14 @@ enum _Phase { checking, available, upToDate, downloading, installing, error }
 class _UpdateSheetState extends State<_UpdateSheet> {
   _Phase _phase = _Phase.checking;
   UpdateInfo? _info;
-  double _progress = 0;
+  UpdateService? _updater;
+  String _baseUrl = '';
+  double? _progress; // null → indeterminate
   String _current = '';
-  bool _downloaded = false; // a verified APK for this build is already cached
+  bool _downloaded = false; // a verified APK for this build is ready to install
+  int? _dlId; // active/finished background-download id (install handle)
+  String? _cachedPath; // legacy in-process download path (install handle)
+  Timer? _poll;
   List<Map<String, dynamic>> _changelog = const [];
 
   @override
@@ -39,18 +48,26 @@ class _UpdateSheetState extends State<_UpdateSheet> {
     _check();
   }
 
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
   Future<void> _check() async {
     final state = context.read<AppState>();
-    _current = await state.updater.currentVersion();
-    if (!state.updater.supported) {
+    final updater = _updater = state.updater;
+    _baseUrl = state.baseUrl;
+    _current = await updater.currentVersion();
+    if (!updater.supported) {
       if (mounted) setState(() => _phase = _Phase.upToDate);
       return;
     }
     // Use the cached result if we already have one, otherwise fetch fresh.
     var info = state.availableUpdate;
     if (info == null) {
-      final fetched = await state.updater.fetch(state.baseUrl);
-      if (fetched != null && await state.updater.isNewer(fetched)) {
+      final fetched = await updater.fetch(state.baseUrl);
+      if (fetched != null && await updater.isNewer(fetched)) {
         info = fetched;
         state.availableUpdate = fetched;
       }
@@ -60,28 +77,138 @@ class _UpdateSheetState extends State<_UpdateSheet> {
       _info = info;
       _phase = info != null ? _Phase.available : _Phase.upToDate;
     });
-    // Show what's new for the offered version, if the changelog has an entry.
-    if (info != null) {
-      // If the user already pulled this build down (and just cancelled the
-      // install), we can offer to install it straight away — no re-download.
-      final cached = await state.updater.cachedApk(info);
-      if (mounted) setState(() => _downloaded = cached != null);
-      final cl = await state.changelogFor(info.version);
-      if (mounted) setState(() => _changelog = cl);
+    if (info == null) return;
+    unawaited(updater.reportEvent(state.baseUrl, 'update_offered'));
+
+    // What's new for the offered version, if the changelog has an entry.
+    final cl = await state.changelogFor(info.version);
+    if (mounted) setState(() => _changelog = cl);
+
+    // Rejoin a download that ran (or finished) while we were away — the app may
+    // have been backgrounded or even killed since it started.
+    final pending = await updater.pendingDownload(info);
+    if (pending != null) {
+      final status = await updater.backgroundStatus(pending.id);
+      if (status.isDone) {
+        final path = await updater.verifiedPath(status, info);
+        if (path != null) {
+          _dlId = pending.id;
+          if (mounted) setState(() => _downloaded = true);
+          return;
+        }
+        await updater.clearPending(); // finished but unverifiable → re-offer
+      } else if (status.isActive) {
+        _dlId = pending.id;
+        if (mounted) {
+          setState(() {
+            _phase = _Phase.downloading;
+            _progress = status.fraction;
+          });
+        }
+        _startPolling();
+        return;
+      } else {
+        await updater.clearPending();
+      }
+    }
+
+    // Legacy in-process cache (a download finished the old way before upgrading).
+    final cached = await updater.cachedApk(info);
+    if (mounted && cached != null) {
+      setState(() {
+        _downloaded = true;
+        _cachedPath = cached;
+      });
     }
   }
 
-  Future<void> _downloadAndInstall() async {
-    final state = context.read<AppState>();
+  /// Begin (or, when already downloaded, skip straight to installing).
+  Future<void> _start() async {
+    final updater = _updater;
     final info = _info;
-    if (info == null) return;
+    if (updater == null || info == null) return;
+    if (_downloaded) {
+      await _install();
+      return;
+    }
+    unawaited(updater.reportEvent(_baseUrl, 'update_started'));
     setState(() {
-      // A cached build installs immediately; only show the progress bar when we
-      // actually have to fetch bytes.
-      _phase = _downloaded ? _Phase.installing : _Phase.downloading;
-      _progress = 0;
+      _phase = _Phase.downloading;
+      _progress = null;
     });
-    final String? path = await state.updater.download(
+    if (updater.supportsBackgroundDownload) {
+      final id = await updater.startBackgroundDownload(info);
+      if (!mounted) return;
+      if (id == null) {
+        // The OS download couldn't start — fall back to an in-process fetch.
+        await _downloadInProcess();
+        return;
+      }
+      _dlId = id;
+      _startPolling();
+    } else {
+      await _downloadInProcess();
+    }
+  }
+
+  void _startPolling() {
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(milliseconds: 600), (t) async {
+      final updater = _updater;
+      final info = _info;
+      final id = _dlId;
+      if (updater == null || info == null || id == null) {
+        t.cancel();
+        return;
+      }
+      final status = await updater.backgroundStatus(id);
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (status.isActive) {
+        setState(() {
+          _phase = _Phase.downloading;
+          _progress = status.fraction;
+        });
+      } else if (status.isDone) {
+        t.cancel();
+        final path = await updater.verifiedPath(status, info);
+        if (!mounted) return;
+        if (path == null) {
+          await updater.clearPending();
+          unawaited(updater.reportEvent(_baseUrl, 'update_failed'));
+          setState(() => _phase = _Phase.error);
+          return;
+        }
+        unawaited(updater.reportEvent(_baseUrl, 'update_downloaded'));
+        setState(() {
+          _downloaded = true;
+          _progress = 1.0;
+        });
+        await _install();
+      } else {
+        t.cancel();
+        await updater.clearPending();
+        unawaited(updater.reportEvent(_baseUrl, 'update_failed'));
+        if (mounted) setState(() => _phase = _Phase.error);
+      }
+    });
+  }
+
+  /// Fallback path: stream the APK inside the app (only when the OS download
+  /// isn't available). Doesn't survive backgrounding — hence the fallback.
+  Future<void> _downloadInProcess() async {
+    final updater = _updater;
+    final info = _info;
+    if (updater == null || info == null) return;
+    if (mounted) {
+      setState(() {
+        _phase = _Phase.downloading;
+        _progress = 0;
+      });
+    }
+    final path = await updater.download(
       info,
       onProgress: (p) {
         if (mounted) setState(() => _progress = p);
@@ -89,15 +216,33 @@ class _UpdateSheetState extends State<_UpdateSheet> {
     );
     if (!mounted) return;
     if (path == null) {
+      unawaited(updater.reportEvent(_baseUrl, 'update_failed'));
       setState(() => _phase = _Phase.error);
       return;
     }
-    setState(() => _phase = _Phase.installing);
-    final ok = await state.updater.install(path);
+    unawaited(updater.reportEvent(_baseUrl, 'update_downloaded'));
+    _cachedPath = path;
+    await _install();
+  }
+
+  Future<void> _install() async {
+    final updater = _updater;
+    if (updater == null) return;
+    if (mounted) setState(() => _phase = _Phase.installing);
+    bool ok;
+    if (_dlId != null) {
+      ok = await updater.installBackground(_dlId!);
+    } else if (_cachedPath != null) {
+      ok = await updater.install(_cachedPath!);
+    } else {
+      ok = false;
+    }
     if (!mounted) return;
     if (!ok) {
+      unawaited(updater.reportEvent(_baseUrl, 'update_failed'));
       setState(() => _phase = _Phase.error);
     } else {
+      unawaited(updater.reportEvent(_baseUrl, 'update_install_launched'));
       // The system installer is now in front; close the sheet.
       Navigator.of(context).maybePop();
     }
@@ -181,36 +326,20 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           ],
           if (_downloaded) ...[
             const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle_rounded,
-                      size: 18, color: scheme.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Bereits heruntergeladen – du kannst direkt installieren, '
-                      'ohne erneut zu laden.',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          height: 1.35,
-                          color: scheme.onSurface),
-                    ),
-                  ),
-                ],
-              ),
+            _infoBox(
+              scheme,
+              Icons.check_circle_rounded,
+              'Bereits heruntergeladen – du kannst direkt installieren, '
+              'ohne erneut zu laden.',
+              tint: scheme.primaryContainer.withValues(alpha: 0.5),
+              icon: scheme.primary,
             ),
           ],
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _downloadAndInstall,
+              onPressed: _start,
               icon: Icon(_downloaded
                   ? Icons.install_mobile_rounded
                   : Icons.download_rounded),
@@ -221,24 +350,44 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Android fragt dich anschließend, ob die Installation erlaubt ist.',
+            _downloaded
+                ? 'Android fragt dich anschließend, ob die Installation erlaubt ist.'
+                : 'Der Download läuft im Hintergrund weiter, auch wenn du Ping '
+                    'verlässt. Android fragt danach, ob installiert werden darf.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
         ];
       case _Phase.downloading:
+        final pct = _progress;
         return [
           const Text('Wird heruntergeladen …',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 18),
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-                value: _progress > 0 ? _progress : null, minHeight: 8),
+            child: LinearProgressIndicator(value: pct, minHeight: 8),
           ),
           const SizedBox(height: 8),
-          Text('${(_progress * 100).round()} %',
+          Text(pct != null ? '${(pct * 100).round()} %' : 'Wird vorbereitet …',
               style: TextStyle(color: scheme.onSurfaceVariant)),
+          const SizedBox(height: 14),
+          _infoBox(
+            scheme,
+            Icons.cloud_download_rounded,
+            'Du kannst Ping jetzt schließen oder zu einer anderen App wechseln – '
+            'der Download läuft im Hintergrund weiter und meldet sich, wenn er '
+            'fertig ist.',
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.minimize_rounded),
+              label: const Text('Im Hintergrund laden'),
+            ),
+          ),
         ];
       case _Phase.installing:
         return const [
@@ -262,31 +411,12 @@ class _UpdateSheetState extends State<_UpdateSheet> {
             style: TextStyle(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline_rounded,
-                    size: 18, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Meldet Android „App nicht installiert“? Deinstalliere die '
-                    'alte Version einmalig und installiere die neue danach – '
-                    'künftige Updates laufen dann automatisch.',
-                    style: TextStyle(
-                        fontSize: 12.5,
-                        height: 1.35,
-                        color: scheme.onSurfaceVariant),
-                  ),
-                ),
-              ],
-            ),
+          _infoBox(
+            scheme,
+            Icons.info_outline_rounded,
+            'Meldet Android „App nicht installiert"? Deinstalliere die alte '
+            'Version einmalig und installiere die neue danach – künftige Updates '
+            'laufen dann automatisch.',
           ),
           const SizedBox(height: 18),
           Row(
@@ -300,7 +430,7 @@ class _UpdateSheetState extends State<_UpdateSheet> {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: _downloadAndInstall,
+                  onPressed: _start,
                   child: const Text('Erneut versuchen'),
                 ),
               ),
@@ -308,6 +438,31 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           ),
         ];
     }
+  }
+
+  Widget _infoBox(ColorScheme scheme, IconData glyph, String text,
+      {Color? tint, Color? icon}) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tint ?? scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(glyph, size: 18, color: icon ?? scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                  fontSize: 12.5, height: 1.35, color: scheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _versionRow(String label, String value, ColorScheme scheme,

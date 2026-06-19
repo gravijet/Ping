@@ -9,6 +9,8 @@ import 'update_info.dart';
 class UpdateService {
   bool get supported => false;
 
+  bool get supportsBackgroundDownload => false;
+
   PackageInfo? _package;
   Future<PackageInfo?> _info() async {
     try {
@@ -36,4 +38,28 @@ class UpdateService {
       null;
 
   Future<bool> install(String path) async => false;
+
+  // Background-download surface — no-ops on web/desktop (those builds update by
+  // reloading, not by downloading an APK). Mirrors the Android API so the shared
+  // update UI compiles unchanged.
+  Future<int?> startBackgroundDownload(UpdateInfo info,
+          {bool allowMetered = true}) async =>
+      null;
+
+  Future<ApkDownloadProgress> backgroundStatus(int id) async =>
+      ApkDownloadProgress.none;
+
+  Future<PendingApkDownload?> pendingDownload(UpdateInfo info) async => null;
+
+  Future<String?> verifiedPath(
+          ApkDownloadProgress status, UpdateInfo info) async =>
+      null;
+
+  Future<bool> installBackground(int id) async => false;
+
+  Future<void> cancelBackground(int id) async {}
+
+  Future<void> clearPending() async {}
+
+  Future<void> reportEvent(String baseUrl, String name) async {}
 }

@@ -151,12 +151,66 @@ function apkInfo() {
   return cache;
 }
 
-function streamApk(res, info) {
-  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  res.setHeader('Content-Disposition', `attachment; filename="ping-${info.version}.apk"`);
-  res.setHeader('Content-Length', info.size);
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  fs.createReadStream(info.full).pipe(res);
+// Stream a file with HTTP range support, so a client whose connection drops
+// mid-download (e.g. Android's DownloadManager when the network flaps) can ask
+// for just the remaining bytes instead of starting over. Advertises
+// `Accept-Ranges` + a stable validator (ETag/Last-Modified) and answers a
+// `Range:` request with 206 Partial Content; a malformed/unsatisfiable range
+// gets a 416. Falls back to a normal 200 full-body stream otherwise.
+function sendFileRanged(req, res, full, size, { type, filename, maxAge = 300 } = {}) {
+  res.setHeader('Content-Type', type);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', `public, max-age=${maxAge}`);
+  if (filename) {
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  }
+  // A validator lets DownloadManager confirm (via If-Range) that the file hasn't
+  // changed before it resumes a partial download.
+  try {
+    const mtimeMs = fs.statSync(full).mtimeMs;
+    res.setHeader('Last-Modified', new Date(mtimeMs).toUTCString());
+    res.setHeader('ETag', `"${size}-${Math.round(mtimeMs)}"`);
+  } catch {
+    /* validators are best-effort */
+  }
+
+  const range = req.headers.range;
+  if (!range) {
+    res.setHeader('Content-Length', size);
+    return fs.createReadStream(full).pipe(res);
+  }
+
+  const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!m || (m[1] === '' && m[2] === '')) {
+    res.status(416).setHeader('Content-Range', `bytes */${size}`);
+    return res.end();
+  }
+  let start;
+  let end;
+  if (m[1] === '') {
+    // Suffix range: the final N bytes.
+    const n = parseInt(m[2], 10);
+    start = Math.max(0, size - n);
+    end = size - 1;
+  } else {
+    start = parseInt(m[1], 10);
+    end = m[2] === '' ? size - 1 : Math.min(parseInt(m[2], 10), size - 1);
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+    res.status(416).setHeader('Content-Range', `bytes */${size}`);
+    return res.end();
+  }
+  res.status(206);
+  res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+  res.setHeader('Content-Length', end - start + 1);
+  return fs.createReadStream(full, { start, end }).pipe(res);
+}
+
+function streamApk(req, res, info) {
+  sendFileRanged(req, res, info.full, info.size, {
+    type: 'application/vnd.android.package-archive',
+    filename: `ping-${info.version}.apk`,
+  });
 }
 
 // The Windows installer, hosted locally just like the APK. Returns the newest
@@ -269,15 +323,14 @@ export function mountDownloads(app, publicDir) {
   // Windows installer: streams the locally-hosted .exe (newest in windowsDir),
   // exactly like the APK download. Falls back to a redirect if only a download
   // URL is configured and no local file exists.
-  const serveWindows = (_req, res) => {
+  const serveWindows = (req, res) => {
     const win = windowsInfo();
     if (win) {
       const name = `Ping-Setup-${win.version || 'latest'}.exe`;
-      res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
-      res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-      res.setHeader('Content-Length', win.size);
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      return fs.createReadStream(win.full).pipe(res);
+      return sendFileRanged(req, res, win.full, win.size, {
+        type: 'application/vnd.microsoft.portable-executable',
+        filename: name,
+      });
     }
     if (config.windowsDownloadUrl) {
       return res.redirect(302, config.windowsDownloadUrl);
@@ -292,7 +345,7 @@ export function mountDownloads(app, publicDir) {
 
   // The Android download itself, under several friendly URLs (/download/android
   // is the explicit-platform alias alongside the bare /download default).
-  const serve = (_req, res) => {
+  const serve = (req, res) => {
     const info = apkInfo();
     if (!info) {
       return res
@@ -300,7 +353,7 @@ export function mountDownloads(app, publicDir) {
         .type('text/plain; charset=utf-8')
         .send('Noch kein Ping-Build verfügbar. Bitte später erneut versuchen.');
     }
-    streamApk(res, info);
+    streamApk(req, res, info);
   };
   app.get('/download', serve);
   app.get('/download/android', serve);
@@ -320,13 +373,9 @@ export function mountDownloads(app, publicDir) {
         .type('text/plain; charset=utf-8')
         .send('Für diese Architektur gibt es keinen passenden Build.');
     }
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="ping-${info.version}-${req.params.abi}.apk"`
-    );
-    res.setHeader('Content-Length', v.size);
-    res.setHeader('Cache-Control', 'public, max-age=300');
-    fs.createReadStream(v.full).pipe(res);
+    sendFileRanged(req, res, v.full, v.size, {
+      type: 'application/vnd.android.package-archive',
+      filename: `ping-${info.version}-${req.params.abi}.apk`,
+    });
   });
 }

@@ -133,6 +133,11 @@ installierbare **Progressive Web App**:
 - **Tastenkürzel-Übersicht** – Taste `?` zeigt alle Shortcuts gruppiert an.
 - **Update-Hinweis** – nach einem Deploy bietet ein Banner „Neu laden" an, statt
   Assets stillschweigend auszutauschen.
+- **Hintergrund-Updates (Android)** – das In-App-Update lädt das neue APK über
+  Androids System-Downloadmanager. Der Download **läuft weiter, wenn du Ping
+  verlässt oder schließt**, zeigt eine System-Benachrichtigung mit Fortschritt
+  und wird beim erneuten Öffnen fortgesetzt; abgebrochene Downloads setzen dank
+  Range-Requests am Server dort fort, wo sie waren – statt neu zu starten.
 
 ---
 
