@@ -14,6 +14,9 @@ import 'admin_screen.dart';
 import 'backup_screen.dart';
 import 'design_screen.dart';
 import 'device_screen.dart';
+import 'dev_panel_screen.dart';
+import 'diagnostics_screen.dart';
+import 'insights_screen.dart';
 import 'link_device_screen.dart';
 import 'profile_view_screen.dart';
 import 'saved_messages_screen.dart';
@@ -166,6 +169,12 @@ class SettingsScreen extends StatelessWidget {
           _navTile(context, Icons.backup_outlined, 'Backup',
               'Tägliche Server-Sicherung & eigener Export',
               () => const BackupScreen()),
+          _navTile(context, Icons.insights_outlined, 'Deine Statistik',
+              'Private Nutzungszahlen — nur auf diesem Gerät',
+              () => const InsightsScreen()),
+          _navTile(context, Icons.bug_report_outlined, 'Diagnose',
+              'Fehlerberichte einsehen & teilen',
+              () => const DiagnosticsScreen()),
           if (me?.isAdmin == true) ...[
             const Divider(),
             _SectionHeader('Verwaltung'),
@@ -181,11 +190,12 @@ class SettingsScreen extends StatelessWidget {
           ],
           const Divider(),
           _SectionHeader('Über'),
-          ListTile(
-            leading: const PingLogo(size: 40),
-            title: const Text('Ping'),
-            subtitle: const Text('Version 0.24.0 — schnell, sicher, in Blau.'),
-          ),
+          const _VersionTile(),
+          if (state.settings.devOptionsUnlocked)
+            _navTile(context, Icons.developer_mode_rounded,
+                'Entwickleroptionen',
+                'Feature-Flags, Performance, Diagnose',
+                () => const DevPanelScreen()),
           ListTile(
             leading: Icon(
               state.availableUpdate != null
@@ -221,7 +231,8 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Ping',
-              applicationVersion: '0.24.0',
+              applicationVersion:
+                  state.runningVersion.isEmpty ? '0.26.0' : state.runningVersion,
             ),
           ),
           const SizedBox(height: 8),
@@ -359,6 +370,54 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+}
+
+/// The "Über → Ping" row. Tapping it seven times unlocks the developer options
+/// (the familiar Android build-number gesture), then a "NEU" hint and an
+/// Entwickleroptionen entry appear above.
+class _VersionTile extends StatefulWidget {
+  const _VersionTile();
+
+  @override
+  State<_VersionTile> createState() => _VersionTileState();
+}
+
+class _VersionTileState extends State<_VersionTile> {
+  int _taps = 0;
+
+  void _onTap(AppState state) {
+    state.feedback.tap();
+    if (state.settings.devOptionsUnlocked) return; // already on
+    _taps++;
+    final remaining = 7 - _taps;
+    if (remaining <= 0) {
+      state.updateSettings(state.settings.copyWith(devOptionsUnlocked: true));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Entwickleroptionen aktiviert.')));
+    } else if (remaining <= 3) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          duration: const Duration(milliseconds: 700),
+          content: Text(
+              'Noch $remaining ${remaining == 1 ? 'Schritt' : 'Schritte'} '
+              'bis zu den Entwickleroptionen.'),
+        ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+    final version =
+        state.runningVersion.isEmpty ? '0.26.0' : state.runningVersion;
+    return ListTile(
+      leading: const PingLogo(size: 40),
+      title: const Text('Ping'),
+      subtitle: Text('Version $version — schnell, sicher, in Blau.'),
+      onTap: () => _onTap(state),
+    );
+  }
 }
 
 class _SectionHeader extends StatelessWidget {

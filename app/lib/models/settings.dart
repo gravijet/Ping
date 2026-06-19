@@ -77,6 +77,11 @@ class PingSettings {
   final bool showContactMood; // show a contact's status/mood in the chat header
   final bool chatListMoodEmoji; // show a contact's mood emoji in the chat list
 
+  // Diagnostics & developer (all on-device, opt-in)
+  final bool collectMetrics; // count my own actions for "Deine Statistik" (local)
+  final bool devOptionsUnlocked; // 7-tap-on-version unlock for the dev panel
+  final bool showPerformanceOverlay; // overlay Flutter's GPU/UI frame graphs
+
   const PingSettings({
     this.readReceipts = true,
     this.sendTypingIndicators = true,
@@ -124,6 +129,9 @@ class PingSettings {
     this.quickReplies = kDefaultQuickReplies,
     this.showContactMood = true,
     this.chatListMoodEmoji = true,
+    this.collectMetrics = false,
+    this.devOptionsUnlocked = false,
+    this.showPerformanceOverlay = false,
   });
 
   PingSettings copyWith({
@@ -174,6 +182,9 @@ class PingSettings {
     List<String>? quickReplies,
     bool? showContactMood,
     bool? chatListMoodEmoji,
+    bool? collectMetrics,
+    bool? devOptionsUnlocked,
+    bool? showPerformanceOverlay,
   }) =>
       PingSettings(
         readReceipts: readReceipts ?? this.readReceipts,
@@ -224,6 +235,10 @@ class PingSettings {
         quickReplies: quickReplies ?? this.quickReplies,
         showContactMood: showContactMood ?? this.showContactMood,
         chatListMoodEmoji: chatListMoodEmoji ?? this.chatListMoodEmoji,
+        collectMetrics: collectMetrics ?? this.collectMetrics,
+        devOptionsUnlocked: devOptionsUnlocked ?? this.devOptionsUnlocked,
+        showPerformanceOverlay:
+            showPerformanceOverlay ?? this.showPerformanceOverlay,
       );
 
   Map<String, dynamic> toJson() => {
@@ -273,6 +288,9 @@ class PingSettings {
         'quickReplies': quickReplies,
         'showContactMood': showContactMood,
         'chatListMoodEmoji': chatListMoodEmoji,
+        'collectMetrics': collectMetrics,
+        'devOptionsUnlocked': devOptionsUnlocked,
+        'showPerformanceOverlay': showPerformanceOverlay,
       };
 
   factory PingSettings.fromJson(Map<String, dynamic> j) => PingSettings(
@@ -331,6 +349,9 @@ class PingSettings {
             kDefaultQuickReplies,
         showContactMood: j['showContactMood'] ?? true,
         chatListMoodEmoji: j['chatListMoodEmoji'] ?? true,
+        collectMetrics: j['collectMetrics'] ?? false,
+        devOptionsUnlocked: j['devOptionsUnlocked'] ?? false,
+        showPerformanceOverlay: j['showPerformanceOverlay'] ?? false,
       );
 
   static PingSettings decode(String? raw) {

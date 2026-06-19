@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -21,9 +22,11 @@ import 'app_lock_service.dart';
 import 'audio_player_service.dart';
 import 'call_service.dart';
 import 'chat_cache_store.dart';
+import 'crash_service.dart';
 import 'device_info_service.dart';
 import 'feedback_service.dart';
 import 'media_service.dart';
+import 'metrics_service.dart';
 import 'local_message_store.dart';
 import 'outbox_store.dart';
 import 'launcher_service.dart';
@@ -135,6 +138,12 @@ class AppState extends ChangeNotifier {
   /// vibrator (when present) gives crisper, distinct patterns; otherwise it
   /// falls back to the platform's built-in haptic channels.
   late final FeedbackService feedback = FeedbackService(() => settings, deviceInfo);
+
+  /// Opt-in, anonymous, on-device usage counters powering the "Deine Statistik"
+  /// screen. Reads the live [PingSettings.collectMetrics] flag on every call, so
+  /// every [MetricsService.bump] is a no-op until the user turns it on.
+  late final MetricsService metrics =
+      MetricsService(() => settings.collectMetrics);
   final LocalMessageStore localStore = LocalMessageStore();
   final StarredStore starredStore = StarredStore();
   final ChatCacheStore chatCache = ChatCacheStore();
@@ -156,6 +165,11 @@ class AppState extends ChangeNotifier {
   /// Hydrated from cache on launch, refreshed from `/config` when online.
   RemoteConfig remoteConfig = RemoteConfig.empty;
   int _runningBuild = 0;
+
+  /// The running app's version name (e.g. `0.26.0`), resolved once at startup.
+  /// Empty until [init] reads it; the settings/diagnostics screens fall back to
+  /// a sensible default while it's loading.
+  String runningVersion = '';
 
   /// Drives 1:1 WebRTC calls. Built lazily on first access rather than in
   /// [init], because the call overlay (mounted from `MaterialApp.builder`)
@@ -250,6 +264,7 @@ class AppState extends ChangeNotifier {
   /// Start a call to [user] (from the chat header). Loads the history afterwards
   /// so the entry shows up once the call ends.
   Future<void> startCall(PingUser user, {required bool video}) async {
+    metrics.bump(MetricKeys.callsStarted);
     await callController.startCall(user, video: video);
   }
 
@@ -487,7 +502,17 @@ class AppState extends ChangeNotifier {
     _callsSeenAt = prefs.getInt(_kCallsSeen) ?? 0;
     if (updater.supported) {
       _runningBuild = await updater.currentBuildNumber();
+      try {
+        runningVersion = await updater.currentVersion();
+      } catch (_) {
+        /* version label stays empty; UI falls back to a default */
+      }
     }
+    // Tag crash reports with the exact running build, and load any opt-in usage
+    // metrics from disk before the first action can bump a counter.
+    CrashService.instance.version =
+        '${runningVersion.isEmpty ? '?' : runningVersion}+$_runningBuild';
+    unawaited(metrics.load().then((_) => metrics.bump(MetricKeys.appOpens)));
     _loadChatWallpapers(prefs);
     _loadPinnedChats(prefs);
     _loadFavoriteChats(prefs);
@@ -2037,6 +2062,7 @@ class AppState extends ChangeNotifier {
     );
     _appendMessage(temp);
     notifyListeners();
+    metrics.bump(MetricKeys.messagesSent);
 
     try {
       final res = await _api.post('/chats/$chatId/messages', {
@@ -2123,6 +2149,9 @@ class AppState extends ChangeNotifier {
     );
     _appendMessage(temp);
     notifyListeners();
+    metrics.bump(MetricKeys.messagesSent);
+    if (att.isImage) metrics.bump(MetricKeys.photosSent);
+    if (att.isVoice) metrics.bump(MetricKeys.voiceSent);
     try {
       final res = await _api.post('/chats/$chatId/messages', {
         'type': att.kind,
@@ -2518,6 +2547,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> postTextStatus(String body, String bgColor) async {
     await _api.post('/status', {'type': 'text', 'body': body, 'bgColor': bgColor});
+    metrics.bump(MetricKeys.statusPosted);
     await loadStatus();
   }
 
@@ -2527,6 +2557,7 @@ class AppState extends ChangeNotifier {
       'attachment': att.toJson(),
       if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
     });
+    metrics.bump(MetricKeys.statusPosted);
     await loadStatus();
   }
 
@@ -2536,6 +2567,7 @@ class AppState extends ChangeNotifier {
       'attachment': att.toJson(),
       if (caption != null && caption.trim().isNotEmpty) 'body': caption.trim(),
     });
+    metrics.bump(MetricKeys.statusPosted);
     await loadStatus();
   }
 
@@ -2639,8 +2671,10 @@ class AppState extends ChangeNotifier {
   // ---- Active chat tracking ------------------------------------------------
 
   void setActiveChat(String? chatId) {
+    final opening = chatId != null && chatId != _activeChatId;
     _activeChatId = chatId;
     if (chatId != null) {
+      if (opening) metrics.bump(MetricKeys.chatsOpened);
       _socket.markRead(chatId, silent: !settings.readReceipts);
       notifications.cancelForChat(chatId);
       final i = chats.indexWhere((c) => c.id == chatId);

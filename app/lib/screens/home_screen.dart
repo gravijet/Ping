@@ -13,6 +13,7 @@ import '../utils/chat_filter.dart';
 import '../widgets/brand.dart';
 import '../widgets/changelog_view.dart';
 import '../widgets/chat_tile.dart';
+import '../widgets/skeleton.dart';
 import '../widgets/update_sheet.dart';
 import '../widgets/verified_badge.dart';
 import 'app_navigation.dart';
@@ -334,7 +335,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _chatsBody(AppState state, ColorScheme scheme) {
     if (_loading && state.chats.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      // A shaped skeleton reads as "your chats are loading" far better than a
+      // bare spinner; it honours the reduce-motion preference by going static.
+      return ChatListSkeleton(animate: !state.settings.reduceMotion);
     }
     if (_error != null && state.chats.isEmpty) {
       return _ErrorState(message: _error!, onRetry: _refresh);

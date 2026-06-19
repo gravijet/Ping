@@ -83,6 +83,9 @@ CI (`.github/workflows/ci.yml`) runs all of the above on every push and PR.
   `test/webclient-offline.test.js` for cache/sync/validation/perf helpers) —
   these run under `npm test` with only a tiny in-memory `localStorage` shim, no
   DOM needed.
+- For **pure** Flutter logic (services, models), add a `flutter_test` case under
+  `app/test/` — keep persistence best-effort so it no-ops without a platform
+  channel (see `crash_service_test.dart` / `metrics_service_test.dart`).
 
 ## Releasing
 

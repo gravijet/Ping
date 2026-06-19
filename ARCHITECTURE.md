@@ -178,6 +178,28 @@ VAPID keys (`VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`) gate the whole web path; the
 private key never leaves the server. Generate them with
 `node -e "import('./src/webpush.js').then(m=>console.log(m.generateVapidKeys()))"`.
 
+## On-device diagnostics — Android (0.26.0)
+Unlike the web client's telemetry (which can batch anonymous counts to the
+server), the Flutter app's 0.26.0 diagnostics are **strictly local** — there is
+no upload path at all.
+- **`crash_service.dart`** — a singleton ring buffer (50) of recent errors.
+  `main()` runs the app inside `runZonedGuarded` (binding initialised in the same
+  zone) and chains `FlutterError.onError` + `PlatformDispatcher.instance.onError`
+  so framework and uncaught async errors are captured. Reports are persisted via
+  `doc_store` and **redacted** (phone numbers, bearer/`token=` fragments,
+  JWT-shaped triplets) before they touch disk. Surfaced in `diagnostics_screen.dart`.
+- **`metrics_service.dart`** — opt-in (`PingSettings.collectMetrics`, default
+  off) integer counters with rolling 30-day buckets, persisted via `doc_store`.
+  `bump()` no-ops until enabled, so `AppState` call sites (send, open chat, call,
+  status, app-open) are unconditional. Visualised by `insights_screen.dart` with
+  a `CustomPaint` 7-day bar chart (no chart package).
+- **`dev_panel_screen.dart`** — unlocked by seven taps on the version row
+  (`devOptionsUnlocked`); a read-only feature-flag/remote-config inspector, the
+  `showPerformanceOverlay` toggle (wired on `MaterialApp`), and build/device facts.
+- **UX:** `widgets/skeleton.dart` (shimmer chat-list placeholder) and a custom
+  fade-through `PageTransitionsBuilder` in `theme.dart`; both collapse to a static
+  / instant form when *reduce motion* is on.
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

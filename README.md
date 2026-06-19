@@ -78,6 +78,15 @@ Online-Status, Lesebestätigungen).
   letzten Chats und eine **Schnelleinstellungen-Kachel** zum Stummschalten; auf
   **Windows** **Toast-Aktionen** und ein „Nicht stören"-Eintrag im Infobereich.
   Installierte Web-Apps zeigen einen **OS-Symbol-Badge** mit der Ungelesen-Zahl.
+- **Diagnose, Statistik & Entwickleroptionen (seit 0.26.0)** – auf **Android**
+  eine **Diagnose**-Seite mit auf dem Gerät gespeicherten Fehlerberichten
+  (Telefonnummern und Tokens werden vor dem Speichern entfernt; nichts wird je
+  übertragen), zum Einsehen, Kopieren oder Mailen; eine **opt-in** „Deine
+  Statistik" mit rein lokalen Nutzungszahlen und einem abhängigkeitsfreien
+  7-Tage-Diagramm; und **Entwickleroptionen** (sieben Tipps auf die
+  Versionszeile) mit Feature-Flag-Inspektor und Performance-Overlay. Dazu
+  **Skeleton-Ladeansichten** und ruhigere Seitenübergänge, die „Bewegung
+  reduzieren" respektieren.
 - **Konto löschen** – jede Person kann ihr eigenes Konto dauerhaft löschen
   (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
   eigenen Nachrichten erscheinen dort nur noch als „Gelöschtes Konto".
@@ -366,7 +375,9 @@ bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
   Dazu kommen Unit-Tests für die **Ping-Web-Logik** (Erwähnungen, Theme-Codes,
   Entwürfe, Insights sowie seit 0.22.0 der **Offline-Cache**, die **Sync-Queue**,
   die **Deeplink-Validierung** und die **Leistungsmetriken**).
-- **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt.
+- **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt
+  (104 Tests), seit 0.26.0 inklusive der **On-Device-Diagnose** (Crash-Erfassung,
+  Redaktion, geschützte Zone) und der **opt-in-Statistik** (Zähler, 7-Tage-Reihe).
 
 ---
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +14,7 @@ import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/windows_web_shell.dart';
 import 'services/app_state.dart';
+import 'services/crash_service.dart';
 import 'services/push_service.dart';
 import 'theme.dart';
 
@@ -21,55 +24,69 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+void main() {
+  // Run the whole app inside a guarded zone so *asynchronous* errors are caught
+  // by the on-device crash reporter instead of vanishing into the void. Flutter
+  // requires the binding to be initialised in the same zone that calls runApp,
+  // so the entire bootstrap lives inside this closure.
+  CrashService.instance.guard(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // Windows is a thin shell around the PC web client (Ping Web): it just hosts a
-  // WebView2 view, so it skips the full native bootstrap (AppState, Firebase,
-  // locale data) entirely. Android/iOS continue with the full app below.
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    runApp(const WindowsWebShellApp());
-    return;
-  }
-
-  // Locale data for date/time formatting. A failure here must never block the
-  // first frame — fall back to the default locale rather than hang on the
-  // native launch screen (the "stuck on a grey screen after install" report).
-  try {
-    await initializeDateFormatting('de').timeout(const Duration(seconds: 5));
-  } catch (_) {
-    /* dates fall back to the default locale; the app still renders */
-  }
-
-  // Firebase backs push notifications (and, on older builds, phone verify). Only
-  // Android is configured (via android/app/google-services.json); on other
-  // platforms we just skip it and everything else still works. A cold device
-  // without Google Play Services can make this hang, so it's time-boxed — we'd
-  // rather start without push than never paint a frame.
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    try {
-      await Firebase.initializeApp().timeout(const Duration(seconds: 8));
-      // Handle push messages that arrive while the app is in the background or
-      // terminated (the OS shows the notification; this keeps FCM delivering).
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    } catch (_) {
-      // Verification/push will be unavailable; the app still works otherwise.
+    // Windows is a thin shell around the PC web client (Ping Web): it just hosts
+    // a WebView2 view, so it skips the full native bootstrap (AppState, Firebase,
+    // locale data) entirely. Android/iOS continue with the full app below.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      runApp(const WindowsWebShellApp());
+      return;
     }
-  }
 
-  // In release builds an uncaught widget error renders a bare grey screen with
-  // no way out. Show a branded, actionable fallback instead so a first-launch
-  // glitch is recoverable rather than a dead end.
-  ErrorWidget.builder = (details) => const _FatalErrorScreen();
+    // Capture framework + uncaught platform errors on-device. Strictly local —
+    // reports are kept in a small ring buffer and shown under Einstellungen →
+    // Diagnose; nothing is ever transmitted. Loading past reports is best-effort.
+    CrashService.instance.install();
+    unawaited(CrashService.instance.load());
 
-  final state = AppState();
-  // Kick off bootstrap; the UI shows a splash until it resolves. Guarded so a
-  // bootstrap exception can't leave the app stranded on the splash forever.
-  state.init().catchError((Object e) => state.failBootstrap(e));
+    // Locale data for date/time formatting. A failure here must never block the
+    // first frame — fall back to the default locale rather than hang on the
+    // native launch screen (the "stuck on a grey screen after install" report).
+    try {
+      await initializeDateFormatting('de').timeout(const Duration(seconds: 5));
+    } catch (_) {
+      /* dates fall back to the default locale; the app still renders */
+    }
 
-  runApp(
-    ChangeNotifierProvider.value(value: state, child: PingApp(state: state)),
-  );
+    // Firebase backs push notifications (and, on older builds, phone verify).
+    // Only Android is configured (via android/app/google-services.json); on
+    // other platforms we just skip it and everything else still works. A cold
+    // device without Google Play Services can make this hang, so it's time-boxed
+    // — we'd rather start without push than never paint a frame.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        await Firebase.initializeApp().timeout(const Duration(seconds: 8));
+        // Handle push messages that arrive while the app is in the background or
+        // terminated (the OS shows the notification; this keeps FCM delivering).
+        FirebaseMessaging.onBackgroundMessage(
+            firebaseMessagingBackgroundHandler);
+      } catch (_) {
+        // Verification/push will be unavailable; the app still works otherwise.
+      }
+    }
+
+    // In release builds an uncaught widget error renders a bare grey screen with
+    // no way out. Show a branded, actionable fallback instead so a first-launch
+    // glitch is recoverable rather than a dead end. (FlutterError.onError, hooked
+    // by CrashService.install above, already records the underlying error.)
+    ErrorWidget.builder = (details) => const _FatalErrorScreen();
+
+    final state = AppState();
+    // Kick off bootstrap; the UI shows a splash until it resolves. Guarded so a
+    // bootstrap exception can't leave the app stranded on the splash forever.
+    state.init().catchError((Object e) => state.failBootstrap(e));
+
+    runApp(
+      ChangeNotifierProvider.value(value: state, child: PingApp(state: state)),
+    );
+  });
 }
 
 /// Last-resort UI shown when a widget subtree throws during build. Replaces
@@ -168,15 +185,26 @@ class _PingAppState extends State<PingApp> with WidgetsBindingObserver {
         context.select<AppState, bool>((s) => s.settings.boldText);
     final highContrast =
         context.select<AppState, bool>((s) => s.settings.highContrast);
+    final reduceMotion =
+        context.select<AppState, bool>((s) => s.settings.reduceMotion);
+    // Developer aid (Entwickleroptionen): Flutter's GPU/UI frame-time graphs.
+    final showPerfOverlay =
+        context.select<AppState, bool>((s) => s.settings.showPerformanceOverlay);
     return MaterialApp(
       title: 'Ping',
       debugShowCheckedModeBanner: false,
+      showPerformanceOverlay: showPerfOverlay,
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: scaffoldMessengerKey,
       theme: PingTheme.light(design,
-          boldText: boldText, highContrast: highContrast),
+          boldText: boldText,
+          highContrast: highContrast,
+          reduceMotion: reduceMotion),
       darkTheme: PingTheme.dark(design,
-          amoled: amoled, boldText: boldText, highContrast: highContrast),
+          amoled: amoled,
+          boldText: boldText,
+          highContrast: highContrast,
+          reduceMotion: reduceMotion),
       themeMode: themeMode,
       // The call overlay floats above every screen so an incoming call rings
       // wherever the user is. The app-lock gate sits above even that, so a

@@ -252,17 +252,24 @@ class PingTheme {
     PingDesign? design, {
     bool boldText = false,
     bool highContrast = false,
+    bool reduceMotion = false,
   }) =>
       _build(Brightness.light, design ?? kPingDesigns.first,
-          boldText: boldText, highContrast: highContrast);
+          boldText: boldText,
+          highContrast: highContrast,
+          reduceMotion: reduceMotion);
   static ThemeData dark(
     PingDesign? design, {
     bool amoled = false,
     bool boldText = false,
     bool highContrast = false,
+    bool reduceMotion = false,
   }) =>
       _build(Brightness.dark, design ?? kPingDesigns.first,
-          amoled: amoled, boldText: boldText, highContrast: highContrast);
+          amoled: amoled,
+          boldText: boldText,
+          highContrast: highContrast,
+          reduceMotion: reduceMotion);
 
   /// Derive the chat-surface palette (bubbles, wallpaper, app-bar) from a design
   /// seed so every design has a distinct, cohesive look.
@@ -303,6 +310,7 @@ class PingTheme {
     bool amoled = false,
     bool boldText = false,
     bool highContrast = false,
+    bool reduceMotion = false,
   }) {
     final isLight = brightness == Brightness.light;
     final palette = _paletteFor(design, brightness);
@@ -350,8 +358,21 @@ class PingTheme {
       visualDensity: VisualDensity.standard,
     );
 
+    // A single page transition for every platform. With *reduce motion* on,
+    // routes appear instantly; otherwise a subtle fade-through that's lighter
+    // than the heavy default Android zoom.
+    final pageTransition = reduceMotion
+        ? const _NoPageTransitionsBuilder()
+        : const _FadeThroughPageTransitionsBuilder();
+    final pageTransitionsTheme = PageTransitionsTheme(
+      builders: {
+        for (final p in TargetPlatform.values) p: pageTransition,
+      },
+    );
+
     return base.copyWith(
       extensions: [palette],
+      pageTransitionsTheme: pageTransitionsTheme,
       textTheme: _textTheme(base.textTheme, scheme, boldText),
       appBarTheme: AppBarTheme(
         backgroundColor: palette.brand,
@@ -488,4 +509,52 @@ class PingTheme {
 extension PingPaletteX on BuildContext {
   PingPalette get ping =>
       Theme.of(this).extension<PingPalette>() ?? PingPalette.light;
+}
+
+/// Route transition: a calm fade combined with a small upward slide of the
+/// incoming page (Material-3-ish "fade through"), lighter than the default
+/// Android zoom. Used when the user has *not* asked for reduced motion.
+class _FadeThroughPageTransitionsBuilder extends PageTransitionsBuilder {
+  const _FadeThroughPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.03),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Route transition that does nothing — the new page simply appears. Used when
+/// *reduce motion* is enabled (an accessibility aid for motion sensitivity).
+class _NoPageTransitionsBuilder extends PageTransitionsBuilder {
+  const _NoPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) =>
+      child;
 }
