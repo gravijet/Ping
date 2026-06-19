@@ -37,10 +37,9 @@ const post = {
   tag: 'feature',
   summary:
     'Ping erreicht dich jetzt auch außerhalb der App: im Browser echte Push-Benachrichtigungen, ' +
-    'selbst wenn der Tab geschlossen ist; auf Android direkt aus der Benachrichtigung antworten, ' +
-    'als gelesen markieren, Startbildschirm-Schnellzugriffe und eine Schnelleinstellungen-Kachel; ' +
-    'auf Windows Toast-Aktionen und „Nicht stören". Plus ein Ungelesen-Zähler am App-Symbol. ' +
-    'Web Push ist abhängigkeitsfrei nach Standard umgesetzt – Schlüssel bleiben am Server.',
+    'selbst wenn der Tab geschlossen ist; auf Android direkt aus der Benachrichtigung antworten ' +
+    'oder als gelesen markieren, plus Startbildschirm-Schnellzugriffe und eine Stummschalt-Kachel; ' +
+    'auf Windows Toast-Aktionen und „Nicht stören". Dazu ein Ungelesen-Zähler am App-Symbol.',
   body,
   published: true,
 };
