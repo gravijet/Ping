@@ -71,6 +71,13 @@ Online-Status, Lesebestätigungen).
   Messaging). Eingehende Anrufe kommen als hochpriorer Daten-Push und klingeln
   per Voll­bild-Hinweis, auch wenn die App geschlossen ist; verpasste Anrufe
   erzeugen eine eigene Notiz.
+- **Benachrichtigungen überall (seit 0.25.0)** – im **Web** echte
+  System-Benachrichtigungen, **auch wenn der Tab/Browser geschlossen ist** (Web
+  Push, abhängigkeitsfrei nach RFC 8291/8292); auf **Android** **direkt antworten
+  und „gelesen"** aus der Benachrichtigung heraus, **Launcher-Verknüpfungen** zu
+  letzten Chats und eine **Schnelleinstellungen-Kachel** zum Stummschalten; auf
+  **Windows** **Toast-Aktionen** und ein „Nicht stören"-Eintrag im Infobereich.
+  Installierte Web-Apps zeigen einen **OS-Symbol-Badge** mit der Ungelesen-Zahl.
 - **Konto löschen** – jede Person kann ihr eigenes Konto dauerhaft löschen
   (mit Passwortbestätigung). Die Gespräche der anderen bleiben erhalten, die
   eigenen Nachrichten erscheinen dort nur noch als „Gelöschtes Konto".

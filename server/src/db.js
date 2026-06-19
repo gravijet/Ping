@@ -195,6 +195,20 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
 
+  -- Web Push (browser) subscriptions — the W3C Push API counterpart of the FCM
+  -- device tokens above. The push service's endpoint URL is globally unique, so
+  -- it is the PK; p256dh + auth are the per-subscription encryption keys the
+  -- server needs to seal each payload (see webpush.js).
+  CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+    endpoint   TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_web_push_user ON web_push_subscriptions(user_id);
+
   -- One-time SMS verification codes (server-side phone OTP). Keyed by the
   -- canonical E.164 number; only the hash of the code is stored.
   CREATE TABLE IF NOT EXISTS phone_codes (

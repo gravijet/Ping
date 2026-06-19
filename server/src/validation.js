@@ -544,6 +544,17 @@ export const pushTokenSchema = z.object({
   platform: z.enum(['android', 'ios', 'web']).optional(),
 });
 
+// A W3C Push API subscription as serialized by the browser: the push-service
+// endpoint URL plus the two encryption keys (base64url) the server seals each
+// payload with. Sizes are generously bounded to reject obvious junk only.
+export const webPushSubscriptionSchema = z.object({
+  endpoint: z.string().trim().url('Ungültiger Push-Endpoint.').max(2048),
+  keys: z.object({
+    p256dh: z.string().trim().min(1).max(512),
+    auth: z.string().trim().min(1).max(256),
+  }),
+});
+
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {
   const result = schema.safeParse(data);

@@ -26,8 +26,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final svc = NotificationService();
     await svc.init();
     await svc.cancelIncomingCall();
+  } else if (type == 'message') {
+    // New-message pushes arrive as *data* messages (no `notification` block), so
+    // the app draws the notification itself — that's what lets it carry the
+    // inline "Antworten" / "Gelesen" actions. Title/body travel in the data map.
+    final svc = NotificationService();
+    await svc.init();
+    final target = NotificationTarget.fromData(data) ?? const NotificationTarget();
+    await svc.showMessage(
+      title: (data['title'] ?? 'Ping').toString(),
+      body: (data['body'] ?? '').toString(),
+      target: target,
+    );
   }
-  // Everything else carries a notification block the system tray shows itself.
+  // Announcements/status still carry a `notification` block the tray shows itself.
 }
 
 /// Wires Firebase Cloud Messaging into the app: obtains the device token (so the

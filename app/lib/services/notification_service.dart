@@ -1,7 +1,68 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'notification_target.dart';
+
+// Action ids for the message-notification buttons (direct reply + mark read).
+const String _kReplyAction = 'msg_reply';
+const String _kMarkReadAction = 'msg_markread';
+
+// SharedPreferences keys the background isolate reads to reach the server — they
+// must match the ones AppState writes (app_state.dart: _kToken / _kBaseUrl).
+const String _kPrefToken = 'ping_token';
+const String _kPrefBaseUrl = 'ping_base_url';
+
+String _apiRoot(String baseUrl) {
+  final b = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  return '$b/api';
+}
+
+/// Handles a Reply / "Mark read" notification action that fired while the app
+/// was in the background or terminated. Runs in its own isolate, so it can't
+/// touch AppState — it reads the persisted session straight from
+/// SharedPreferences and talks to the server over HTTP itself.
+///
+/// Must be a top-level function annotated `vm:entry-point` so the engine can
+/// find it after a cold start.
+@pragma('vm:entry-point')
+Future<void> notificationActionBackground(NotificationResponse resp) async {
+  final action = resp.actionId;
+  if (action != _kReplyAction && action != _kMarkReadAction) return;
+  final target = NotificationTarget.decode(resp.payload);
+  final chatId = target?.chatId;
+  if (chatId == null || chatId.isEmpty) return;
+
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_kPrefToken);
+    final baseUrl = prefs.getString(_kPrefBaseUrl);
+    if (token == null || token.isEmpty || baseUrl == null || baseUrl.isEmpty) return;
+    final root = _apiRoot(baseUrl);
+    final headers = {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+    if (action == _kReplyAction) {
+      final text = (resp.input ?? '').trim();
+      if (text.isEmpty) return;
+      await http.post(
+        Uri.parse('$root/chats/$chatId/messages'),
+        headers: headers,
+        body: jsonEncode({'body': text}),
+      );
+    }
+    // Either action implicitly clears the unread state for that chat.
+    await http.post(Uri.parse('$root/chats/$chatId/read'), headers: headers);
+    // Take the notification down — the reply was sent / the chat is read.
+    await FlutterLocalNotificationsPlugin().cancel(resp.id ?? (chatId.hashCode & 0x7fffffff));
+  } catch (_) {
+    /* offline / transient — the chat reconciles itself on next open */
+  }
+}
 
 /// Lightweight wrapper around local notifications. Used to surface incoming
 /// messages and admin announcements while the app is running. Stays silent on
@@ -17,9 +78,20 @@ class NotificationService {
   void Function(String callId, String callerId, bool video, bool accept)?
       onCallAction;
 
+  /// Called when the user sends a direct reply from a message notification
+  /// (foreground). The background/terminated case is handled out-of-isolate by
+  /// [notificationActionBackground].
+  void Function(String chatId, String text)? onReply;
+
+  /// Called when the user taps "Als gelesen" on a message notification (foreground).
+  void Function(String chatId)? onMarkRead;
+
   /// Fixed id for the (single) incoming-call notification, so it can be replaced
   /// and cancelled deterministically.
   static const int _callNotificationId = 911000;
+
+  /// Notification-group key under which per-chat message notifications stack.
+  static const String _messageGroup = 'ping.messages';
 
   static const _messageChannel = AndroidNotificationChannel(
     'ping_messages',
@@ -64,6 +136,9 @@ class NotificationService {
       await _plugin.initialize(
         settings,
         onDidReceiveNotificationResponse: _onResponse,
+        // Action buttons (reply / mark read) tapped while the app is in the
+        // background or terminated land in their own isolate.
+        onDidReceiveBackgroundNotificationResponse: notificationActionBackground,
       );
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
@@ -87,6 +162,18 @@ class NotificationService {
       return;
     }
     final target = NotificationTarget.decode(payload);
+    // Direct-reply / mark-read actions on a message notification (foreground).
+    if (target?.chatId != null) {
+      if (resp.actionId == _kReplyAction) {
+        final text = (resp.input ?? '').trim();
+        if (text.isNotEmpty) onReply?.call(target!.chatId!, text);
+        return;
+      }
+      if (resp.actionId == _kMarkReadAction) {
+        onMarkRead?.call(target!.chatId!);
+        return;
+      }
+    }
     if (target != null) onTap?.call(target);
   }
 
@@ -136,7 +223,16 @@ class NotificationService {
     bool announcement = false,
   }) async {
     if (!_ready) return;
+    // Honour the Quick Settings "snooze" tile (PingTileService): while the snooze
+    // window is in the future, drop chat-message notifications entirely. Reads
+    // the same pref the tile writes; works in the background isolate too.
+    // Announcements/calls intentionally bypass it.
+    if (!announcement && target.chatId != null && await _isSnoozed()) return;
     final channel = announcement ? _announcementChannel : _messageChannel;
+    // Real chat messages get inline "Antworten" (direct reply) + "Gelesen"
+    // actions — replying or clearing the chat straight from the notification
+    // shade, without ever opening the app. Announcements stay action-less.
+    final isChat = !announcement && target.chatId != null;
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         channel.id,
@@ -144,15 +240,47 @@ class NotificationService {
         channelDescription: channel.description,
         importance: announcement ? Importance.max : Importance.high,
         priority: Priority.high,
-        category:
-            announcement ? AndroidNotificationCategory.social : null,
+        category: announcement
+            ? AndroidNotificationCategory.social
+            : AndroidNotificationCategory.message,
         styleInformation: const BigTextStyleInformation(''),
+        // Stack message notifications under a single group so the shade shows
+        // one tidy "Ping" bundle rather than N loose cards.
+        groupKey: isChat ? _messageGroup : null,
+        actions: isChat
+            ? <AndroidNotificationAction>[
+                const AndroidNotificationAction(
+                  _kReplyAction,
+                  'Antworten',
+                  inputs: <AndroidNotificationActionInput>[
+                    AndroidNotificationActionInput(label: 'Nachricht …'),
+                  ],
+                ),
+                const AndroidNotificationAction(
+                  _kMarkReadAction,
+                  'Gelesen',
+                  cancelNotification: true,
+                ),
+              ]
+            : null,
       ),
     );
     // Group message notifications per chat (replace previous); give each
     // announcement its own slot so they stack.
     final id = (target.chatId ?? target.route ?? body).hashCode & 0x7fffffff;
     await _plugin.show(id, title, body, details, payload: target.encode());
+  }
+
+  /// True while the Quick Settings snooze tile has muted notifications. Reads
+  /// the shared pref the tile (PingTileService) writes.
+  Future<bool> _isSnoozed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final until = prefs.getInt('ping_snooze_until') ?? 0;
+      return DateTime.now().millisecondsSinceEpoch < until;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> cancelForChat(String chatId) async {

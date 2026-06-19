@@ -117,14 +117,33 @@ class WindowsNative with TrayListener, WindowListener {
   }
 
   Future<void> _notify(Map<String, dynamic> data) async {
+    final chatId = (data['chatId'] ?? '').toString();
     try {
+      final hasChat = chatId.isNotEmpty;
       final n = LocalNotification(
         title: (data['title'] ?? 'Ping').toString(),
         body: (data['body'] ?? '').toString(),
+        // Action buttons on the OS toast — open the chat, or clear it as read
+        // without bringing the window forward. (Index order must match below.)
+        actions: hasChat
+            ? [
+                LocalNotificationAction(text: 'Öffnen'),
+                LocalNotificationAction(text: 'Als gelesen'),
+              ]
+            : null,
       );
       n.onClick = () {
         _restore();
-        postToWeb({'type': 'open-chat', 'chatId': (data['chatId'] ?? '').toString()});
+        postToWeb({'type': 'open-chat', 'chatId': chatId});
+      };
+      n.onClickAction = (index) {
+        if (index == 1) {
+          // "Als gelesen" — mark read in the background, leave the window be.
+          postToWeb({'type': 'mark-read', 'chatId': chatId});
+        } else {
+          _restore();
+          postToWeb({'type': 'open-chat', 'chatId': chatId});
+        }
       };
       await n.show();
     } catch (e) {
@@ -198,6 +217,7 @@ class WindowsNative with TrayListener, WindowListener {
       await trayManager.setContextMenu(Menu(items: [
         MenuItem(key: 'show', label: 'Ping öffnen'),
         MenuItem(key: 'newchat', label: 'Neuer Chat'),
+        MenuItem(key: 'dnd', label: 'Nicht stören (1 Std.)'),
         MenuItem(key: 'settings', label: 'Einstellungen'),
         MenuItem.checkbox(
           key: 'tray',
@@ -226,6 +246,9 @@ class WindowsNative with TrayListener, WindowListener {
       case 'newchat':
         _restore();
         postToWeb({'type': 'new-chat'});
+        break;
+      case 'dnd':
+        postToWeb({'type': 'dnd', 'minutes': 60});
         break;
       case 'settings':
         _restore();

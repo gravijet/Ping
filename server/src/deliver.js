@@ -43,7 +43,16 @@ export function pushMessage(chat, msg, senderId) {
   sendPushToUsers(targets, {
     title: isGroup ? chat.name || 'Gruppe' : senderName,
     body: isGroup ? `${senderName}: ${p}` : p,
-    data: { type: 'message', chatId: chat.id, messageId: msg.id, senderId },
+    // Let the app render this one itself so it can offer inline reply + mark-read
+    // from the shade (see push.js). Title/body still reach Web Push unchanged.
+    clientNotification: true,
+    data: {
+      type: 'message',
+      chatId: chat.id,
+      messageId: msg.id,
+      senderId,
+      senderName,
+    },
   }).catch(() => {});
 }
 

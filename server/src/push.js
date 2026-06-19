@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { config } from './config.js';
 import { tokensForUsers, removePushToken } from './pushRepo.js';
+import { webSubscriptionsForUsers, removeWebPushSubscription } from './webPushRepo.js';
+import { webPushEnabled, sendWebPushToSubscriptions } from './webpush.js';
 
 // Firebase Cloud Messaging (HTTP v1) sender.
 //
@@ -97,7 +99,7 @@ function isDeadTokenError(status, errJson) {
 }
 
 async function sendOne(accessToken, token, payload) {
-  const { title, body, data, android, channelId } = payload;
+  const { title, body, data, android, channelId, clientNotification } = payload;
   // FCM data values must be strings.
   const stringData = {};
   for (const [k, v] of Object.entries(data || {})) {
@@ -106,7 +108,18 @@ async function sendOne(accessToken, token, payload) {
   // A payload with no title/body is a *silent data message*: the client's
   // background handler turns it into the right UI (e.g. a full-screen incoming
   // call) instead of the OS drawing a tray notification. Used for calls.
-  const isDataOnly = !title && !body;
+  //
+  // `clientNotification` is the same idea for *visible* notifications: the app
+  // draws the notification itself (so it can attach inline reply / mark-read
+  // actions) rather than letting the OS render a static tray card. Title/body
+  // ride along inside `data` so the Android side still has them — and they also
+  // stay on the top-level payload so the Web Push path (push.js → webpush.js)
+  // keeps working unchanged. Used for new-message notifications.
+  const isDataOnly = (!title && !body) || !!clientNotification;
+  if (clientNotification) {
+    if (title != null) stringData.title = String(title);
+    if (body != null) stringData.body = String(body);
+  }
   const message = {
     token,
     data: stringData,
@@ -157,18 +170,47 @@ async function sendOne(accessToken, token, payload) {
 export async function sendPushToUsers(userIds, payload) {
   // Never hit the network (or a real device) from the test suite.
   if (process.env.NODE_ENV === 'test') return 0;
-  if (!pushEnabled() || userIds.length === 0) return 0;
-  const tokens = tokensForUsers(userIds);
-  if (tokens.length === 0) return 0;
-  let accessToken;
-  try {
-    accessToken = await getAccessToken();
-  } catch (e) {
-    console.error('[push]', e.message);
-    return 0;
+  if (userIds.length === 0) return 0;
+
+  // Browsers (Ping Web + the Windows shell) get the same notification over Web
+  // Push — but only for *visible* ones. A title-less/body-less data message is a
+  // silent control push (e.g. an incoming WebRTC call) that only the Android
+  // background handler knows how to turn into UI, so it never goes to the web.
+  const isVisible = !!(payload.title || payload.body);
+  const webPromise =
+    isVisible && webPushEnabled()
+      ? sendWebPushToSubscriptions(
+          webSubscriptionsForUsers(userIds),
+          {
+            title: payload.title || 'Ping',
+            body: payload.body || '',
+            data: payload.data || {},
+            tag: payload.data?.chatId || payload.data?.route || undefined,
+          },
+          removeWebPushSubscription
+        ).catch(() => 0)
+      : Promise.resolve(0);
+
+  let fcmPromise = Promise.resolve(0);
+  if (pushEnabled()) {
+    const tokens = tokensForUsers(userIds);
+    if (tokens.length > 0) {
+      fcmPromise = (async () => {
+        let accessToken;
+        try {
+          accessToken = await getAccessToken();
+        } catch (e) {
+          console.error('[push]', e.message);
+          return 0;
+        }
+        const results = await Promise.allSettled(
+          tokens.map((t) => sendOne(accessToken, t, payload))
+        );
+        return results.filter((r) => r.status === 'fulfilled' && r.value).length;
+      })();
+    }
   }
-  const results = await Promise.allSettled(
-    tokens.map((t) => sendOne(accessToken, t, payload))
-  );
-  return results.filter((r) => r.status === 'fulfilled' && r.value).length;
+
+  const [fcm, web] = await Promise.all([fcmPromise, webPromise]);
+  return fcm + web;
 }

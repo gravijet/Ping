@@ -54,6 +54,7 @@ import {
   officialMessageSchema,
   adminStatusSchema,
   pushTokenSchema,
+  webPushSubscriptionSchema,
   messageStorageSchema,
   postCreateSchema,
   postUpdateSchema,
@@ -213,6 +214,11 @@ import {
   allPushTokens,
   devicesForUser,
 } from './pushRepo.js';
+import {
+  saveWebPushSubscription,
+  removeUserWebPushSubscription,
+} from './webPushRepo.js';
+import { vapidPublicKey, webPushEnabled } from './webpush.js';
 import {
   createPost,
   updatePost,
@@ -2201,6 +2207,45 @@ router.delete(
   h(async (req, res) => {
     const { token } = parse(pushTokenSchema, req.body);
     removeUserPushToken(req.user.id, token);
+    res.json({ ok: true });
+  })
+);
+
+// ---- Web Push (browser notifications) -------------------------------------
+
+// The public VAPID application key the browser needs to subscribe, plus whether
+// the server has web push configured at all (so the client can hide the toggle).
+router.get(
+  '/push/web/vapid',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ enabled: webPushEnabled(), publicKey: vapidPublicKey() });
+  })
+);
+
+// Store (or refresh) a browser push subscription for this user.
+router.post(
+  '/push/web/subscribe',
+  requireAuth,
+  h(async (req, res) => {
+    const sub = parse(webPushSubscriptionSchema, req.body);
+    saveWebPushSubscription(req.user.id, {
+      endpoint: sub.endpoint,
+      p256dh: sub.keys.p256dh,
+      auth: sub.keys.auth,
+    });
+    res.json({ ok: true });
+  })
+);
+
+// Drop a browser subscription (notifications turned off / logout). Scoped to the
+// user so one account can't unsubscribe another's browser.
+router.post(
+  '/push/web/unsubscribe',
+  requireAuth,
+  h(async (req, res) => {
+    const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint.trim() : '';
+    if (endpoint) removeUserWebPushSubscription(req.user.id, endpoint);
     res.json({ ok: true });
   })
 );

@@ -109,6 +109,21 @@ export const config = {
     process.env.FIREBASE_SERVICE_ACCOUNT ||
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'firebase-service-account.json'),
 
+  // ---- Web Push (browser notifications, RFC 8291/8292 VAPID) ---------------
+  // Lets the web client (Ping Web + the Windows shell that wraps it) receive
+  // notifications even when its tab/window is closed. Generate a key pair once:
+  //   node -e "import('./src/webpush.js').then(m=>console.log(m.generateVapidKeys()))"
+  // then set VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY (base64url). Without them web
+  // push stays disabled and everything else keeps working. VAPID_SUBJECT is the
+  // contact the push service can reach (a mailto: or https: URL).
+  webPush: (() => {
+    const publicKey = (process.env.VAPID_PUBLIC_KEY || '').trim();
+    const privateKey = (process.env.VAPID_PRIVATE_KEY || '').trim();
+    let subject = (process.env.VAPID_SUBJECT || '').trim();
+    if (!subject) subject = 'mailto:user@example.invalid';
+    return { publicKey, privateKey, subject };
+  })(),
+
   // ---- Backups -------------------------------------------------------------
   // Automatic daily snapshots of the SQLite database (via VACUUM INTO, which is
   // consistent even while the server is running). Stored next to the DB unless

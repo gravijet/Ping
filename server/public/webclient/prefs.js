@@ -22,6 +22,7 @@ const DEFAULTS = {
   spellcheck: true,       // browser spellcheck in the composer
   sendTyping: true,       // broadcast "tippt …" to the other side
   notifEnabled: false,    // browser notifications
+  webPush: false,         // OS push even when the tab/browser is closed (Web Push)
   notifPreview: true,
   notifSound: true,       // play a soft chime with each notification
   callRingtone: true,     // play a ringtone for incoming / a ringback for outgoing calls

@@ -26,6 +26,7 @@ import * as activity from './activity.js';
 import { mentionsUser } from './mentions.js';
 import { openShortcuts, shortcutsOpen } from './shortcuts.js';
 import { safeId } from './validate.js';
+import { syncWebPush } from './webpush.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
@@ -121,6 +122,9 @@ async function enterApp() {
   refreshActivityBadge();
   updateConnectionBanner();
   handleDeepLink();
+  // Re-establish (or tear down) the browser push subscription to match the
+  // user's saved preference — silent, never prompts.
+  syncWebPush(prefs.get('webPush')).catch(() => {});
   telemetry.track('app_ready', { chats: store.state.chats.size });
   prefetchModules();
 }
@@ -420,6 +424,14 @@ function refreshBadges() {
   setNavBadge('chats', unread);
   // Mirror the total onto the Windows taskbar icon when running in the shell.
   native.setUnread(unreadTotal);
+  // …and onto the OS app icon of an installed PWA (App Badging API). A genuine
+  // OS-level badge that survives the tab being closed; cleared at zero.
+  try {
+    if ('setAppBadge' in navigator) {
+      if (unreadTotal > 0) navigator.setAppBadge(unreadTotal);
+      else navigator.clearAppBadge?.();
+    }
+  } catch { /* unsupported / permission — ignore */ }
 }
 
 // ---- Windows desktop bridge (no-ops in a normal browser) ------------------
@@ -432,6 +444,20 @@ function wireNative() {
   native.onNative('settings', () => openSettings());
   native.onNative('command', () => openCommandPalette());
   native.onNative('new-chat', () => newChatModal());
+  // "Als gelesen" from a desktop toast action: clear the chat's unread state.
+  native.onNative('mark-read', async (d) => {
+    if (!d.chatId) return;
+    try { await api.post(`/chats/${d.chatId}/read`); } catch { /* offline */ }
+    const c = store.getChat(d.chatId);
+    if (c && c.unread) { c.unread = 0; store.emit('chats'); }
+    refreshBadges();
+  });
+  // "Nicht stören" from the tray: silence notifications for a while.
+  native.onNative('dnd', (d) => {
+    const mins = Number(d.minutes) || 60;
+    prefs.set('dndUntil', Date.now() + mins * 60000);
+    toast('Nicht stören aktiviert.', 'ok');
+  });
   // Sync the host with the user's saved desktop preferences.
   native.setAutostart(prefs.get('desktopAutostart'));
   native.setCloseToTray(prefs.get('desktopCloseToTray'));
@@ -616,6 +642,17 @@ function registerServiceWorker() {
   // the freshly cached assets are the ones actually running.
   navigator.serviceWorker.addEventListener?.('controllerchange', () => {
     if (reloading) return; reloading = true; location.reload();
+  });
+  // Messages from the worker: a tapped push notification asks us to open a chat;
+  // a "mark read" action asks us to refresh the unread badges.
+  navigator.serviceWorker.addEventListener?.('message', (e) => {
+    const d = e.data || {};
+    if (d.type === 'open-chat' && d.chatId) {
+      window.focus?.();
+      if (store.getChat(d.chatId)) openChatInShell(d.chatId);
+    } else if (d.type === 'refresh-badges') {
+      refreshBadges();
+    }
   });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((reg) => {

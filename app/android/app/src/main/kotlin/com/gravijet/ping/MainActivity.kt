@@ -5,6 +5,8 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -13,6 +15,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.os.StatFs
+import android.os.Bundle
 import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -25,10 +28,18 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    // Kept so a notification/shortcut intent that arrives while the app is
+    // already running can be pushed straight to Dart (see onNewIntent).
+    private var channel: MethodChannel? = null
+
+    // A deep-link route ("chat:<id>" / "route:<name>") captured from the launch
+    // intent, consumed by Dart on startup via "consumeLaunchRoute".
+    private var pendingRoute: String? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ping/native")
-            .setMethodCallHandler { call, result ->
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ping/native")
+        channel!!.setMethodCallHandler { call, result ->
                 when (call.method) {
                     // The device's primary CPU ABI so the in-app updater can fetch
                     // the matching per-ABI APK split (a much smaller download).
@@ -76,9 +87,81 @@ class MainActivity : FlutterActivity() {
                         vibratePattern(call)
                         result.success(null)
                     }
+                    // --- Launcher integration -------------------------------------
+                    // Publish dynamic launcher shortcuts (long-press the app icon →
+                    // jump straight into a recent chat). Fed the recent chats by Dart.
+                    "setChatShortcuts" -> {
+                        setChatShortcuts(call)
+                        result.success(null)
+                    }
+                    // The route a launching shortcut/notification asked for, consumed
+                    // once on startup (null on a plain launch).
+                    "consumeLaunchRoute" -> {
+                        val r = pendingRoute
+                        pendingRoute = null
+                        result.success(r)
+                    }
                     else -> result.notImplemented()
                 }
             }
+        captureRoute(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        captureRoute(intent)
+        // Already running → hand the route to Dart immediately instead of waiting
+        // for a consumeLaunchRoute poll.
+        val r = pendingRoute
+        if (r != null) {
+            pendingRoute = null
+            runOnUiThread { channel?.invokeMethod("launchRoute", r) }
+        }
+    }
+
+    /** Pull a "ping.chatId"/"ping.route" extra off [intent] into [pendingRoute]. */
+    private fun captureRoute(intent: Intent?) {
+        if (intent == null) return
+        val chatId = intent.getStringExtra("ping.chatId")
+        val route = intent.getStringExtra("ping.route")
+        when {
+            !chatId.isNullOrEmpty() -> pendingRoute = "chat:$chatId"
+            !route.isNullOrEmpty() -> pendingRoute = "route:$route"
+        }
+    }
+
+    /**
+     * Replace the app's dynamic launcher shortcuts with the given recent chats.
+     * Each shortcut launches MainActivity with a "ping.chatId" extra that
+     * captureRoute() turns into a deep link. API 25+ only (older launchers have
+     * no shortcut surface); silently no-ops on a vendor that rejects them.
+     */
+    private fun setChatShortcuts(call: MethodCall) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.N_MR1) return
+        val mgr = getSystemService(ShortcutManager::class.java) ?: return
+        @Suppress("UNCHECKED_CAST")
+        val items = (call.argument<List<Map<String, String>>>("chats")) ?: emptyList()
+        try {
+            val max = mgr.maxShortcutCountPerActivity.coerceAtLeast(1)
+            val shortcuts = items.take(minOf(max, 4)).mapNotNull { item ->
+                val id = item["chatId"] ?: return@mapNotNull null
+                val label = (item["label"] ?: "Chat").take(24)
+                val intent = Intent(this, MainActivity::class.java).apply {
+                    action = Intent.ACTION_VIEW
+                    putExtra("ping.chatId", id)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+                ShortcutInfo.Builder(this, "chat_$id")
+                    .setShortLabel(label)
+                    .setLongLabel(label)
+                    .setIntent(intent)
+                    .build()
+            }
+            mgr.dynamicShortcuts = shortcuts
+        } catch (_: Exception) {
+            /* best effort — shortcuts are a nicety, never fail the call */
+        }
     }
 
     private fun downloadManager(): DownloadManager =

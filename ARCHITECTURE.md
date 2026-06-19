@@ -146,6 +146,38 @@ rows, no identity), surfaced as `fleet` inside `GET /api/admin/diagnostics`.
 Kill-switchable via the `deviceDiagnostics` / `adaptiveData` / `deviceTelemetry`
 remote flags.
 
+## Notifications & OS integration (0.25.0)
+Ping reaches the user *outside* the app on every platform, through one server
+fan-out (`sendPushToUsers` in `push.js`) that drives **both** transports:
+
+- **FCM (Android)** — unchanged for announcements/status/calls. New-message
+  pushes are now sent as **data messages** with `clientNotification: true`
+  (title/body folded into `data`), so the Flutter side draws them itself and can
+  attach **inline reply (`RemoteInput`)** + **mark-read** actions. The foreground
+  path renders them directly; the background/terminated path renders them in the
+  FCM background isolate. Action taps land in `notificationActionBackground`
+  (`notification_service.dart`), a top-level isolate entry point that reads the
+  persisted bearer token + base URL from `SharedPreferences` and POSTs the reply
+  (`/chats/:id/messages`) or read (`/chats/:id/read`) over HTTPS — working even
+  with the app closed. `MainActivity.setChatShortcuts` publishes dynamic launcher
+  shortcuts; `PingTileService` is a Quick-Settings snooze tile whose state
+  (`ping_snooze_until`, shared via `FlutterSharedPreferences`) is honoured at the
+  single `NotificationService.showMessage` choke point.
+- **Web Push (browser + Windows shell)** — `webpush.js` implements the standards
+  directly on `node:crypto`: a fresh ECDH P-256 ephemeral key per message,
+  `HKDF` → `AES-128-GCM` payload encryption (RFC 8291 / RFC 8188 `aes128gcm`) and
+  an ES256 **VAPID** JWT (RFC 8292, raw `r‖s` signature) — no dependency. Browser
+  subscriptions live in `web_push_subscriptions` (`webPushRepo.js`); the client
+  (`webclient/webpush.js`) subscribes via the Push API and mirrors the auth token
+  into an IndexedDB store the service worker reads. `sw.js` handles `push`
+  (Öffnen / Als gelesen actions), `notificationclick` (focus + route, or
+  mark-read with no tab open) and `pushsubscriptionchange` (auto re-subscribe).
+  `navigator.setAppBadge()` shows the unread count on an installed PWA's OS icon.
+
+VAPID keys (`VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`) gate the whole web path; the
+private key never leaves the server. Generate them with
+`node -e "import('./src/webpush.js').then(m=>console.log(m.generateVapidKeys()))"`.
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

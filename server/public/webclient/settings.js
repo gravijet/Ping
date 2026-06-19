@@ -12,6 +12,7 @@ import { el, clear, icon, avatar, modal, toast, switchEl, setRow, confirmModal }
 import { pickFile } from './media.js';
 import { doLogout, refreshThemeNav } from './app.js';
 import { isShell, setAutostart, setCloseToTray } from './native.js';
+import { webPushSupported, webPushAvailable, enableWebPush, disableWebPush } from './webpush.js';
 import { flag } from './flags.js';
 import { openThemeStudio } from './themes.js';
 import { renderInsights } from './insights.js';
@@ -462,6 +463,10 @@ function notifyTab(c) {
         }) }),
     setRow('chat', 'Vorschau anzeigen', { sub: 'Nachrichtentext in der Benachrichtigung.',
       trailing: switchEl(prefs.get('notifPreview'), (v) => prefs.set('notifPreview', v)) }),
+    // Web Push: real OS notifications even when the tab/browser is closed. Only
+    // offered in a normal browser (the Windows shell raises its own toasts) and
+    // only once we confirm the server actually has VAPID keys configured.
+    ...(!shell && webPushSupported() ? [webPushRow(c)] : []),
     setRow('bell', 'Ton abspielen', { sub: 'Sanfter Hinweiston bei neuen Nachrichten.',
       trailing: switchEl(prefs.get('notifSound'), (v) => prefs.set('notifSound', v)) }),
     el('div', { class: 'list-section', text: 'Anrufe' }),
@@ -470,6 +475,34 @@ function notifyTab(c) {
     el('div', { class: 'list-section', text: 'Nicht stören' }),
     dndRow(c),
   );
+}
+
+// Web Push: subscribe this browser so notifications arrive even with no tab
+// open. The row mounts immediately (sync), then quietly disables itself if the
+// server turns out to have no VAPID keys — so a misconfigured server never
+// dangles a toggle that can't work.
+function webPushRow(c) {
+  const sw = switchEl(prefs.get('webPush'), async (v) => {
+    try {
+      if (v) { await enableWebPush(); prefs.set('webPush', true); toast('Push aktiviert.', 'ok'); }
+      else { await disableWebPush(); prefs.set('webPush', false); }
+    } catch (e) {
+      prefs.set('webPush', false);
+      throw new Error(e.message || 'Push konnte nicht aktiviert werden.');
+    }
+  });
+  const row = setRow('bell', 'Push (auch bei geschlossenem Tab)', {
+    sub: 'Benachrichtigungen, selbst wenn Ping gerade nicht geöffnet ist.',
+    trailing: sw,
+  });
+  webPushAvailable().then((ok) => {
+    if (!ok) {
+      sw.disabled = true;
+      row.classList.add('disabled');
+      row.title = 'Auf diesem Server nicht eingerichtet.';
+    }
+  }).catch(() => {});
+  return row;
 }
 
 // Do Not Disturb: silence all notifications until a chosen time.

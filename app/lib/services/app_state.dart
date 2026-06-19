@@ -26,6 +26,7 @@ import 'feedback_service.dart';
 import 'media_service.dart';
 import 'local_message_store.dart';
 import 'outbox_store.dart';
+import 'launcher_service.dart';
 import 'notification_service.dart';
 import 'notification_target.dart';
 import 'push_service.dart';
@@ -90,6 +91,7 @@ class AppState extends ChangeNotifier {
   late SocketService _socket;
   final NotificationService notifications = NotificationService();
   final PushService push = PushService();
+  final LauncherService launcher = LauncherService();
   final WallpaperService wallpapers = WallpaperService();
   final UpdateService updater = UpdateService();
   String? _pushToken;
@@ -540,6 +542,14 @@ class AppState extends ChangeNotifier {
     }
     notifications.onTap = dispatchNotificationTarget;
     notifications.onCallAction = _onCallAction;
+    // Direct reply / mark-read from a message notification while the app is
+    // alive in the foreground (the background/terminated case is handled
+    // out-of-isolate in notification_service.dart).
+    notifications.onReply = (chatId, text) {
+      sendMessage(chatId, text);
+      _markChatReadLocally(chatId);
+    };
+    notifications.onMarkRead = _markChatReadLocally;
     push.onToken = _onPushToken;
     push.onOpen = dispatchNotificationTarget;
     push.onIncomingCall = _onIncomingCallPush;
@@ -551,10 +561,25 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       /* push registration can hang without Play Services — never block boot */
     }
+    // Launcher shortcuts (recent chats) + their deep-link routing: a tapped
+    // shortcut while the app runs arrives via onLaunchRoute; a cold launch is
+    // picked up from consumeLaunchRoute below.
+    launcher.onLaunchRoute = (route) {
+      final t = NotificationTarget.decode(route);
+      if (t != null) dispatchNotificationTarget(t);
+    };
+    launcher.wire();
+
     // If the app was cold-launched by tapping a local notification, route to it
     // once the UI is ready.
     final launch = await notifications.launchTarget();
     if (launch != null) dispatchNotificationTarget(launch);
+    // …or by a launcher shortcut deep link.
+    final launchRoute = await launcher.consumeLaunchRoute();
+    if (launchRoute != null) {
+      final t = NotificationTarget.decode(launchRoute);
+      if (t != null) dispatchNotificationTarget(t);
+    }
     // Cold-launched by accepting/declining an incoming call from the lock screen.
     final callLaunch = await notifications.launchCall();
     if (callLaunch != null) {
@@ -1868,6 +1893,7 @@ class AppState extends ChangeNotifier {
       _sortChats();
       online = true;
       chatCache.save(List<Chat>.from(chats));
+      _publishShortcuts();
       notifyListeners();
     } on ApiException catch (e) {
       if (e.status == null) {
@@ -1970,6 +1996,31 @@ class AppState extends ChangeNotifier {
     if (!_loadedChats.contains(chatId)) return;
     final list = _messages[chatId];
     if (list != null) localStore.save(chatId, list);
+  }
+
+  /// Clear a chat's unread state locally + tell the server, and take down any
+  /// lingering notification for it. Used by the notification "Gelesen"/reply
+  /// actions so the badge and shade reflect the action immediately.
+  void _markChatReadLocally(String chatId) {
+    _socket.markRead(chatId);
+    final i = chats.indexWhere((c) => c.id == chatId);
+    if (i != -1 && chats[i].unread != 0) {
+      chats[i] = chats[i].copyWith(unread: 0);
+      notifyListeners();
+    }
+    notifications.cancelForChat(chatId);
+  }
+
+  /// Mirror the most relevant recent chats onto the launcher as dynamic
+  /// shortcuts (Android). Driven off the already-sorted, non-archived list.
+  void _publishShortcuts() {
+    final picks = <({String chatId, String label})>[];
+    for (final c in chats) {
+      if (c.archived || c.title.trim().isEmpty) continue;
+      picks.add((chatId: c.id, label: c.title.trim()));
+      if (picks.length >= 4) break;
+    }
+    launcher.setChatShortcuts(picks);
   }
 
   /// Optimistically append the message, then reconcile with the server.
