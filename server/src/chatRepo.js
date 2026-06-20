@@ -30,6 +30,30 @@ const s = {
   setChatExpireStmt: db.prepare('UPDATE chats SET expire_seconds = ? WHERE id = ?'),
   setInviteCodeStmt: db.prepare('UPDATE chats SET invite_code = ? WHERE id = ?'),
   chatByInviteCode: db.prepare('SELECT * FROM chats WHERE invite_code = ?'),
+  // ---- Channels / Communities (0.31.0) -----------------------------------
+  insertChannel: db.prepare(`
+    INSERT INTO chats (id, type, name, avatar_color, created_by, created_at,
+                       visibility, handle, broadcast, category, description)
+    VALUES (?, 'group', ?, ?, ?, ?, 'public', ?, 1, ?, ?)`),
+  chatByHandle: db.prepare('SELECT * FROM chats WHERE handle = ? COLLATE NOCASE'),
+  setChannelMetaStmt: db.prepare(
+    'UPDATE chats SET name = ?, description = ?, category = ? WHERE id = ?'
+  ),
+  setChannelVisibilityStmt: db.prepare(
+    'UPDATE chats SET visibility = ?, handle = ?, broadcast = ? WHERE id = ?'
+  ),
+  subscriberCount: db.prepare('SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?'),
+  // Directory listing: public channels, most-subscribed first, with an optional
+  // category filter and a free-text query over name/handle/description.
+  publicChannels: db.prepare(`
+    SELECT c.*,
+           (SELECT COUNT(*) FROM chat_members cm WHERE cm.chat_id = c.id) AS sub_count
+    FROM chats c
+    WHERE c.visibility = 'public'
+      AND (@cat = '' OR c.category = @cat)
+      AND (@q = '' OR c.name LIKE @like OR c.handle LIKE @like OR c.description LIKE @like)
+    ORDER BY sub_count DESC, c.created_at DESC
+    LIMIT @limit`),
   userChats: db.prepare(`
     SELECT c.* FROM chats c
     JOIN chat_members m ON m.chat_id = c.id
@@ -91,6 +115,80 @@ export function createGroupChat({ name, ownerId, memberIds = [] }) {
   }
   return s.chatById.get(id);
 }
+
+// ---- Channels / Communities ------------------------------------------------
+// A channel is a public, discoverable, broadcast-style chat: it reuses the group
+// machinery (members, messages, reactions, …) but is listed in the directory,
+// joinable by anyone via its handle, and — being a broadcast — only its owner
+// may post (everyone else reads and reacts). See chatView() for the surfaced
+// fields and the message route for the posting gate.
+
+const HANDLE_RE = /^[a-z0-9](?:[a-z0-9_-]{1,28}[a-z0-9])$/;
+
+/** Normalize a raw handle to the canonical lower-case, URL-safe form, or null. */
+export function normalizeHandle(raw) {
+  const h = String(raw || '').trim().toLowerCase().replace(/^@+/, '');
+  return HANDLE_RE.test(h) ? h : null;
+}
+
+export const getChannelByHandle = (handle) => {
+  const h = normalizeHandle(handle);
+  return h ? s.chatByHandle.get(h) : null;
+};
+
+/** Create a public broadcast channel owned by [ownerId]. Handle must be free. */
+export function createChannel({ name, handle, description = '', category = '', ownerId }) {
+  const id = uid();
+  const ts = now();
+  s.insertChannel.run(id, name, pickAvatarColor(id), ownerId, ts, handle, category, description);
+  s.addMember.run(id, ownerId, 'owner', ts);
+  return s.chatById.get(id);
+}
+
+/** Browse the public-channel directory. */
+export function listChannelDirectory({ q = '', category = '', limit = 60 } = {}) {
+  const query = String(q || '').trim();
+  return s.publicChannels
+    .all({
+      q: query,
+      like: `%${query}%`,
+      cat: String(category || '').trim(),
+      limit: Math.min(Math.max(1, limit | 0), 200),
+    })
+    .map((row) => channelCard(row));
+}
+
+/** Compact directory card for a channel row (already carrying sub_count). */
+export function channelCard(chat, viewerId = null) {
+  return {
+    id: chat.id,
+    handle: chat.handle,
+    title: chat.name,
+    description: chat.description || '',
+    category: chat.category || '',
+    avatarColor: chat.avatar_color,
+    hasAvatar: !!chat.avatar_mime,
+    avatarVersion: chat.avatar_version || 0,
+    subscriberCount: chat.sub_count != null ? chat.sub_count : s.subscriberCount.get(chat.id).n,
+    createdAt: chat.created_at,
+    joined: viewerId ? isMember(chat.id, viewerId) : undefined,
+  };
+}
+
+/** Rename / re-describe / re-categorize a channel. Unspecified fields stay. */
+export function updateChannelMeta(chatId, { name, description, category }) {
+  const c = s.chatById.get(chatId);
+  if (!c) return null;
+  s.setChannelMetaStmt.run(
+    name ?? c.name,
+    description ?? c.description ?? '',
+    category ?? c.category ?? '',
+    chatId
+  );
+  return s.chatById.get(chatId);
+}
+
+export const subscriberCount = (chatId) => s.subscriberCount.get(chatId).n;
 
 export const getChat = (id) => s.chatById.get(id);
 export const isMember = (chatId, userId) => !!s.isMember.get(chatId, userId);
@@ -322,9 +420,27 @@ export function chatView(chat, viewerId) {
     base.description = chat.description || '';
     base.hasAvatar = !!chat.avatar_mime;
     base.avatarVersion = chat.avatar_version || 0;
-    base.members = memberIds.map((id) => publicUser(getUserById(id))).filter(Boolean);
     base.ownerId = memberRows.find((m) => m.role === 'owner')?.user_id || null;
+    // ---- Channels / Communities ------------------------------------------
+    const isChannel = chat.visibility === 'public' && !!chat.broadcast;
+    base.isChannel = isChannel;
+    base.visibility = chat.visibility || 'private';
+    base.handle = chat.handle || null;
+    base.broadcast = !!chat.broadcast;
+    base.category = chat.category || '';
+    base.role = memberRows.find((m) => m.user_id === viewerId)?.role || null;
+    base.subscriberCount = memberIds.length;
+    // A broadcast channel can be huge; only the owner needs the full member list
+    // (for moderation). Subscribers just see the count, which keeps chat-list
+    // payloads small.
+    base.members = isChannel && base.role !== 'owner'
+      ? []
+      : memberIds.map((id) => publicUser(getUserById(id))).filter(Boolean);
   }
+  // Whether the viewer may post: blocked by a read-only lock, and in a broadcast
+  // channel restricted to owners/admins. The client uses this to swap the
+  // composer for a "you're following this channel" bar.
+  base.canPost = !chat.locked && (!chat.broadcast || base.role === 'owner');
 
   const last = s.lastVisibleMessage.get(chat.id, now(), viewerId);
   base.lastMessage = last ? messageView(last, viewerId) : null;

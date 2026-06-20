@@ -188,7 +188,13 @@ function buildHead(chat, onBack) {
     el('button', { class: 'iconbtn back-only', title: 'Zurück', onClick: onBack }, icon('back')),
     el('div', { class: 'peer', onClick: () => openChatInfo(chat) }, [
       av,
-      el('div', {}, [el('div', { class: 'title', text: chat.self ? 'Notiz an mich' : chat.title }), sub]),
+      el('div', {}, [
+        el('div', { class: 'title' }, [
+          el('span', { text: chat.self ? 'Notiz an mich' : chat.title }),
+          chat.isChannel ? icon('megaphone', 'sm channel-badge') : null,
+        ].filter(Boolean)),
+        sub,
+      ]),
     ]),
     el('div', { class: 'actions' }, [
       isDirect && !chat.self
@@ -212,7 +218,10 @@ function updateHeadSub() {
   const typing = store.typingUsers(cur.chatId).filter((u) => u !== store.state.me?.id);
   if (typing.length) { sub.textContent = 'tippt …'; sub.classList.add('typing'); return; }
   sub.classList.remove('typing');
-  if (chat.type === 'group') {
+  if (chat.isChannel) {
+    const n = chat.subscriberCount ?? chat.memberIds?.length ?? 0;
+    sub.textContent = n === 1 ? '1 Abonnent' : `${n.toLocaleString('de-DE')} Abonnenten`;
+  } else if (chat.type === 'group') {
     sub.textContent = `${chat.members?.length || chat.memberIds?.length || 0} Mitglieder`;
   } else if (chat.self) {
     sub.textContent = 'Nur du';
@@ -601,6 +610,11 @@ function renderComposer() {
 
   if (chat?.locked) {
     wrap.appendChild(el('div', { class: 'composer locked', text: '🔒 Dieser Kanal ist schreibgeschützt.' }));
+    return;
+  }
+  // Broadcast channel (0.31.0): subscribers can't post, only read + react.
+  if (chat && chat.canPost === false && chat.broadcast) {
+    wrap.appendChild(el('div', { class: 'composer locked', text: '📢 Nur die Betreiber können in diesem Kanal posten.' }));
     return;
   }
   if (cur.recorder) { renderRecBar(wrap); return; }
@@ -1075,18 +1089,33 @@ async function bulkDelete() {
 
 // ---- chat menu / info -----------------------------------------------------
 function chatMenu(e, chat) {
+  const isChannel = !!chat.isChannel;
+  const isOwner = chat.role === 'owner';
   openMenu(e, [
     { label: 'Infos', icon: 'info', onClick: () => openChatInfo(chat) },
     { label: 'Suchen', icon: 'search', onClick: () => toggleChatSearch() },
     { label: 'Nachrichten auswählen', icon: 'check', onClick: () => enterSelect(null) },
+    isChannel ? { label: 'Kanal teilen', icon: 'link', onClick: () => shareChannel(chat) } : null,
+    isChannel && isOwner ? { label: 'Kanal bearbeiten', icon: 'edit',
+      onClick: () => import('./channels.js').then((m) => m.editChannelModal(chat)) } : null,
     { label: chat.muted ? 'Stummschaltung aufheben' : 'Stummschalten', icon: 'mute', onClick: () => toggleMute(chat) },
-    { label: 'Verschwindende Nachrichten', icon: 'clock', onClick: () => expireModal(chat) },
-    { label: 'Geplante Nachrichten', icon: 'schedule', onClick: () => listScheduled() },
+    // Owner-only authoring affordances make no sense for read-only subscribers.
+    !isChannel || isOwner ? { label: 'Verschwindende Nachrichten', icon: 'clock', onClick: () => expireModal(chat) } : null,
+    !isChannel || isOwner ? { label: 'Geplante Nachrichten', icon: 'schedule', onClick: () => listScheduled() } : null,
     { label: chat.archived ? 'Aus Archiv' : 'Archivieren', icon: 'archive', onClick: () => toggleArchive(chat) },
     { label: 'Chat exportieren', icon: 'download', onClick: () => exportChat(chat) },
-    chat.type === 'group' ? { label: 'Gruppe verlassen', icon: 'logout', danger: true,
+    chat.type === 'group' ? { label: isChannel ? 'Nicht mehr folgen' : 'Gruppe verlassen', icon: 'logout', danger: true,
       onClick: () => import('./groups.js').then((m) => m.leaveGroup(chat.id)) } : null,
   ].filter(Boolean));
+}
+
+// Copy a shareable /?c=<handle> link for a channel.
+function shareChannel(chat) {
+  if (!chat.handle) { toast('Kein Link verfügbar.'); return; }
+  const url = `${location.origin}/webclient/?c=${encodeURIComponent(chat.handle)}`;
+  navigator.clipboard?.writeText(url)
+    .then(() => toast('Kanal-Link kopiert.', 'ok'))
+    .catch(() => toast(url));
 }
 
 // Export the *full* conversation history. The server streams the complete

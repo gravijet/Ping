@@ -62,6 +62,7 @@ A modular ES-module SPA — no framework, no bundler. Served as static files.
 | `shortcuts.js` | keyboard-shortcut cheat sheet (the canonical binding list) |
 | `themes.js` | Theme Studio: presets, custom accent, `ping-theme:` codes |
 | `insights.js` | device-local usage insights (never transmitted) |
+| `channels.js` | Communities: Entdecken directory, create/preview/edit dialogs, `?c=` deep links |
 | `sw.js` | service worker (app-shell precache + runtime cache + update prompt) |
 
 State flows one way: socket/REST events mutate the **store**, the store emits,
@@ -225,6 +226,36 @@ event for live/cross-device sync, and UI on web + Android.
   chips/tabs above the chat list, exclusive with the built-in quick filters.
 - **In-chat search** — `GET /messages/search?chatId=…` reuses the LIKE search,
   constrained to one (membership-checked) chat.
+
+## Channels / Communities (0.31.0)
+Public, discoverable **broadcast channels** — kill-switchable via the remote flag
+`communities`. A channel is *not* a new entity: it is a `type='group'` chat with
+four additive `chats` columns — `visibility='public'`, a globally-unique
+`handle`, `broadcast=1` and a directory `category`. That reuse means messages,
+reactions, pins, FTS search and push all work unchanged the moment you follow one.
+
+- **Schema** (`db.js`): the columns are in the initial schema *and* added to old
+  databases by idempotent `ALTER TABLE`s in `ensureColumns()`. A partial unique
+  index `idx_chats_handle (handle COLLATE NOCASE) WHERE handle IS NOT NULL` makes
+  handles case-insensitively unique among channels while exempting ordinary
+  chats; `idx_chats_public (visibility) WHERE visibility='public'` keeps the
+  directory query cheap. These indexes live in `ensureColumns()` (not the initial
+  block) so they never reference a column an old DB hasn't gained yet.
+- **Repo** (`chatRepo.js`): `createChannel`, `getChannelByHandle`,
+  `listChannelDirectory` (sub-count-ranked, `q` + `category` filtered),
+  `channelCard`, `updateChannelMeta`, `subscriberCount`, `normalizeHandle`.
+  `chatView` surfaces `isChannel/handle/broadcast/category/role/subscriberCount`
+  and a derived **`canPost`** (false for a broadcast-channel subscriber); the full
+  member list is omitted for non-owner subscribers to keep payloads small.
+- **Routes**: `POST /channels` (409 on a taken handle), `GET /channels`
+  (directory), `GET /channels/:handle` (deep-link lookup + owner), `POST
+  /channels/:handle/join` (idempotent; pings the owner live), `PATCH /channels/:id`
+  (owner-only). The send route gates a non-owner's post in a `broadcast` channel
+  with a 403 (distinct from a read-only `locked` channel, which blocks everyone).
+- **Web** (`channels.js`): the **Entdecken** directory pane, create dialog (live
+  handle-availability check), preview/hero card, owner edit dialog and the
+  `/?c=<handle>` deep link. The chat header shows a 📣 badge + subscriber count
+  and swaps the composer for a read-only notice for subscribers.
 
 ## Conversation context (0.28.0)
 Two additive features that add context to messages — both kill-switchable via the

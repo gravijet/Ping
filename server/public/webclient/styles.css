@@ -1637,3 +1637,95 @@ a { color: var(--accent-ink); }
 @media (prefers-reduced-motion: reduce) {
   .search-skel .sk-line { animation: none; }
 }
+
+/* ===========================================================================
+   Channels / Communities (0.31.0) — directory pane, channel cards, create
+   dialog and the broadcast badge. Reuses the app's surface/accent tokens so it
+   inherits every theme (light, dark, AMOLED, theme-studio accents).
+   =========================================================================== */
+
+/* Category filter chips above the directory list. */
+.cat-chips {
+  display: flex; gap: 8px; padding: 0 14px 10px; overflow-x: auto;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.cat-chips::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex: 0 0 auto; padding: 6px 13px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: background .15s, color .15s, border-color .15s;
+}
+.cat-chip:hover { background: var(--surface-2); color: var(--text); }
+.cat-chip.active {
+  background: var(--accent-soft); color: var(--accent-ink);
+  border-color: var(--accent-line);
+}
+
+/* Directory list of channel cards. */
+.channel-list { padding: 0 8px 16px; }
+.channel-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 10px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .15s;
+}
+.channel-row:hover { background: var(--surface); }
+.channel-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.channel-meta { flex: 1; min-width: 0; }
+.channel-name {
+  display: flex; align-items: center; gap: 5px;
+  font-weight: 680; font-size: 15px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.channel-handle { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+.channel-desc {
+  font-size: 13px; color: var(--faint); margin-top: 3px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.channel-row .btn.sm { flex: 0 0 auto; }
+
+/* The broadcast badge (a small megaphone) next to a channel's name. */
+.channel-badge { color: var(--accent); opacity: .9; flex: 0 0 auto; }
+.icon.sm.channel-badge { width: 15px; height: 15px; }
+
+/* Empty-state illustration glyph. */
+.pane-empty-ic {
+  display: inline-flex; width: 56px; height: 56px; margin: 0 auto 14px;
+  align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+}
+.pane-empty-ic .icon { width: 28px; height: 28px; }
+
+/* Preview / hero card shown before joining a channel (and on deep links). */
+.channel-hero { text-align: center; padding: 6px 4px 4px; }
+.channel-hero .av { margin: 0 auto 12px; }
+.channel-hero-name {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 20px; font-weight: 760; letter-spacing: -0.01em;
+}
+.channel-hero .channel-handle { text-align: center; font-size: 13.5px; }
+.channel-hero-stats { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.channel-hero-desc {
+  font-size: 14px; color: var(--text); line-height: 1.55; margin-top: 14px;
+  padding-top: 14px; border-top: 1px solid var(--line); text-align: left;
+}
+
+/* A right-aligned action row inside a modal body (used by the preview card). */
+.modal-actions {
+  display: flex; gap: 10px; justify-content: flex-end;
+  margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+}
+
+/* Create-channel dialog: the @handle composite input + inline field hints. */
+.handle-input {
+  display: flex; align-items: center; gap: 2px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); padding-left: 11px; overflow: hidden;
+  transition: border-color .15s;
+}
+.handle-input:focus-within { border-color: var(--accent); }
+.handle-input > span { color: var(--muted); font-weight: 600; }
+.handle-input > input { border: 0 !important; background: transparent !important; flex: 1; }
+.field-hint { font-size: 12.5px; color: var(--muted); margin: -8px 0 14px 3px; }
+.field-hint.ok { color: var(--ok); }
+.field-hint.err { color: var(--danger); }

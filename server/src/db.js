@@ -45,10 +45,26 @@ db.exec(`
     -- server delivers messages into it; normal members can't reply.
     locked       INTEGER NOT NULL DEFAULT 0,
     -- A group's shareable join code (null = no invite link active).
-    invite_code  TEXT
+    invite_code  TEXT,
+    -- ---- Channels / Communities (0.31.0) --------------------------------
+    -- 'private' (default; classic group) or 'public' (a discoverable channel
+    -- listed in the directory and joinable by anyone via its handle).
+    visibility   TEXT NOT NULL DEFAULT 'private',
+    -- Unique, URL-safe public name for a channel (e.g. "ping-news"). Null for
+    -- ordinary groups/DMs. Powers the directory and /c/<handle> deep links.
+    handle       TEXT,
+    -- 1 = broadcast channel: only owners/admins may post; everyone else reads
+    -- and reacts. (Distinct from the locked flag, which blocks all member sends.)
+    broadcast    INTEGER NOT NULL DEFAULT 0,
+    -- Free-form directory category ('Nachrichten', 'Technik', …); '' = none.
+    category     TEXT NOT NULL DEFAULT ''
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_direct_key
     ON chats(direct_key) WHERE direct_key IS NOT NULL;
+  -- NOTE: the channel handle/visibility indexes are created in ensureColumns()
+  -- (not here), because on an existing database the handle/visibility columns
+  -- only appear after the ALTER TABLE migrations run — creating the indexes in
+  -- this block would reference columns that don't exist yet.
 
   CREATE TABLE IF NOT EXISTS chat_members (
     chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -683,6 +699,27 @@ function ensureColumns() {
     // join the group via POST /chats/join.
     db.exec('ALTER TABLE chats ADD COLUMN invite_code TEXT');
   }
+  // ---- Channels / Communities (0.31.0) ------------------------------------
+  if (!chatCols.includes('visibility')) {
+    db.exec("ALTER TABLE chats ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'");
+  }
+  if (!chatCols.includes('handle')) {
+    db.exec('ALTER TABLE chats ADD COLUMN handle TEXT');
+  }
+  if (!chatCols.includes('broadcast')) {
+    db.exec('ALTER TABLE chats ADD COLUMN broadcast INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!chatCols.includes('category')) {
+    db.exec("ALTER TABLE chats ADD COLUMN category TEXT NOT NULL DEFAULT ''");
+  }
+  // These indexes depend on the columns above, so (like the expires index) they
+  // are created here rather than in the initial CREATE TABLE for old databases.
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_handle ON chats(handle COLLATE NOCASE) WHERE handle IS NOT NULL'
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_chats_public ON chats(visibility) WHERE visibility = 'public'"
+  );
   const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
   if (!msgCols.includes('expires_at')) {
     db.exec('ALTER TABLE messages ADD COLUMN expires_at INTEGER');

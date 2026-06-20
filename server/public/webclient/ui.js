@@ -65,6 +65,11 @@ const PATHS = {
   unblock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8 12l3 3 5-6',
   refresh: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5',
   poll: 'M7 16v-5M12 16V8M17 16v-3M4 21h16a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1Z',
+  // Channels / Communities (0.31.0): a compass for "Entdecken", a megaphone for
+  // the broadcast badge, and a hash for handles.
+  compass: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM15.5 8.5l-2 5-5 2 2-5 5-2Z',
+  megaphone: 'M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1ZM14 8a4 4 0 0 1 0 8M16.5 5a8 8 0 0 1 0 14',
+  hash: 'M9 4 7 20M17 4l-2 16M5 9h15M4 15h15',
 };
 
 export function icon(name, cls = '') {

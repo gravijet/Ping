@@ -14,7 +14,8 @@ export const DEFAULT_CONFIG = {
     status: true,
     voiceNotes: true,
     reactions: true,
-    communities: false,
+    // Channels / Communities (0.31.0): public, discoverable broadcast channels.
+    communities: true,
     calls: false,
     // Device-Intelligence (0.24.0): live diagnostics surface, adaptive
     // data/battery behaviour, and the anonymous device-fleet telemetry.

@@ -47,6 +47,14 @@ Online-Status, Lesebestätigungen).
   oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Kanäle & Entdecken** (seit 0.31.0) – öffentliche, **entdeckbare Broadcast-
+  Kanäle**. Erstelle einen Kanal mit Name, eindeutigem **`@handle`**, Beschreibung
+  und Kategorie; im neuen **Entdecken**-Bereich durchsuchst du das nach Abonnenten
+  sortierte Verzeichnis, filterst nach Kategorie und folgst per Tipp. Im Kanal
+  postet nur der/die Betreiber:in – alle anderen **lesen und reagieren**. Jeder
+  Kanal hat einen teilbaren `/?c=<handle>`-Link. (Server-seitig ein öffentlicher
+  Broadcast-Gruppenchat, daher mit voller History, Reaktionen, Suche und Push.)
+  Per Feature-Flag `communities` abschaltbar.
 - **Erweiterte Suche** (seit 0.30.0) – Volltextsuche über alle Chats mit
   **SQLite FTS5**: relevanz-sortiert (bm25), mit **hervorgehobenen Treffern** und
   Filtern direkt in der Suchzeile – `von:` (Absender), `typ:` (foto · video ·

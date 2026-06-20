@@ -227,7 +227,9 @@ function buildNavRail(me) {
     navItem('status', 'status', 'Status'),
     navItem('calls', 'phone', 'Anrufe'),
     navItem('saved', 'star', 'Gespeichert'),
-  ]);
+    // Channels / Communities (0.31.0): the public-channel directory.
+    flag('communities') ? navItem('discover', 'compass', 'Entdecken') : null,
+  ].filter(Boolean));
   const themeBtn = el('button', { class: 'nav-item', id: 'nav-theme', 'data-label': 'Design',
     title: 'Hell/Dunkel', onClick: () => { toggleTheme(); refreshThemeNav(); } },
     icon(prefs.isLight() ? 'moon' : 'sun'));
@@ -323,6 +325,10 @@ function renderSection() {
     sideBody.append(loading());
     return import('./saved.js').then((m) =>
       m.renderSavedPane(sideHead, sideBody, openChatInShell));
+  }
+  if (currentSection === 'discover') {
+    return import('./channels.js').then((m) =>
+      m.renderDiscoverPane(sideHead, sideBody, openChatInShell));
   }
 }
 
@@ -840,10 +846,15 @@ function handleDeepLink() {
     // ?u=<userId> — open a person's profile card (and offer to start a chat).
     const userId = safeId(params.get('u'));
     if (userId && flag('profileLinks')) openProfileById(userId);
+    // ?c=<handle> — open a channel's preview card (follow / open).
+    const channelHandle = params.get('c');
+    if (channelHandle && flag('communities')) {
+      import('./channels.js').then((m) => m.previewChannel(channelHandle, openChatInShell));
+    }
     // PWA app-shortcuts (manifest) land here as query params.
     if (params.get('compose') === '1') newChatModal();
     if (params.get('view') === 'activity' && flag('activityCenter')) activity.openActivityPanel(openChatInShell);
-    if (chatId || userId || params.get('invite') || params.get('compose') || params.get('view')) {
+    if (chatId || userId || channelHandle || params.get('invite') || params.get('compose') || params.get('view')) {
       history.replaceState(null, '', location.pathname);
     }
   } catch { /* malformed URL — ignore */ }

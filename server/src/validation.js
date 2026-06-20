@@ -283,6 +283,55 @@ export const createGroupChatSchema = z.object({
   memberIds: z.array(z.string().min(1)).max(256).optional(),
 });
 
+// ---- Channels / Communities (0.31.0) ---------------------------------------
+// A handle is the channel's public, URL-safe identity: 3-30 chars, lower-case
+// letters/digits/-/_, must start and end alphanumeric. Stored normalized.
+export const handleSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((s) => s.replace(/^@+/, ''))
+  .pipe(
+    z
+      .string()
+      .min(3, 'Der Handle braucht mindestens 3 Zeichen.')
+      .max(30, 'Der Handle darf höchstens 30 Zeichen haben.')
+      .regex(
+        /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])$/,
+        'Nur Kleinbuchstaben, Ziffern, „-" und „_" — Anfang und Ende alphanumerisch.'
+      )
+  );
+
+// A small fixed set keeps the directory tidy and the filter UI simple.
+export const CHANNEL_CATEGORIES = [
+  'Nachrichten', 'Technik', 'Unterhaltung', 'Sport',
+  'Bildung', 'Community', 'Kunst', 'Sonstiges',
+];
+
+export const createChannelSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib dem Kanal einen Namen.')
+    .max(40, 'Der Kanalname darf höchstens 40 Zeichen haben.'),
+  handle: handleSchema,
+  description: z.string().trim().max(280, 'Die Beschreibung ist zu lang (max. 280).').optional(),
+  category: z.enum(CHANNEL_CATEGORIES).optional(),
+});
+
+export const updateChannelSchema = z
+  .object({
+    name: z.string().trim().min(1).max(40).optional(),
+    description: z.string().trim().max(280).optional(),
+    category: z.enum(CHANNEL_CATEGORIES).optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, 'Nichts zu ändern.');
+
+export const channelDirectorySchema = z.object({
+  q: z.string().trim().max(80).optional(),
+  category: z.enum(CHANNEL_CATEGORIES).optional(),
+});
+
 // ---- Admin -----------------------------------------------------------------
 
 export const adminCreateSchema = z.object({

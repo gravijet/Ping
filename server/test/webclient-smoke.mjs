@@ -212,6 +212,17 @@ async function fetchShim(url) {
   if (path === '/calls') return jsonRes({ calls: [] });
   if (path.startsWith('/chats/') && path.endsWith('/invite')) return jsonRes({ code: null });
   if (path === '/ice') return jsonRes({ iceServers: [] });
+  // Channels / Communities (0.31.0)
+  if (/^\/channels\/[^/]+$/.test(path)) return jsonRes({ channel: {
+    id: 'ch1', handle: 'ping-news', title: 'Ping News', description: 'Updates',
+    category: 'Nachrichten', avatarColor: '#7c5cff', subscriberCount: 42,
+    joined: false, owner: { id: 'u9', displayName: 'Team' } } });
+  if (path.startsWith('/channels')) return jsonRes({ channels: [
+    { id: 'ch1', handle: 'ping-news', title: 'Ping News', description: 'Updates',
+      category: 'Nachrichten', avatarColor: '#7c5cff', subscriberCount: 42, joined: false },
+    { id: 'ch2', handle: 'astro', title: 'Astro', description: 'Space', category: 'Bildung',
+      avatarColor: '#22c', subscriberCount: 5, joined: true },
+  ] });
   if (path.startsWith('/uploads')) return jsonRes({ upload: { id: 'u', url: '/api/uploads/u', mime: 'image/png', name: 'a.png', size: 1, kind: 'image' } });
   return jsonRes({ ok: true });
 }
@@ -349,6 +360,23 @@ await step('focus mode: sync, open settings, toggle quiet hours + a day', async 
   if (!day) day; else { day.click(); await tick(); }
   const quick = document.querySelector('.focus-quick .btn');
   if (!quick) throw new Error('focus quick-set buttons missing');
+});
+await step('channels: directory renders, preview + create dialog open', async () => {
+  const channels = await imp('channels.js');
+  const head = new El('div'), body = new El('div');
+  await channels.renderDiscoverPane(head, body, () => {});
+  await new Promise((r) => setTimeout(r, 30)); // let the directory fetch resolve
+  // head/body are detached containers, so query within them (not the document).
+  const rows = body.querySelectorAll('.channel-row');
+  if (!rows.length) throw new Error('no channel rows rendered');
+  // category chips present (Alle + the fixed set)
+  if (!body.querySelector('.cat-chip')) throw new Error('category chips missing');
+  // preview card hydrates from a handle lookup
+  channels.previewChannel('ping-news', () => {}); await tick(); await tick();
+  if (!document.querySelector('.channel-hero')) throw new Error('preview hero not rendered');
+  // create dialog opens with the @handle composite input
+  channels.createChannelModal(() => {}); await tick();
+  if (!document.querySelector('.handle-input')) throw new Error('create dialog handle input missing');
 });
 
 // Phase C: the 0.20.0 offline / diagnostics / dev-tools modules.

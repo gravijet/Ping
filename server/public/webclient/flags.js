@@ -40,6 +40,7 @@ export const DEFAULTS = {
   chatExport: true,      // full server-side per-chat transcript export (txt/json)
   messageSearch: true,   // FTS5 global search view with filters + highlighted snippets
   focusMode: true,       // focus mode / quiet hours + DM auto-reply (server-enforced)
+  communities: true,     // public, discoverable broadcast channels ("Entdecken")
 };
 
 function localOverrides() {

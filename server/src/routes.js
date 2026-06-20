@@ -45,6 +45,9 @@ import {
   lookupSchema,
   matchSchema,
   createGroupChatSchema,
+  createChannelSchema,
+  updateChannelSchema,
+  channelDirectorySchema,
   reactionSchema,
   pollCreateSchema,
   pollVoteSchema,
@@ -150,6 +153,13 @@ import {
   setChatExpire,
   setInviteCode,
   getChatByInviteCode,
+  createChannel,
+  getChannelByHandle,
+  listChannelDirectory,
+  updateChannelMeta,
+  channelCard,
+  subscriberCount,
+  normalizeHandle,
   searchMessages,
   updateGroupMeta,
   setChatAvatar,
@@ -1199,6 +1209,13 @@ router.post(
         .status(403)
         .json({ error: 'Dieser Kanal ist schreibgeschützt.' });
     }
+    // Broadcast channel (0.31.0): only the owner/admins may post; subscribers
+    // read and react. (locked blocks *everyone*; broadcast lets the owner post.)
+    if (req.chat.broadcast && getMemberRole(req.chat.id, req.user.id) !== 'owner') {
+      return res
+        .status(403)
+        .json({ error: 'In diesem Kanal können nur die Betreiber posten.' });
+    }
     const { body, type = 'text', attachment, replyTo: replyRaw } = parse(
       messageSendSchema,
       req.body || {}
@@ -1345,6 +1362,120 @@ router.post(
       sendToUser(memberId, 'message', { message: messageView(sys, memberId) });
     }
     res.status(201).json({ chat: chatView(chat, req.user.id), joined: true });
+  })
+);
+
+// ---- Channels / Communities (0.31.0) ----
+// Public, discoverable broadcast channels. A channel reuses the group chat
+// machinery (it is a `type='group'` row with visibility='public' + broadcast=1),
+// so messages, reactions, pins, search and push all work unchanged; these routes
+// add creation, a searchable directory, handle deep-links and join/leave.
+
+// Create a channel. The handle must be globally unique (case-insensitive).
+router.post(
+  '/channels',
+  requireAuth,
+  h(async (req, res) => {
+    const { name, handle, description = '', category = '' } = parse(
+      createChannelSchema,
+      req.body || {}
+    );
+    if (getChannelByHandle(handle)) {
+      return res.status(409).json({ error: 'Dieser Handle ist schon vergeben.' });
+    }
+    const chat = createChannel({
+      name,
+      handle,
+      description,
+      category,
+      ownerId: req.user.id,
+    });
+    createMessage({
+      chatId: chat.id,
+      senderId: req.user.id,
+      type: 'system',
+      body: `${req.user.display_name} hat den Kanal „${name}" erstellt.`,
+    });
+    sendToUser(req.user.id, 'chat-created', { chat: chatView(chat, req.user.id) });
+    res.status(201).json({ chat: chatView(chat, req.user.id) });
+  })
+);
+
+// Browse the public-channel directory (most-subscribed first), with an optional
+// free-text query and category filter. Each card carries the viewer's joined
+// state so the client can render "Folgen" vs. "Abonniert".
+router.get(
+  '/channels',
+  requireAuth,
+  h(async (req, res) => {
+    const { q = '', category = '' } = parse(channelDirectorySchema, req.query || {});
+    const channels = listChannelDirectory({ q, category }).map((c) => ({
+      ...c,
+      joined: isMember(c.id, req.user.id),
+    }));
+    res.json({ channels });
+  })
+);
+
+// Look up a single channel by its handle — powers /c/<handle> deep links and the
+// preview card shown before you join. Public metadata only (no member list).
+router.get(
+  '/channels/:handle',
+  requireAuth,
+  h(async (req, res) => {
+    const chat = getChannelByHandle(req.params.handle);
+    if (!chat) {
+      return res.status(404).json({ error: 'Diesen Kanal gibt es nicht.' });
+    }
+    const ownerRow = getMembers(chat.id).find((m) => m.role === 'owner');
+    const owner = ownerRow ? publicUser(getUserById(ownerRow.user_id)) : null;
+    res.json({
+      channel: {
+        ...channelCard({ ...chat, sub_count: subscriberCount(chat.id) }, req.user.id),
+        owner: owner ? { id: owner.id, displayName: owner.displayName } : null,
+      },
+    });
+  })
+);
+
+// Subscribe to a channel by handle. Idempotent: re-joining just returns the chat.
+router.post(
+  '/channels/:handle/join',
+  requireAuth,
+  h(async (req, res) => {
+    const chat = getChannelByHandle(req.params.handle);
+    if (!chat) {
+      return res.status(404).json({ error: 'Diesen Kanal gibt es nicht.' });
+    }
+    if (isMember(chat.id, req.user.id)) {
+      return res.json({ chat: chatView(chat, req.user.id), joined: false });
+    }
+    addMember(chat.id, req.user.id);
+    // Notify the owner (so their subscriber count ticks live); no noisy system
+    // message in the feed — channels can have many joins.
+    const ownerRow = getMembers(chat.id).find((m) => m.role === 'owner');
+    if (ownerRow) sendToUser(ownerRow.user_id, 'chat-created', { chat: chatView(chat, ownerRow.user_id) });
+    sendToUser(req.user.id, 'chat-created', { chat: chatView(chat, req.user.id) });
+    res.status(201).json({ chat: chatView(chat, req.user.id), joined: true });
+  })
+);
+
+// Edit a channel's name / description / category (owner only).
+router.patch(
+  '/channels/:id',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!req.chat.broadcast) {
+      return res.status(400).json({ error: 'Das ist kein Kanal.' });
+    }
+    if (getMemberRole(req.chat.id, req.user.id) !== 'owner') {
+      return res.status(403).json({ error: 'Das dürfen nur die Betreiber.' });
+    }
+    const patch = parse(updateChannelSchema, req.body || {});
+    const updated = updateChannelMeta(req.chat.id, patch);
+    broadcastChatUpdate(updated);
+    res.json({ chat: chatView(updated, req.user.id) });
   })
 );
 
