@@ -251,6 +251,102 @@ export function windowsInfo() {
   };
 }
 
+// ---- Per-version release archive (download an old version from its changelog)
+//
+// Every published release keeps its universal APK under downloads/archive/
+// (ping-<version>.apk), and its Windows installer lives next to the current one
+// as Ping-Setup-<version>.exe. This scans both so the website + in-app changelog
+// can offer a download for *any* past version, not just the latest.
+
+const VERSION_RE = /^\d+\.\d+\.\d+$/;
+const ARCHIVE_DIRNAME = 'archive';
+
+function statOrNull(full) {
+  try {
+    const st = fs.statSync(full);
+    return st.isFile() ? st : null;
+  } catch {
+    return null;
+  }
+}
+
+// Compare two "x.y.z" strings numerically, newest first.
+function semverDesc(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pb[i] || 0) !== (pa[i] || 0)) return (pb[i] || 0) - (pa[i] || 0);
+  }
+  return 0;
+}
+
+// The absolute path of an archived APK / a Windows installer for [version], or
+// null if there is no such file. [version] is validated against VERSION_RE so it
+// can never escape the downloads directory.
+export function archivedApkPath(version) {
+  if (!VERSION_RE.test(version)) return null;
+  // Prefer the archive copy; fall back to the live download dir (current build).
+  const candidates = [
+    path.join(config.apkDir, ARCHIVE_DIRNAME, `ping-${version}.apk`),
+    path.join(config.apkDir, `ping-${version}.apk`),
+  ];
+  for (const full of candidates) if (statOrNull(full)) return full;
+  return null;
+}
+
+export function archivedWindowsPath(version) {
+  if (!VERSION_RE.test(version)) return null;
+  const full = path.join(config.windowsDir, `Ping-Setup-${version}.exe`);
+  return statOrNull(full) ? full : null;
+}
+
+// A manifest of every version with a downloadable binary, newest first. Powers
+// the per-changelog download buttons on the site + in the app.
+export function releaseDownloads() {
+  const byVersion = new Map(); // version -> { apk?, windows? }
+  const ensure = (v) => {
+    if (!byVersion.has(v)) byVersion.set(v, { version: v });
+    return byVersion.get(v);
+  };
+
+  // APKs: the archive dir (every past release) + the live dir (current build).
+  for (const dir of [path.join(config.apkDir, ARCHIVE_DIRNAME), config.apkDir]) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of entries) {
+      // Only the universal APK (ping-<ver>.apk); skip per-ABI splits.
+      const m = f.match(/^ping-(\d+\.\d+\.\d+)\.apk$/);
+      if (!m) continue;
+      const st = statOrNull(path.join(dir, f));
+      if (!st) continue;
+      const rec = ensure(m[1]);
+      if (!rec.apk) {
+        rec.apk = { url: `/download/apk/${m[1]}`, size: st.size };
+      }
+    }
+  }
+
+  // Windows installers: Ping-Setup-<ver>.exe in the downloads dir.
+  try {
+    for (const f of fs.readdirSync(config.windowsDir)) {
+      const m = f.match(/^Ping-Setup-(\d+\.\d+\.\d+)\.exe$/);
+      if (!m) continue;
+      const st = statOrNull(path.join(config.windowsDir, f));
+      if (!st) continue;
+      const rec = ensure(m[1]);
+      rec.windows = { url: `/download/windows/${m[1]}`, size: st.size };
+    }
+  } catch {
+    /* no windows dir */
+  }
+
+  return [...byVersion.values()].sort((a, b) => semverDesc(a.version, b.version));
+}
+
 export function mountDownloads(app, publicDir) {
   // Landing page.
   app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
@@ -376,6 +472,48 @@ export function mountDownloads(app, publicDir) {
     sendFileRanged(req, res, v.full, v.size, {
       type: 'application/vnd.android.package-archive',
       filename: `ping-${info.version}-${req.params.abi}.apk`,
+    });
+  });
+
+  // ---- Per-version archive (download an old release from its changelog) -----
+
+  // The list of versions with a downloadable binary (APK and/or Windows), newest
+  // first. The site + app render a download button per changelog entry from this.
+  app.get('/download/releases', (_req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=120');
+    res.json({ releases: releaseDownloads() });
+  });
+
+  // A specific past version's universal APK. :version is strictly validated
+  // (x.y.z) and only ever used as a lookup key, never to build a path directly.
+  app.get('/download/apk/:version', (req, res) => {
+    const full = archivedApkPath(req.params.version);
+    if (!full) {
+      return res
+        .status(404)
+        .type('text/plain; charset=utf-8')
+        .send('Für diese Version gibt es keinen archivierten Android-Build.');
+    }
+    const size = statOrNull(full)?.size ?? 0;
+    sendFileRanged(req, res, full, size, {
+      type: 'application/vnd.android.package-archive',
+      filename: `ping-${req.params.version}.apk`,
+    });
+  });
+
+  // A specific past version's Windows installer.
+  app.get('/download/windows/:version', (req, res) => {
+    const full = archivedWindowsPath(req.params.version);
+    if (!full) {
+      return res
+        .status(404)
+        .type('text/plain; charset=utf-8')
+        .send('Für diese Version gibt es keinen archivierten Windows-Build.');
+    }
+    const size = statOrNull(full)?.size ?? 0;
+    sendFileRanged(req, res, full, size, {
+      type: 'application/vnd.microsoft.portable-executable',
+      filename: `Ping-Setup-${req.params.version}.exe`,
     });
   });
 }

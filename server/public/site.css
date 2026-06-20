@@ -628,3 +628,15 @@ footer.site { border-top: 1px solid var(--line); margin-top: 40px; background: v
 #view { animation: viewIn 0.4s cubic-bezier(0.2, 0.7, 0.2, 1); }
 @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .is-loading #view { min-height: 60vh; }
+
+/* Per-version download buttons under each changelog entry (the archived APK /
+   Windows installer for that release). */
+.cl-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.cl-downloads .btn.sm { gap: 7px; }

@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 // Point the download module at a throwaway dir BEFORE it (via config) is imported.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ping-apk-'));
 process.env.APK_DIR = dir;
+process.env.WINDOWS_DIR = dir; // isolate the per-version archive scan too
 
 const express = (await import('express')).default;
 const { mountDownloads } = await import('../src/download.js');
@@ -141,4 +142,50 @@ test('a resumed download (two ranges) reassembles the whole apk', async () => {
     Buffer.from(await rest.arrayBuffer()),
   ]);
   assert.equal(crypto.createHash('sha256').update(joined).digest('hex'), uni.sha256);
+});
+
+// ---- 0.27.0: per-version release archive (download old versions) -----------
+
+// An older release: its universal APK archived under archive/, and a Windows
+// installer alongside the current downloads. The current 0.7.0 APK above also
+// counts as a downloadable release (from the live dir).
+fs.mkdirSync(path.join(dir, 'archive'), { recursive: true });
+fs.writeFileSync(path.join(dir, 'archive', 'ping-0.6.0.apk'), 'OLD-0.6.0-APK');
+const winBytes = Buffer.from('MZ-FAKE-WINDOWS-INSTALLER');
+fs.writeFileSync(path.join(dir, 'Ping-Setup-0.6.0.exe'), winBytes);
+const winOld = { size: winBytes.length };
+
+test('the release manifest lists each version with a downloadable binary', async () => {
+  const res = await fetch(base + '/download/releases');
+  assert.equal(res.status, 200);
+  const { releases } = await res.json();
+  const v = Object.fromEntries(releases.map((r) => [r.version, r]));
+  // 0.7.0 is the live universal APK; 0.6.0 is archived + has a Windows build.
+  assert.ok(v['0.7.0']?.apk, '0.7.0 APK listed');
+  assert.equal(v['0.7.0'].apk.url, '/download/apk/0.7.0');
+  assert.ok(v['0.6.0']?.apk, '0.6.0 archived APK listed');
+  assert.equal(v['0.6.0'].windows.url, '/download/windows/0.6.0');
+  // Newest first.
+  assert.equal(releases[0].version, '0.7.0');
+});
+
+test('a past version APK downloads from the archive', async () => {
+  const res = await fetch(base + '/download/apk/0.6.0');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'),
+    'application/vnd.android.package-archive');
+  assert.equal((await res.text()), 'OLD-0.6.0-APK');
+});
+
+test('a past version Windows installer downloads', async () => {
+  const res = await fetch(base + '/download/windows/0.6.0');
+  assert.equal(res.status, 200);
+  assert.equal(Buffer.from(await res.arrayBuffer()).length, winOld.size);
+});
+
+test('an unknown version is 404 and path traversal is rejected', async () => {
+  assert.equal((await fetch(base + '/download/apk/9.9.9')).status, 404);
+  // Not an x.y.z string → rejected by the validator (never touches the FS).
+  assert.equal((await fetch(base + '/download/apk/..%2f..%2fetc')).status, 404);
+  assert.equal((await fetch(base + '/download/windows/9.9.9')).status, 404);
 });

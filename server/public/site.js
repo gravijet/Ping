@@ -660,15 +660,30 @@
     let all = [];
     try { all = (await P.json('/api/changelog')).posts || []; }
     catch { document.getElementById('timeline').outerHTML = emptyBox('Changelog gerade nicht erreichbar.'); return; }
+    // Per-version download links so any past release can be fetched right from
+    // its changelog entry (best-effort: no buttons if the manifest is offline).
+    const dl = {};
+    try { ((await P.json('/download/releases')).releases || []).forEach((r) => { dl[r.version] = r; }); }
+    catch { /* leave dl empty */ }
     let filter = '', query = '';
     const tl = document.getElementById('timeline');
+    const downloadRow = (version) => {
+      const r = version && dl[version];
+      if (!r || (!r.apk && !r.windows)) return '';
+      const btn = (href, label, size) =>
+        `<a class="btn sm" href="${href}" download>${P.icon('download')}<span>${label}${size ? ` · ${P.human(size)}` : ''}</span></a>`;
+      const parts = [];
+      if (r.apk) parts.push(btn(r.apk.url, 'Android (APK)', r.apk.size));
+      if (r.windows) parts.push(btn(r.windows.url, 'Windows', r.windows.size));
+      return `<div class="cl-downloads" aria-label="Downloads für Version ${P.esc(version)}">${parts.join('')}</div>`;
+    };
     const entry = (p) => {
       const ver = p.version ? `<span class="ver">v${P.esc(p.version)}</span>` : `<span class="ver">${P.esc(p.title)}</span>`;
       return `<div class="entry"><div class="card">
         <div class="top">${ver}${p.tag ? `<span class="pill ${P.esc(p.tag)}">${P.esc(P.tag(p.tag))}</span>` : ''}<span class="date">${P.fmtDate(p.publishedAt || p.createdAt)}</span></div>
         ${p.version ? `<h3>${P.esc(p.title)}</h3>` : ''}
         ${p.summary ? `<p class="summary">${P.esc(p.summary)}</p>` : ''}
-        <div class="prose">${P.richText(p.body)}</div></div></div>`;
+        <div class="prose">${P.richText(p.body)}</div>${downloadRow(p.version)}</div></div>`;
     };
     function draw() {
       const f = all.filter((p) => (!filter || p.tag === filter) &&

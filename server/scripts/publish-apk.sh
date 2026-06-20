@@ -62,6 +62,12 @@ cp "$UNIVERSAL_SRC" "$DEST_DIR/ping-${NAME}.apk"
 SIZE="$(stat -c%s "$UNIVERSAL_SRC")"
 SHA="$(sha256sum "$UNIVERSAL_SRC" | awk '{print $1}')"
 
+# Archive this version's universal APK so old releases stay downloadable from
+# their changelog entry (the rm above only clears the live dir, never archive/).
+ARCHIVE_DIR="$DEST_DIR/archive"
+mkdir -p "$ARCHIVE_DIR"
+cp "$UNIVERSAL_SRC" "$ARCHIVE_DIR/ping-${NAME}.apk"
+
 # Prefer the version code aapt reads from the universal APK over parsing the
 # pubspec — it's the source of truth the device actually compares against.
 U_CODE=""; U_NAME=""
