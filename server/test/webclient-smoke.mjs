@@ -183,6 +183,7 @@ const msgs = [
   { id: 'm1', chatId: 'c1', senderId: 'u2', body: 'Hallo!', type: 'text', createdAt: Date.now() - 5000 },
   { id: 'm2', chatId: 'c1', senderId: 'me', body: 'Foto:', type: 'image', attachment: { url: '/api/uploads/x', kind: 'image', name: 'a.jpg', width: 800, height: 600 }, createdAt: Date.now() - 4000, status: 'read' },
   { id: 'm3', chatId: 'c1', senderId: 'u2', type: 'poll', poll: { question: 'Wann?', options: [{ text: 'Mo', votes: [] }, { text: 'Di', votes: [] }] }, createdAt: Date.now() - 3000 },
+  { id: 'm4', chatId: 'c1', senderId: 'me', body: 'Schau dir https://example.com/artikel an.', type: 'text', editedAt: Date.now() - 1000, editCount: 1, createdAt: Date.now() - 2000, status: 'read' },
 ];
 
 function jsonRes(data) {
@@ -193,10 +194,12 @@ async function fetchShim(url) {
   if (path === '/me') return jsonRes({ user: me });
   if (path === '/chats') return jsonRes({ chats: [chatDirect, chatGroup] });
   if (path === '/config') return jsonRes({});
+  if (/\/messages\/[^/]+\/edits$/.test(path)) return jsonRes({ versions: [{ body: 'alte Fassung' }, { body: 'neue Fassung', editedAt: Date.now(), current: true }] });
   if (path.startsWith('/chats/c1/messages')) return jsonRes({ messages: msgs });
   if (path.startsWith('/chats/c2/messages')) return jsonRes({ messages: [] });
   if (/^\/chats\/[^/]+$/.test(path)) return jsonRes({ chat: chatDirect });
   if (path.startsWith('/messages/search')) return jsonRes({ messages: [] });
+  if (path.startsWith('/link-preview')) return jsonRes({ preview: { title: 'Beispielseite', description: 'Hallo Welt', image: '', siteName: 'example.com', url: 'https://example.com/artikel' } });
   if (path === '/blocks') return jsonRes({ blocked: [] });
   if (path.startsWith('/users/')) return jsonRes({ user: { ...me, id: 'u2', displayName: 'Anna', about: 'Hi', city: 'Wien' } });
   if (path === '/status') return jsonRes({ statuses: [] });
@@ -444,6 +447,29 @@ await step('pin/star menu actions are wired on a message', async () => {
   const bubble = document.querySelector('.msg .bubble');
   if (bubble) { const ev = { preventDefault() {}, stopPropagation() {}, clientX: 10, clientY: 10 };
     bubble.closest('.msg')?.dispatchEvent?.(new Event('contextmenu')); }
+});
+
+// ---- 0.28.0 "Kontext": link previews + edit history -----------------------
+await step('firstUrl extracts + trims a message link', async () => {
+  const lp = await imp('linkpreview.js');
+  if (lp.firstUrl('see https://example.com/x).') !== 'https://example.com/x') throw new Error('bad url parse');
+  if (lp.firstUrl('no link here') !== null) throw new Error('false positive');
+});
+await step('link-preview card hydrates under a message with a link', async () => {
+  app.openChatInShell('c1'); await tick(); await tick();
+  // m4 carries a URL → a preview slot hydrates into a .link-preview card.
+  const title = document.querySelector('.link-preview .lp-title');
+  if (!title) throw new Error('link-preview card missing');
+  if (title.textContent !== 'Beispielseite') throw new Error('preview title not rendered');
+});
+await step('edit-history viewer opens from the "bearbeitet" badge', async () => {
+  app.openChatInShell('c1'); await tick();
+  const badge = document.querySelector('.edited.as-link');
+  if (!badge) throw new Error('clickable edited badge missing');
+  badge.click(); await tick(); await tick();
+  const items = document.querySelectorAll('.edit-history .eh-item');
+  if (items.length < 2) throw new Error('edit-history not rendered (' + items.length + ' items)');
+  if (!items.some((n) => n.textContent.includes('alte Fassung'))) throw new Error('prior version not shown');
 });
 
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');

@@ -226,6 +226,34 @@ event for live/cross-device sync, and UI on web + Android.
 - **In-chat search** — `GET /messages/search?chatId=…` reuses the LIKE search,
   constrained to one (membership-checked) chat.
 
+## Conversation context (0.28.0)
+Two additive features that add context to messages — both kill-switchable via the
+remote flags `linkPreviews` / `editHistory`.
+
+- **Link previews.** `linkPreview.js` is a dependency-free fetch+scrape:
+  - **SSRF guard** (`assertSafeUrl`): only `http(s)`; the hostname is resolved
+    (`node:dns`) and *every* address is rejected if private/loopback/link-local/
+    ULA/CGNAT/metadata (`isPrivateIp`); redirects are followed manually with a
+    re-check per hop; the body must be HTML and is read with a 512 KB cap + 6 s
+    `AbortController` timeout.
+  - **Parse** (`parseMetadata`, pure/testable): OpenGraph → Twitter-card →
+    `<title>` for the title; og/twitter/meta for description; og/twitter for the
+    image (relative URLs resolved against the page); `og:site_name` else host.
+    HTML entities decoded.
+  - **Cache** (`linkPreviewRepo.js` + `link_previews` table, URL-keyed, shared by
+    all users): 24 h TTL for hits, 1 h negative-cache for misses, plus an
+    in-process in-flight `Map` so a popular link is fetched once. Endpoint
+    `GET /link-preview?url=…` (`requireAuth`, general API rate limiter) always
+    returns `200 { preview: … | null }`; the URL shape is validated by
+    `linkPreviewUrlSchema` (400 on garbage). Clients (web `linkpreview.js`,
+    Flutter `LinkPreviewService` + `LinkPreviewCard`) lazily unfurl the first link
+    in a message, memoise per URL, and skip the image on data-saver.
+- **Edit history.** `editMessage` snapshots the prior body into `message_edits`
+  (skipping no-op saves); `messageView.editCount` exposes the count; `GET
+  /chats/:id/messages/:msgId/edits` (member-gated) returns prior versions
+  oldest-first plus the current body. Surfaced as a tappable "bearbeitet" tag →
+  a modal (web) / bottom sheet (Flutter).
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

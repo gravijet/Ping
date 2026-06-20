@@ -772,6 +772,105 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onVotePoll: interactive && m.poll != null
           ? (option) => _votePoll(m, option)
           : null,
+      fetchLinkPreview:
+          interactive && state.feature('linkPreviews', fallback: true)
+              ? state.linkPreviews.fetch
+              : null,
+      onTapEdited: interactive &&
+              m.editCount > 0 &&
+              state.feature('editHistory', fallback: true)
+          ? () => _showEditHistory(m)
+          : null,
+    );
+  }
+
+  Future<void> _showEditHistory(Message m) async {
+    final state = context.read<AppState>();
+    List<Map<String, dynamic>> versions;
+    try {
+      versions = await state.messageEditHistory(widget.chatId, m.id);
+    } on ApiException catch (e) {
+      _showError(e.message);
+      return;
+    } catch (_) {
+      _showError('Verlauf konnte nicht geladen werden.');
+      return;
+    }
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.7,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text('Bearbeitungsverlauf',
+                      style: Theme.of(ctx).textTheme.titleMedium),
+                ),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                    itemCount: versions.length,
+                    itemBuilder: (_, i) {
+                      final v = versions[i];
+                      final isCur = v['current'] == true || i == versions.length - 1;
+                      final at = v['editedAt'] as int?;
+                      final label = isCur
+                          ? 'Aktuelle Version'
+                          : (i == 0 ? 'Original' : 'Version ${i + 1}');
+                      final when = isCur && at != null
+                          ? ' · ${TimeFormat.messageTime(DateTime.fromMillisecondsSinceEpoch(at))}'
+                          : '';
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isCur
+                              ? scheme.primary.withValues(alpha: 0.12)
+                              : scheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(10),
+                          border: isCur
+                              ? Border.all(
+                                  color: scheme.primary.withValues(alpha: 0.4))
+                              : null,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('$label$when',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: scheme.onSurfaceVariant)),
+                            const SizedBox(height: 4),
+                            Text(
+                              (v['body'] as String?)?.isNotEmpty == true
+                                  ? v['body'] as String
+                                  : '—',
+                              style: const TextStyle(fontSize: 14.5),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

@@ -446,6 +446,33 @@ db.exec(`
     PRIMARY KEY (folder_id, chat_id)
   );
   CREATE INDEX IF NOT EXISTS idx_chat_folder_members_chat ON chat_folder_members(chat_id);
+
+  -- 0.28.0 "Kontext": rich link previews. A shared, URL-keyed cache of the
+  -- OpenGraph/HTML metadata behind a link so the same URL is fetched once for
+  -- everyone. ok=0 rows are negative cache (the fetch failed / wasn't HTML) so
+  -- we don't hammer a dead link on every render. Purged + refreshed by TTL.
+  CREATE TABLE IF NOT EXISTS link_previews (
+    url         TEXT PRIMARY KEY,
+    ok          INTEGER NOT NULL DEFAULT 0,
+    title       TEXT,
+    description TEXT,
+    image       TEXT,
+    site_name   TEXT,
+    final_url   TEXT,
+    fetched_at  INTEGER NOT NULL
+  );
+
+  -- 0.28.0 "Kontext": message edit history. Each time a message is edited the
+  -- *previous* body is snapshotted here, so a reader can audit how a message
+  -- changed (the live body stays on the messages row). One row per prior version.
+  CREATE TABLE IF NOT EXISTS message_edits (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    edited_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_message_edits_message
+    ON message_edits(message_id, edited_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------

@@ -150,6 +150,10 @@ class Message {
   final String? replyTo;
   final int createdAt;
   final int? editedAt;
+
+  /// How many earlier versions of this message exist (0.28.0 "Kontext"). Drives
+  /// the tappable "bearbeitet"-history viewer; 0 when never edited.
+  final int editCount;
   final bool deleted;
 
   /// Disappearing messages: when set, the server purges this message at that
@@ -185,6 +189,7 @@ class Message {
     this.attachment,
     this.replyTo,
     this.editedAt,
+    this.editCount = 0,
     this.deleted = false,
     this.expiresAt,
     this.poll,
@@ -256,6 +261,7 @@ class Message {
   Message copyWith({
     String? body,
     int? editedAt,
+    int? editCount,
     bool? deleted,
     MessageStatus? status,
     Map<String, int>? reactions,
@@ -274,6 +280,7 @@ class Message {
         replyTo: replyTo,
         createdAt: createdAt,
         editedAt: editedAt ?? this.editedAt,
+        editCount: editCount ?? this.editCount,
         deleted: deleted ?? this.deleted,
         expiresAt: expiresAt,
         poll: poll ?? this.poll,
@@ -296,6 +303,7 @@ class Message {
         if (replyTo != null) 'replyTo': replyTo,
         'createdAt': createdAt,
         if (editedAt != null) 'editedAt': editedAt,
+        if (editCount > 0) 'editCount': editCount,
         if (expiresAt != null) 'expiresAt': expiresAt,
         if (poll != null) 'poll': poll!.toJson(),
         'deleted': deleted,
@@ -328,6 +336,7 @@ class Message {
         replyTo: json['replyTo'] as String?,
         createdAt: json['createdAt'] as int,
         editedAt: json['editedAt'] as int?,
+        editCount: (json['editCount'] as num?)?.toInt() ?? 0,
         expiresAt: json['expiresAt'] as int?,
         poll: json['poll'] != null
             ? PollData.fromJson(json['poll'] as Map<String, dynamic>)

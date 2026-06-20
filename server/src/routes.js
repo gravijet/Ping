@@ -35,6 +35,7 @@ import {
   resetPasswordSchema,
   privacySchema,
   searchQuerySchema,
+  linkPreviewUrlSchema,
   updateProfileSchema,
   securitySchema,
   messageBodySchema,
@@ -174,8 +175,10 @@ import {
   toggleStar,
   listStarred,
   setDraft,
+  listMessageEdits,
   MAX_PINS_PER_CHAT,
 } from './chatRepo.js';
+import { getLinkPreview } from './linkPreviewRepo.js';
 import {
   listFolders,
   getFolder,
@@ -1421,6 +1424,26 @@ router.patch(
   })
 );
 
+// Edit history for a message: every prior version (oldest first) plus the
+// current body, so a reader can audit how an edited message changed. Any chat
+// member may view it (the edited badge is visible to everyone).
+router.get(
+  '/chats/:id/messages/:msgId/edits',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const versions = [
+      ...listMessageEdits(msg.id),
+      { body: msg.body, editedAt: msg.edited_at, current: true },
+    ];
+    res.json({ versions });
+  })
+);
+
 router.delete(
   '/chats/:id/messages/:msgId',
   requireAuth,
@@ -2363,6 +2386,25 @@ router.get(
       messageView(m, req.user.id)
     );
     res.json({ messages });
+  })
+);
+
+// ---- Link previews (0.28.0 "Kontext") -------------------------------------
+
+// Resolve the OpenGraph/HTML metadata behind a URL so chat clients can show a
+// rich preview card. Auth-gated (only signed-in users can drive server fetches),
+// shape-validated here, SSRF-guarded + cached in linkPreview* . Always 200: a URL
+// with no usable preview returns { preview: null } so the client just shows the
+// plain link. Malformed/disallowed URLs are rejected (400) by the schema.
+router.get(
+  '/link-preview',
+  requireAuth,
+  h(async (req, res) => {
+    const url = parse(linkPreviewUrlSchema, (req.query.url || '').toString());
+    const preview = await getLinkPreview(url);
+    // Successful previews can be cached briefly by the browser; misses shouldn't.
+    res.set('Cache-Control', preview ? 'private, max-age=600' : 'no-store');
+    res.json({ preview: preview || null });
   })
 );
 

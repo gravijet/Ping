@@ -524,9 +524,39 @@ export function getDraft(userId, chatId) {
   return row ? row.text : '';
 }
 
+// Edit history (0.28.0 "Kontext"): each edit snapshots the *previous* body so a
+// reader can audit how a message changed. The live body stays on the row.
+const edits = {
+  insert: db.prepare(
+    'INSERT INTO message_edits (id, message_id, body, edited_at) VALUES (?, ?, ?, ?)'
+  ),
+  list: db.prepare(
+    'SELECT body, edited_at FROM message_edits WHERE message_id = ? ORDER BY edited_at ASC, id ASC'
+  ),
+  count: db.prepare('SELECT COUNT(*) AS n FROM message_edits WHERE message_id = ?'),
+};
+
 export function editMessage(id, body) {
-  m.edit.run(body, now(), id);
+  const prev = m.byId.get(id);
+  const ts = now();
+  tx(() => {
+    // Snapshot the old text before overwriting (skip no-op saves).
+    if (prev && (prev.body || '') !== body) {
+      edits.insert.run(uid(), id, prev.body || '', ts);
+    }
+    m.edit.run(body, ts, id);
+  });
   return m.byId.get(id);
+}
+
+/// Every prior version of a message, oldest first ({ body, editedAt }). The
+/// message's current body is *not* included — the caller already has it.
+export function listMessageEdits(messageId) {
+  return edits.list.all(messageId).map((r) => ({ body: r.body, editedAt: r.edited_at }));
+}
+
+function editCountOf(messageId) {
+  return edits.count.get(messageId).n;
 }
 
 export function deleteMessage(id) {
@@ -803,6 +833,8 @@ export function messageView(msg, viewerId) {
     quoted: msg.reply_to ? quotedView(msg.reply_to) : null,
     createdAt: msg.created_at,
     editedAt: msg.edited_at,
+    // How many earlier versions exist (drives the "bearbeitet"-history viewer).
+    editCount: msg.deleted_at ? 0 : editCountOf(msg.id),
     deleted: !!msg.deleted_at,
     // Disappearing messages: when the client should drop this bubble.
     expiresAt: msg.expires_at || null,

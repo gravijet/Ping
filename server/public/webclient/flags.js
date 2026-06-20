@@ -33,6 +33,8 @@ export const DEFAULTS = {
   amoledTheme: true,     // AMOLED true-black dark-mode variant
   deviceDiagnostics: true, // "Gerät" settings panel (battery/network/storage)
   adaptiveData: true,    // throttle prefetch on save-data / slow connections
+  linkPreviews: true,    // rich OpenGraph link-preview cards under messages
+  editHistory: true,     // tap "bearbeitet" to see a message's prior versions
 };
 
 function localOverrides() {

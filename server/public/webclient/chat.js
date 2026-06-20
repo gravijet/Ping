@@ -25,6 +25,7 @@ import { skeletonMessages } from './skeleton.js';
 import * as drafts from './drafts.js';
 import { tokenizeMentions, attachAutocomplete, pickerOpen } from './mentions.js';
 import { recordSent } from './insights.js';
+import { firstUrl, attachLinkPreview } from './linkpreview.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -336,7 +337,11 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderPoll(m));
   } else {
     if (m.attachment) bubble.appendChild(renderAttachment(m.attachment, { onImageClick: () => openChatMedia(m) }));
-    if (m.body) bubble.appendChild(el('span', { html: richText(m.body, chat) }));
+    if (m.body) {
+      bubble.appendChild(el('span', { html: richText(m.body, chat) }));
+      // Unfurl the first link into a rich preview card (lazy, no attachment).
+      if (!m.attachment) attachLinkPreview(bubble, firstUrl(m.body));
+    }
   }
 
   if (!m.deleted) {
@@ -344,7 +349,7 @@ function renderMessage(m, chat, first) {
     const meta = el('span', { class: 'meta' }, [
       m.pinned ? icon('pin', 'sm pin-flag') : null,
       starred ? icon('star', 'sm starred-flag fill') : null,
-      m.editedAt ? el('span', { class: 'edited', text: 'bearbeitet · ' }) : null,
+      m.editedAt ? editedBadge(m) : null,
       el('span', { text: timeOf(m.createdAt) }),
       mine ? statusTick(m) : null,
     ].filter(Boolean));
@@ -384,6 +389,45 @@ function renderReactions(m) {
   return el('div', { class: 'reactions' }, entries.map(([emoji, n]) =>
     el('button', { class: `reaction ${(m.myReactions || []).includes(emoji) ? 'mine' : ''}`,
       onClick: () => toggleReaction(m, emoji) }, `${emoji} ${n}`)));
+}
+
+// The "bearbeitet" tag. When the message has tracked prior versions (and the
+// feature is on) it becomes a button that opens the edit-history viewer.
+function editedBadge(m) {
+  if (flag('editHistory') && (m.editCount || 0) > 0) {
+    return el('button', {
+      class: 'edited as-link', title: 'Bearbeitungsverlauf ansehen',
+      onClick: (e) => { e.stopPropagation(); openEditHistory(m); },
+    }, 'bearbeitet · ');
+  }
+  return el('span', { class: 'edited', text: 'bearbeitet · ' });
+}
+
+async function openEditHistory(m) {
+  const dlg = modal({ title: 'Bearbeitungsverlauf', width: '460px',
+    body: (b) => b.append(el('div', { class: 'hint', text: 'Lade …' })) });
+  try {
+    const { versions } = await api.get(`/chats/${cur.chatId}/messages/${m.id}/edits`);
+    clear(dlg.body);
+    if (!versions?.length) {
+      dlg.body.append(el('div', { class: 'hint', text: 'Keine früheren Versionen.' }));
+      return;
+    }
+    const list = el('div', { class: 'edit-history' });
+    versions.forEach((v, i) => {
+      const isCur = v.current || i === versions.length - 1;
+      const label = isCur ? 'Aktuelle Version' : (i === 0 ? 'Original' : `Version ${i + 1}`);
+      const when = isCur && v.editedAt ? ' · ' + new Date(v.editedAt).toLocaleString('de-DE') : '';
+      list.append(el('div', { class: `eh-item ${isCur ? 'current' : ''}` }, [
+        el('div', { class: 'eh-meta', text: label + when }),
+        el('div', { class: 'eh-body', text: v.body || '—' }),
+      ]));
+    });
+    dlg.body.append(list);
+  } catch {
+    clear(dlg.body);
+    dlg.body.append(el('div', { class: 'hint', text: 'Verlauf konnte nicht geladen werden.' }));
+  }
 }
 
 function buildMsgActions(m, mine) {

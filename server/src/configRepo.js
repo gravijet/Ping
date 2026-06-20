@@ -21,6 +21,9 @@ export const DEFAULT_CONFIG = {
     deviceDiagnostics: true,
     adaptiveData: true,
     deviceTelemetry: true,
+    // Kontext (0.28.0): rich link previews + message edit-history viewer.
+    linkPreviews: true,
+    editHistory: true,
   },
   values: {
     maxStatusSeconds: 30,

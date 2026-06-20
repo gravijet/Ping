@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 
 import '../models/message.dart';
 import '../services/audio_player_service.dart';
+import '../services/link_preview_service.dart';
 import '../theme.dart';
 import '../utils/emoji.dart';
 import '../utils/format.dart';
 import '../utils/message_format.dart';
+import 'link_preview_card.dart';
 import 'receipt_ticks.dart';
 import 'verified_badge.dart';
 
@@ -74,6 +76,14 @@ class MessageBubble extends StatelessWidget {
   /// Tapped a poll option — toggle my vote for it.
   final void Function(int option)? onVotePoll;
 
+  /// Resolves the link preview for a URL (0.28.0 "Kontext"). When provided and
+  /// the body contains a link, a preview card is rendered under the text.
+  final Future<LinkPreview?> Function(String url)? fetchLinkPreview;
+
+  /// Tapped the "bearbeitet" tag — open this message's edit history. Only shown
+  /// as tappable when the message actually has tracked prior versions.
+  final VoidCallback? onTapEdited;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -105,7 +115,16 @@ class MessageBubble extends StatelessWidget {
     this.accentBubbles = false,
     this.onToggleReaction,
     this.onVotePoll,
+    this.fetchLinkPreview,
+    this.onTapEdited,
   });
+
+  /// The link to unfurl under this message, or null when previews are off / the
+  /// message has no link / it's not a plain text message.
+  String? get _previewUrl =>
+      (!message.deleted && fetchLinkPreview != null && message.type == 'text')
+          ? firstUrl(message.body)
+          : null;
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +150,9 @@ class MessageBubble extends StatelessWidget {
     final hasMedia = message.attachment != null && !message.deleted;
     final hasPoll = message.poll != null && !message.deleted;
     final hasText = message.body.trim().isNotEmpty;
+    // The link to unfurl under this bubble (null = previews off / no link). A
+    // local so the type-promotion holds when we pass it to LinkPreviewCard.
+    final previewUrl = _previewUrl;
     // Emoji-only messages render large and bubble-less, like a sticker. Size
     // tapers as the emoji count grows so a single 😀 is big and a row stays sane.
     final jumbo =
@@ -302,6 +324,16 @@ class MessageBubble extends StatelessWidget {
                               height: 1.3),
                         ),
             ),
+          if (previewUrl != null)
+            Padding(
+              padding: EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 0, hasMedia ? 6 : 0, 0),
+              child: LinkPreviewCard(
+                url: previewUrl,
+                fetch: fetchLinkPreview!,
+                isMine: isMine,
+                fg: fg,
+              ),
+            ),
           Padding(
             padding:
                 EdgeInsets.fromLTRB(hasMedia ? 6 : 0, 2, hasMedia ? 4 : 0, 0),
@@ -378,10 +410,25 @@ class MessageBubble extends StatelessWidget {
         if (message.isEdited)
           Padding(
             padding: const EdgeInsets.only(right: 5),
-            child: Text(
-              'bearbeitet',
-              style: TextStyle(color: fg.withValues(alpha: 0.6), fontSize: 11),
-            ),
+            child: (message.editCount > 0 && onTapEdited != null)
+                ? GestureDetector(
+                    onTap: onTapEdited,
+                    child: Text(
+                      'bearbeitet',
+                      style: TextStyle(
+                        color: fg.withValues(alpha: 0.6),
+                        fontSize: 11,
+                        decoration: TextDecoration.underline,
+                        decorationStyle: TextDecorationStyle.dotted,
+                        decorationColor: fg.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  )
+                : Text(
+                    'bearbeitet',
+                    style:
+                        TextStyle(color: fg.withValues(alpha: 0.6), fontSize: 11),
+                  ),
           ),
         if (message.expiresAt != null)
           Padding(

@@ -47,6 +47,13 @@ Online-Status, Lesebestätigungen).
   oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Link-Vorschauen** (seit 0.28.0) – geteilte Links werden zu einer kompakten
+  Karte mit Titel, Beschreibung, Seitenname und Vorschaubild aufgelöst. Lädt erst
+  beim Sichtbarwerden, wird pro URL **einmal serverseitig** geholt und
+  zwischengespeichert, spart auf Wunsch im Datensparmodus das Bild – und zeigt für
+  Links ohne Metadaten einfach nichts. SSRF-gehärtet (keine internen Adressen).
+- **Bearbeitungsverlauf** (seit 0.28.0) – jede Bearbeitung sichert die vorige
+  Fassung; ein Tipp auf „bearbeitet" zeigt, wie sich eine Nachricht verändert hat.
 - **Angepinnte Nachrichten** (seit 0.27.0) – wichtige Nachrichten anpinnen; alle
   im Chat sehen sie in einem Banner unter dem Kopf, tippen zum Springen (und
   Durchblättern mehrerer Pins), bis zu 50 pro Chat, in Echtzeit für alle.

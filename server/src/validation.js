@@ -394,6 +394,16 @@ export const searchQuerySchema = z
   .min(2, 'Bitte gib mindestens 2 Zeichen ein.')
   .max(120, 'Die Suche ist zu lang.');
 
+// Link-preview lookups (0.28.0). Shape-only validation here; the SSRF host
+// checks live in linkPreview.js (they need DNS and so are async).
+export const linkPreviewUrlSchema = z
+  .string()
+  .trim()
+  .min(1, 'Bitte gib eine Adresse ein.')
+  .max(2048, 'Diese Adresse ist zu lang.')
+  .url('Diese Adresse ist ungültig.')
+  .refine((u) => /^https?:\/\//i.test(u), 'Nur http- und https-Links werden unterstützt.');
+
 // An official message an admin sends into a user's "Ping Team" channel — either
 // to one user or broadcast to everyone. Plain text only (no caller-supplied
 // attachment to keep the channel simple and trustworthy).

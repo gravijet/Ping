@@ -26,6 +26,7 @@ import 'chat_cache_store.dart';
 import 'crash_service.dart';
 import 'device_info_service.dart';
 import 'feedback_service.dart';
+import 'link_preview_service.dart';
 import 'media_service.dart';
 import 'metrics_service.dart';
 import 'local_message_store.dart';
@@ -450,6 +451,28 @@ class AppState extends ChangeNotifier {
 
   ApiClient get api => _api;
   SocketService get socket => _socket;
+
+  /// Session-scoped link-preview fetcher + cache (0.28.0 "Kontext"). Re-bound if
+  /// the API client is recreated (e.g. on re-login) so it always uses the live
+  /// token.
+  LinkPreviewService? _linkPreviews;
+  LinkPreviewService get linkPreviews {
+    if (_linkPreviews == null || !identical(_linkPreviews!.api, _api)) {
+      _linkPreviews = LinkPreviewService(_api);
+    }
+    return _linkPreviews!;
+  }
+
+  /// Every prior version of a message (oldest first) plus the current body, for
+  /// the edit-history viewer. Each entry: { body, editedAt?, current? }.
+  Future<List<Map<String, dynamic>>> messageEditHistory(
+      String chatId, String messageId) async {
+    final res = await _api.get('/chats/$chatId/messages/$messageId/edits');
+    final versions = ((res as Map)['versions'] as List?) ?? const [];
+    return versions
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
 
   /// Auth headers for direct image requests (avatars are auth-gated).
   Map<String, String> get authHeaders =>
