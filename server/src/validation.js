@@ -592,6 +592,52 @@ export const webPushSubscriptionSchema = z.object({
   }),
 });
 
+// ---- Erinnerung & Schnellzugriff (0.29.0) ----------------------------------
+
+// A message reminder. remindAt is an absolute epoch-ms timestamp that must be in
+// the future (a small skew is tolerated) and no more than a year out; an
+// optional note lets the user record *why* they want the nudge.
+export const reminderCreateSchema = z.object({
+  remindAt: z
+    .number()
+    .int('Ungültiger Zeitpunkt.')
+    .refine((t) => t > Date.now() - 60_000, 'Der Zeitpunkt liegt in der Vergangenheit.')
+    .refine((t) => t < Date.now() + 366 * 86400_000, 'Höchstens 1 Jahr im Voraus.'),
+  note: z.string().trim().max(500, 'Die Notiz ist zu lang.').optional().default(''),
+});
+
+// A quick reply (canned response): required body, optional short "/shortcut".
+// The shortcut is normalised to lowercase word-chars by the repo's consumers;
+// here we only bound it and forbid whitespace so "/gn8" stays a single token.
+export const quickReplyCreateSchema = z.object({
+  shortcut: z
+    .string()
+    .trim()
+    .max(24, 'Das Kürzel ist zu lang.')
+    .refine((v) => v === '' || !/\s/.test(v), 'Das Kürzel darf keine Leerzeichen enthalten.')
+    .optional()
+    .default(''),
+  text: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib einen Text ein.')
+    .max(8000, 'Der Text ist zu lang.'),
+});
+
+// Editing a quick reply: every field optional, but at least one must be present.
+export const quickReplyUpdateSchema = z
+  .object({
+    shortcut: z
+      .string()
+      .trim()
+      .max(24, 'Das Kürzel ist zu lang.')
+      .refine((v) => v === '' || !/\s/.test(v), 'Das Kürzel darf keine Leerzeichen enthalten.')
+      .optional(),
+    text: z.string().trim().min(1, 'Bitte gib einen Text ein.').max(8000, 'Der Text ist zu lang.').optional(),
+    sort: z.number().int().min(0).max(9999).optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
+
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {
   const result = schema.safeParse(data);

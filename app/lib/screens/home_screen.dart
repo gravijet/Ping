@@ -22,6 +22,7 @@ import 'archived_chats_screen.dart';
 import 'calls_tab.dart';
 import 'chat_screen.dart';
 import 'new_chat_screen.dart';
+import 'reminders_screen.dart';
 import 'saved_messages_screen.dart';
 import 'settings_screen.dart';
 import 'status_tab.dart';
@@ -246,6 +247,18 @@ class _HomeScreenState extends State<HomeScreen>
         titleSpacing: 16,
         title: const Text('Ping'),
         actions: [
+          if (state.feature('reminders', fallback: true))
+            IconButton(
+              tooltip: 'Erinnerungen',
+              icon: Badge(
+                isLabelVisible: state.pendingReminderCount > 0,
+                label: Text('${state.pendingReminderCount}'),
+                child: const Icon(Icons.alarm_outlined),
+              ),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RemindersScreen()),
+              ),
+            ),
           IconButton(
             tooltip: 'Gespeichert',
             icon: const Icon(Icons.bookmark_border_rounded),

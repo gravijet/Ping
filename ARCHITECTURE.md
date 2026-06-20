@@ -254,6 +254,30 @@ remote flags `linkPreviews` / `editHistory`.
   oldest-first plus the current body. Surfaced as a tappable "bearbeitet" tag →
   a modal (web) / bottom sheet (Flutter).
 
+## Reminders, quick replies & export (0.29.0)
+Three additive, owner-scoped features — kill-switchable via the remote flags
+`reminders` / `quickReplies` / `chatExport`.
+
+- **Message reminders.** `remindersRepo.js` + `message_reminders` (partial
+  due-index on `remind_at WHERE fired_at IS NULL`). `POST
+  /chats/:id/messages/:msgId/remind` (member-gated) stores a snapshot
+  (preview + chat title) so the nudge survives message deletion;
+  `GET /me/reminders` and `DELETE /me/reminders/:rid` are owner-scoped. The
+  **maintenance sweep** (`runMaintenance`) picks up due rows, stamps `fired_at`
+  *first*, then fans out `sendToUser('reminder', …)` + `sendPushToUsers`, and
+  purges rows fired > 7 days ago. Clients: web `reminders.js` (dialog + live
+  pane + toast), Flutter `Reminder` model + `AppState` + `RemindersScreen`
+  (a fired reminder raises a snooze-bypassing notification).
+- **Quick replies.** `quickRepliesRepo.js` + `quick_replies` (per-user,
+  reorderable). CRUD under `/me/quick-replies`; every mutation broadcasts
+  `quick-replies-updated` to the user's other devices. Web `quickreplies.js`
+  is server-backed with a localStorage mirror, one-time migration of the old
+  device-only `prefs.quickReplies`, and inline `/shortcut` expansion.
+- **Per-chat export.** `GET /chats/:id/export?format=txt|json` (member-gated)
+  streams the full visible history with a `Content-Disposition` attachment;
+  the web client downloads it via an authenticated raw fetch (local export is
+  the offline fallback).
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

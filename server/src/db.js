@@ -473,6 +473,45 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_message_edits_message
     ON message_edits(message_id, edited_at);
+
+  -- 0.29.0 "Erinnerung & Schnellzugriff": message reminders. A user asks Ping to
+  -- nudge them about a specific message at a chosen time. The maintenance sweep
+  -- fires due rows (remind_at <= now AND fired_at IS NULL) over WS + push, stamps
+  -- fired_at, and keeps the row briefly so the UI can show "erledigt" before it
+  -- is purged. A denormalised snapshot (preview/chat title) lets the reminders
+  -- pane render without re-fetching a message that may meanwhile have vanished.
+  CREATE TABLE IF NOT EXISTS message_reminders (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    preview    TEXT NOT NULL DEFAULT '',
+    chat_title TEXT NOT NULL DEFAULT '',
+    remind_at  INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    fired_at   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_reminders_due
+    ON message_reminders(remind_at) WHERE fired_at IS NULL;
+  CREATE INDEX IF NOT EXISTS idx_reminders_user
+    ON message_reminders(user_id, remind_at);
+
+  -- 0.29.0 "Erinnerung & Schnellzugriff": quick replies (canned responses). A
+  -- per-user library of reusable snippets the composer can insert with one tap,
+  -- optionally addressed by a short "/shortcut". sort gives the user a stable,
+  -- reorderable order.
+  CREATE TABLE IF NOT EXISTS quick_replies (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shortcut   TEXT NOT NULL DEFAULT '',
+    text       TEXT NOT NULL,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_quick_replies_user
+    ON quick_replies(user_id, sort);
 `);
 
 // ---- Migrations ------------------------------------------------------------

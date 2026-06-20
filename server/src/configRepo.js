@@ -24,6 +24,11 @@ export const DEFAULT_CONFIG = {
     // Kontext (0.28.0): rich link previews + message edit-history viewer.
     linkPreviews: true,
     editHistory: true,
+    // Erinnerung & Schnellzugriff (0.29.0): message reminders, quick replies,
+    // per-chat transcript export.
+    reminders: true,
+    quickReplies: true,
+    chatExport: true,
   },
   values: {
     maxStatusSeconds: 30,

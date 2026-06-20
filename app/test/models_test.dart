@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ping/models/chat.dart';
 import 'package:ping/models/message.dart';
+import 'package:ping/models/reminder.dart';
 import 'package:ping/models/remote_config.dart';
 import 'package:ping/models/status.dart';
 import 'package:ping/models/user.dart';
@@ -494,6 +495,39 @@ void main() {
       expect(hasFormatting('plain text'), false);
       expect(hasFormatting('a *b*'), true);
       expect(hasFormatting('x||y'), true);
+    });
+  });
+
+  group('Reminder', () {
+    test('parses a pending reminder and falls back to the preview', () {
+      final r = Reminder.fromJson({
+        'id': 'r1',
+        'chatId': 'c1',
+        'messageId': 'm1',
+        'note': '',
+        'preview': 'Ruf zurück',
+        'chatTitle': 'Bob',
+        'remindAt': 1781730000000,
+        'createdAt': 1781720000000,
+        'firedAt': null,
+      });
+      expect(r.fired, false);
+      expect(r.label, 'Ruf zurück'); // empty note → preview
+      expect(r.remindTime.millisecondsSinceEpoch, 1781730000000);
+    });
+
+    test('a fired reminder prefers its note for the label', () {
+      final r = Reminder.fromJson({
+        'id': 'r2',
+        'chatId': 'c1',
+        'messageId': 'm1',
+        'note': 'Termin bestätigen',
+        'preview': 'irgendwas',
+        'remindAt': 1781730000000,
+        'firedAt': 1781730005000,
+      });
+      expect(r.fired, true);
+      expect(r.label, 'Termin bestätigen');
     });
   });
 }

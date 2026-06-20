@@ -933,6 +933,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         label: starred ? 'Nicht mehr speichern' : 'Markieren',
         onTap: () => _toggleStar(m),
       ),
+      if (state.feature('reminders', fallback: true))
+        MessageAction(
+          icon: Icons.alarm_add_rounded,
+          label: 'Erinnern',
+          onTap: () => _setReminder(m),
+        ),
       if (!selfChat)
         MessageAction(
           icon: (m.pinned || state.pinsFor(widget.chatId).any((p) => p.id == m.id))
@@ -995,6 +1001,86 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       actions: actions,
       originRect: rect,
     );
+  }
+
+  /// "Erinnere mich" — pick when to be nudged about [m], then create the
+  /// reminder on the server (which fires it over the socket / via push).
+  Future<void> _setReminder(Message m) async {
+    final state = context.read<AppState>();
+    final now = DateTime.now();
+    DateTime atToday(int h) => DateTime(now.year, now.month, now.day, h);
+    final presets = <(String, DateTime)>[
+      ('In 20 Minuten', now.add(const Duration(minutes: 20))),
+      ('In 1 Stunde', now.add(const Duration(hours: 1))),
+      ('In 3 Stunden', now.add(const Duration(hours: 3))),
+      if (atToday(18).isAfter(now.add(const Duration(minutes: 30))))
+        ('Heute Abend, 18:00', atToday(18)),
+      ('Morgen früh, 9:00', atToday(9).add(const Duration(days: 1))),
+      ('Nächste Woche', atToday(9).add(const Duration(days: 7))),
+    ];
+
+    final chosen = await showModalBottomSheet<DateTime>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Row(children: [
+                Icon(Icons.alarm_rounded),
+                SizedBox(width: 10),
+                Text('Erinnere mich', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+            for (final p in presets)
+              ListTile(
+                title: Text(p.$1),
+                trailing: Text(TimeFormat.dateTime(p.$2),
+                    style: TextStyle(color: Theme.of(ctx).colorScheme.onSurfaceVariant)),
+                onTap: () => Navigator.of(ctx).pop(p.$2),
+              ),
+            ListTile(
+              leading: const Icon(Icons.event_rounded),
+              title: const Text('Eigener Zeitpunkt …'),
+              onTap: () => Navigator.of(ctx).pop(now), // sentinel → custom picker
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    DateTime when = chosen;
+    // The "custom" sentinel (== now) opens the date + time pickers.
+    if (chosen == now) {
+      final date = await showDatePicker(
+        context: context,
+        initialDate: now.add(const Duration(hours: 1)),
+        firstDate: now,
+        lastDate: now.add(const Duration(days: 365)),
+      );
+      if (date == null || !mounted) return;
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+      );
+      if (time == null || !mounted) return;
+      when = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    }
+
+    if (when.isBefore(DateTime.now())) {
+      _showError('Bitte einen Zeitpunkt in der Zukunft wählen.');
+      return;
+    }
+    try {
+      await state.createReminder(widget.chatId, m.id,
+          remindAt: when.millisecondsSinceEpoch);
+      if (mounted) _showError('Erinnerung gesetzt für ${TimeFormat.dateTime(when)}.');
+    } catch (e) {
+      if (mounted) _showError('Erinnerung fehlgeschlagen.');
+    }
   }
 
   /// Full emoji grid for reacting with any emoji (the "+" in the reaction pill).

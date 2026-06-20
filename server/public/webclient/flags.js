@@ -35,6 +35,9 @@ export const DEFAULTS = {
   adaptiveData: true,    // throttle prefetch on save-data / slow connections
   linkPreviews: true,    // rich OpenGraph link-preview cards under messages
   editHistory: true,     // tap "bearbeitet" to see a message's prior versions
+  reminders: true,       // "Erinnere mich" — message reminders (server-fired)
+  quickReplies: true,    // canned composer replies, synced across devices
+  chatExport: true,      // full server-side per-chat transcript export (txt/json)
 };
 
 function localOverrides() {

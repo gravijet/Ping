@@ -1,8 +1,15 @@
 import { db, now } from './db.js';
 import { purgeExpiredMessages, getChat } from './chatRepo.js';
 import { purgeExpiredStatuses } from './statusRepo.js';
-import { broadcastToChat } from './hub.js';
+import { broadcastToChat, sendToUser } from './hub.js';
+import { sendPushToUsers } from './push.js';
 import { dueScheduled, deleteScheduled } from './scheduledRepo.js';
+import {
+  dueReminders,
+  markReminderFired,
+  purgeFiredReminders,
+  reminderView,
+} from './remindersRepo.js';
 import {
   dueScheduledBroadcasts,
   deleteScheduledBroadcast,
@@ -64,6 +71,33 @@ export function runMaintenance() {
       .catch((e) => console.error('[maintenance] geplante Durchsage fehlgeschlagen:', e.message));
     sentBroadcasts++;
   }
+  // Message reminders ("Erinnere mich") that have come due → nudge the owner
+  // over their live sockets and, as a fallback, via push. Stamp fired_at first so
+  // a push failure can never re-fire the same reminder on the next sweep.
+  let firedReminders = 0;
+  for (const row of dueReminders()) {
+    try {
+      markReminderFired(row.id);
+      const reminder = reminderView(row);
+      sendToUser(row.user_id, 'reminder', { reminder });
+      const where = reminder.chatTitle ? ` · ${reminder.chatTitle}` : '';
+      sendPushToUsers([row.user_id], {
+        title: '⏰ Erinnerung',
+        body: (reminder.note || reminder.preview || 'Du wolltest an etwas erinnert werden.') + where,
+        data: {
+          type: 'reminder',
+          reminderId: reminder.id,
+          chatId: reminder.chatId,
+          messageId: reminder.messageId,
+        },
+      }).catch(() => {});
+      firedReminders++;
+    } catch (e) {
+      console.error('[maintenance] Erinnerung fehlgeschlagen:', e.message);
+    }
+  }
+  // Drop reminders that fired long enough ago that the user has seen them.
+  purgeFiredReminders();
   purgeExpiredStatuses();
   // Expired OTP rows are useless after their window; keep an hour of slack for
   // debugging ("why didn't my code work?") before dropping them.
@@ -72,6 +106,7 @@ export function runMaintenance() {
     purgedMessages: purged.length,
     deliveredScheduled: delivered,
     sentBroadcasts,
+    firedReminders,
   };
 }
 

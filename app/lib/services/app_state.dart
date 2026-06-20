@@ -11,6 +11,7 @@ import '../models/call.dart';
 import '../models/chat.dart';
 import '../models/chat_folder.dart';
 import '../models/message.dart';
+import '../models/reminder.dart';
 import '../models/remote_config.dart';
 import '../models/scheduled_message.dart';
 import '../models/settings.dart';
@@ -801,6 +802,8 @@ class AppState extends ChangeNotifier {
     await loadStatus();
     loadCalls();
     loadRemoteConfig();
+    // Message reminders sync (best-effort; the screen + nav badge read them).
+    loadReminders();
     // Replay anything composed while offline last session, then send it now.
     await _hydrateOutbox();
     _flushOutbox();
@@ -2374,6 +2377,58 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- Message reminders ("Erinnere mich", 0.29.0) ------------------------
+
+  final List<Reminder> _reminders = [];
+
+  /// All reminders: pending first (soonest due), then recently fired.
+  List<Reminder> get reminders => List.unmodifiable(_reminders);
+
+  /// Number of reminders still waiting to fire (for a nav badge).
+  int get pendingReminderCount => _reminders.where((r) => !r.fired).length;
+
+  Future<void> loadReminders() async {
+    try {
+      final res = await _api.get('/me/reminders');
+      _reminders
+        ..clear()
+        ..addAll((res['reminders'] as List)
+            .map((e) => Reminder.fromJson(e as Map<String, dynamic>)));
+      notifyListeners();
+    } on ApiException {
+      /* offline: keep whatever we had */
+    }
+  }
+
+  Future<void> createReminder(
+    String chatId,
+    String messageId, {
+    required int remindAt,
+    String note = '',
+  }) async {
+    final res = await _api.post('/chats/$chatId/messages/$messageId/remind', {
+      'remindAt': remindAt,
+      if (note.trim().isNotEmpty) 'note': note.trim(),
+    });
+    _upsertReminder(Reminder.fromJson(res['reminder'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  Future<void> deleteReminder(String id) async {
+    await _api.delete('/me/reminders/$id');
+    _reminders.removeWhere((r) => r.id == id);
+    notifyListeners();
+  }
+
+  void _upsertReminder(Reminder r) {
+    final i = _reminders.indexWhere((x) => x.id == r.id);
+    if (i >= 0) {
+      _reminders[i] = r;
+    } else {
+      _reminders.insert(0, r);
+    }
+  }
+
   Future<void> editMessage(String chatId, String messageId, String body) async {
     final res =
         await _api.patch('/chats/$chatId/messages/$messageId', {'body': body});
@@ -2907,6 +2962,43 @@ class AppState extends ChangeNotifier {
           ..addAll(((payload['folders'] as List?) ?? const [])
               .map((e) => ChatFolder.fromJson(e as Map<String, dynamic>)));
         notifyListeners();
+        break;
+
+      // ---- Message reminders (0.29.0) ----
+      case 'reminder':
+        // A reminder came due. Surface it as a notification (bypasses the
+        // snooze tile — the user explicitly asked to be nudged) and refresh
+        // the list so the screen shows it as "erledigt".
+        final rm = payload['reminder'];
+        if (rm is Map<String, dynamic>) {
+          final r = Reminder.fromJson(rm);
+          _upsertReminder(r);
+          if (settings.notificationsEnabled) {
+            notifications.showMessage(
+              title: '⏰ Erinnerung',
+              body: r.chatTitle.isNotEmpty ? '${r.label} · ${r.chatTitle}' : r.label,
+              target: NotificationTarget(route: 'home'),
+              announcement: true,
+            );
+          }
+          notifyListeners();
+        }
+        break;
+
+      case 'reminder-created':
+        final rm = payload['reminder'];
+        if (rm is Map<String, dynamic>) {
+          _upsertReminder(Reminder.fromJson(rm));
+          notifyListeners();
+        }
+        break;
+
+      case 'reminder-deleted':
+        final rid = payload['id'] as String?;
+        if (rid != null) {
+          _reminders.removeWhere((r) => r.id == rid);
+          notifyListeners();
+        }
         break;
 
       case 'receipt':

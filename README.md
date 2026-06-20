@@ -47,6 +47,17 @@ Online-Status, Lesebestätigungen).
   oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Erinnerungen – „Erinnere mich"** (seit 0.29.0) – lass dich an jede Nachricht
+  zu einem gewählten Zeitpunkt erinnern (Vorlagen wie *in 20 Min*, *heute Abend*,
+  *morgen früh*, oder eigener Termin). Die Erinnerung wird mit einem Schnappschuss
+  der Nachricht gespeichert, kommt **live über die Socket-Verbindung** und – bei
+  geschlossener App – **per Push**. Eigene „Erinnerungen"-Ansicht inklusive Zähler.
+- **Schnellantworten – jetzt geräteübergreifend** (seit 0.29.0) – vorbereitete
+  Antworten liegen am Konto und synchronisieren auf alle Geräte; optional mit
+  einem **`/kürzel`**, das du direkt im Eingabefeld ausschreibst (`/gn8 `).
+- **Chat-Export – vollständig** (seit 0.29.0) – eine Unterhaltung als komplette
+  Abschrift (nicht nur das Geladene) als **.txt** oder strukturiertes **.json**
+  herunterladen, serverseitig gestreamt mit echten Absendernamen.
 - **Link-Vorschauen** (seit 0.28.0) – geteilte Links werden zu einer kompakten
   Karte mit Titel, Beschreibung, Seitenname und Vorschaubild aufgelöst. Lädt erst
   beim Sichtbarwerden, wird pro URL **einmal serverseitig** geholt und

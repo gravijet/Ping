@@ -1514,3 +1514,42 @@ a { color: var(--accent-ink); }
 .diag-fill.good { background: var(--ok); }
 .diag-fill.low { background: var(--danger); }
 @media (prefers-reduced-motion: reduce) { .diag-fill { transition: none; } }
+
+/* ---- 0.29.0 "Erinnerung & Schnellzugriff" -------------------------------- */
+
+/* Reminder dialog */
+.reminder-snap { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2);
+  border-left: 3px solid var(--accent); color: var(--text); font-size: 14px; line-height: 1.4;
+  margin-bottom: 14px; max-height: 4.5em; overflow: hidden; }
+.reminder-label { margin: 6px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.reminder-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.reminder-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 9px 12px; }
+.reminder-preset-when { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 460px) { .reminder-presets { grid-template-columns: 1fr; } }
+
+/* Reminder list pane */
+.reminder-list { display: flex; flex-direction: column; gap: 6px; }
+.reminder-row { display: flex; align-items: center; gap: 10px; padding: 10px;
+  border-radius: var(--radius-sm); transition: background .15s; }
+.reminder-row:hover { background: var(--surface-2); }
+.reminder-row.fired { opacity: .6; }
+.reminder-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+  border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.reminder-row.fired .reminder-ic { background: var(--surface-2); color: var(--ok); }
+.reminder-main { flex: 1; min-width: 0; cursor: pointer; }
+.reminder-when { font-size: 12px; color: var(--accent); font-weight: 640;
+  font-variant-numeric: tabular-nums; }
+.reminder-row.fired .reminder-when { color: var(--muted); }
+.reminder-note { font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.reminder-chat { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+/* Empty-state used by the reminders pane */
+.empty-state { text-align: center; padding: 28px 16px; }
+.empty-emoji { font-size: 36px; margin-bottom: 10px; }
+
+/* Quick-reply shortcut chip (settings list) */
+.qr-chip { display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font: 600 12px/1.6 var(--mono);
+  vertical-align: middle; }

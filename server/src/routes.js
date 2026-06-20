@@ -70,6 +70,9 @@ import {
   telemetrySchema,
   clientErrorSchema,
   deviceStatsSchema,
+  reminderCreateSchema,
+  quickReplyCreateSchema,
+  quickReplyUpdateSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
@@ -255,6 +258,21 @@ import {
   countPublishedPosts,
   postView,
 } from './postsRepo.js';
+import {
+  createReminder,
+  listReminders,
+  deleteReminder,
+  pendingReminderCount,
+  reminderView,
+} from './remindersRepo.js';
+import {
+  createQuickReply,
+  listQuickReplies,
+  updateQuickReply,
+  deleteQuickReply,
+  countQuickReplies,
+  quickReplyView,
+} from './quickRepliesRepo.js';
 import { recordAudit, listAudit } from './auditRepo.js';
 import {
   createApiKey,
@@ -1649,6 +1667,194 @@ router.get(
     const limitRaw = Number(req.query.limit);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 200;
     res.json({ messages: listStarred(req.user.id, limit) });
+  })
+);
+
+// ---- 0.29.0 "Erinnerung & Schnellzugriff": message reminders --------------
+
+// A compact, human-readable one-liner for a message — used to snapshot what a
+// reminder is *about* so the reminders pane renders even if the original message
+// later disappears. Mirrors deliver.js' previewOf but folds in the body.
+function reminderPreviewOf(msg) {
+  const body = (msg.body || '').trim();
+  if (body) return body.length > 140 ? body.slice(0, 139) + '…' : body;
+  switch (msg.type) {
+    case 'image': return '📷 Foto';
+    case 'video': return '🎬 Video';
+    case 'voice': return '🎤 Sprachnachricht';
+    case 'audio': return '🎵 Audio';
+    case 'gif': return 'GIF';
+    case 'file': return '📎 Datei';
+    case 'poll': return '📊 Umfrage';
+    default: return 'Nachricht';
+  }
+}
+
+// Create a reminder for a specific message. Member-gated; the snapshot captures
+// the preview + chat title so the reminder survives the message being deleted.
+router.post(
+  '/chats/:id/messages/:msgId/remind',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const { remindAt, note } = parse(reminderCreateSchema, req.body);
+    if (pendingReminderCount(req.user.id) >= 200) {
+      return res.status(409).json({ error: 'Du hast zu viele offene Erinnerungen.' });
+    }
+    const row = createReminder({
+      userId: req.user.id,
+      chatId: req.chat.id,
+      messageId: msg.id,
+      remindAt,
+      note,
+      preview: reminderPreviewOf(msg),
+      chatTitle: chatView(req.chat, req.user.id).title || '',
+    });
+    const reminder = reminderView(row);
+    sendToUser(req.user.id, 'reminder-created', { reminder });
+    res.status(201).json({ reminder });
+  })
+);
+
+// Every reminder for the signed-in user: pending first (soonest due), then ones
+// that recently fired so the pane can show them as "erledigt".
+router.get(
+  '/me/reminders',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ reminders: listReminders(req.user.id).map(reminderView) });
+  })
+);
+
+// Cancel / dismiss a reminder the caller owns.
+router.delete(
+  '/me/reminders/:rid',
+  requireAuth,
+  h(async (req, res) => {
+    if (!deleteReminder(req.params.rid, req.user.id)) {
+      return res.status(404).json({ error: 'Diese Erinnerung gibt es nicht.' });
+    }
+    sendToUser(req.user.id, 'reminder-deleted', { id: req.params.rid });
+    res.status(204).end();
+  })
+);
+
+// ---- 0.29.0 "Erinnerung & Schnellzugriff": quick replies ------------------
+
+function broadcastQuickReplies(userId) {
+  sendToUser(userId, 'quick-replies-updated', {
+    quickReplies: listQuickReplies(userId).map(quickReplyView),
+  });
+}
+
+router.get(
+  '/me/quick-replies',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ quickReplies: listQuickReplies(req.user.id).map(quickReplyView) });
+  })
+);
+
+router.post(
+  '/me/quick-replies',
+  requireAuth,
+  h(async (req, res) => {
+    if (countQuickReplies(req.user.id) >= 100) {
+      return res.status(409).json({ error: 'Du hast die maximale Anzahl an Schnellantworten erreicht.' });
+    }
+    const { shortcut, text } = parse(quickReplyCreateSchema, req.body);
+    const row = createQuickReply({ userId: req.user.id, shortcut, text });
+    broadcastQuickReplies(req.user.id);
+    res.status(201).json({ quickReply: quickReplyView(row) });
+  })
+);
+
+router.patch(
+  '/me/quick-replies/:qid',
+  requireAuth,
+  h(async (req, res) => {
+    const patch = parse(quickReplyUpdateSchema, req.body);
+    const row = updateQuickReply(req.params.qid, req.user.id, patch);
+    if (!row) return res.status(404).json({ error: 'Diese Schnellantwort gibt es nicht.' });
+    broadcastQuickReplies(req.user.id);
+    res.json({ quickReply: quickReplyView(row) });
+  })
+);
+
+router.delete(
+  '/me/quick-replies/:qid',
+  requireAuth,
+  h(async (req, res) => {
+    if (!deleteQuickReply(req.params.qid, req.user.id)) {
+      return res.status(404).json({ error: 'Diese Schnellantwort gibt es nicht.' });
+    }
+    broadcastQuickReplies(req.user.id);
+    res.status(204).end();
+  })
+);
+
+// ---- 0.29.0 "Erinnerung & Schnellzugriff": per-chat transcript export ------
+
+// Download a single conversation as a portable transcript. ?format=txt gives a
+// human-readable log; ?format=json gives structured data. Member-gated; only the
+// history the caller is allowed to see is included.
+router.get(
+  '/chats/:id/export',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const uid = req.user.id;
+    const format = req.query.format === 'json' ? 'json' : 'txt';
+    const view = chatView(req.chat, uid);
+    const title = view.title || 'Chat';
+    const members = getMembers(req.chat.id).map((m) => getUserById(m.user_id)).filter(Boolean);
+    const nameFor = (senderId) => {
+      if (!senderId) return 'System';
+      if (senderId === uid) return 'Du';
+      const u = members.find((x) => x.id === senderId);
+      return u?.display_name || 'Unbekannt';
+    };
+    const messages = getHistory(req.chat.id, { limit: 50000, viewerId: uid }).map((m) =>
+      messageView(m, uid)
+    );
+    // A filesystem-safe slug for the download filename.
+    const slug = (title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'chat').slice(0, 40);
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'json') {
+      res.set('Content-Type', 'application/json; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="ping-${slug}-${stamp}.json"`);
+      return res.json({
+        exportedAt: Date.now(),
+        chat: { id: req.chat.id, title, type: view.type },
+        members: members.map((u) => ({ id: u.id, name: u.display_name })),
+        messages,
+      });
+    }
+
+    const fmt = (ts) => new Date(ts).toLocaleString('de-DE');
+    const lines = [
+      `Ping — Chatverlauf: ${title}`,
+      `Exportiert am ${fmt(Date.now())} · ${messages.length} Nachrichten`,
+      '='.repeat(60),
+      '',
+    ];
+    for (const m of messages) {
+      const who = nameFor(m.senderId);
+      let text = (m.body || '').trim();
+      if (!text) text = `[${m.type}]`;
+      if (m.deleted) text = '[gelöscht]';
+      if (m.attachment?.name) text += ` (📎 ${m.attachment.name})`;
+      const edited = m.editedAt ? ' (bearbeitet)' : '';
+      lines.push(`[${fmt(m.createdAt)}] ${who}${edited}: ${text}`);
+    }
+    res.set('Content-Type', 'text/plain; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="ping-${slug}-${stamp}.txt"`);
+    res.send(lines.join('\n'));
   })
 );
 

@@ -4,7 +4,7 @@
    updates. Per-message actions: react, reply, forward, star, copy, info, delete.
 */
 
-import { api } from './api.js';
+import { api, getToken } from './api.js';
 import * as store from './store.js';
 import * as socket from './socket.js';
 import * as prefs from './prefs.js';
@@ -26,6 +26,7 @@ import * as drafts from './drafts.js';
 import { tokenizeMentions, attachAutocomplete, pickerOpen } from './mentions.js';
 import { recordSent } from './insights.js';
 import { firstUrl, attachLinkPreview } from './linkpreview.js';
+import * as quickreplies from './quickreplies.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -473,6 +474,8 @@ function msgMenu(e, m, mine) {
       onClick: () => togglePin(m) } : null,
     { label: starred ? 'Markierung entfernen' : 'Markieren', icon: 'star',
       onClick: () => toggleStarSynced(m) },
+    flag('reminders') ? { label: 'Erinnern', icon: 'clock',
+      onClick: () => import('./reminders.js').then((r) => r.setReminderDialog(cur.chatId, m)) } : null,
     mine && m.type === 'text' && !m.attachment
       ? { label: 'Bearbeiten', icon: 'edit', onClick: () => setEdit(m) } : null,
     (m.body || m.type === 'text')
@@ -607,6 +610,11 @@ function renderComposer() {
   };
 
   ta.addEventListener('input', () => {
+    // Expand a leading "/shortcut " into its full quick-reply text inline.
+    if (flag('quickReplies')) {
+      const expanded = quickreplies.expand(ta.value);
+      if (expanded != null) ta.value = expanded;
+    }
     autosize(ta); emitTyping(ta.value.length > 0); refreshRight();
     if (!cur.editing && flag('drafts')) drafts.set(cur.chatId, ta.value);
   });
@@ -624,10 +632,12 @@ function renderComposer() {
 
   const composer = el('div', { class: 'composer' }, [
     el('button', { class: 'iconbtn', title: 'Anhängen', onClick: (e) => attachMenu(e) }, icon('attach')),
-    el('button', { class: 'iconbtn', title: 'Schnellantwort', onClick: (e) => quickReplyMenu(e, ta) }, icon('bolt')),
+    flag('quickReplies')
+      ? el('button', { class: 'iconbtn', title: 'Schnellantwort', onClick: (e) => quickReplyMenu(e, ta) }, icon('bolt'))
+      : null,
     el('div', { class: 'grow' }, [emojiBtn, ta]),
     right,
-  ]);
+  ].filter(Boolean));
   wrap.appendChild(composer);
   cur.ta = ta;
   refreshRight();
@@ -737,12 +747,16 @@ function contextBar(kind, m, onClose) {
 function setReply(m) { cur.editing = null; cur.replyTo = m; renderComposer(); cur.ta?.focus(); }
 function setEdit(m) { cur.replyTo = null; cur.editing = m; renderComposer(); }
 
-// Canned replies (managed in Einstellungen → Chats): tap to drop one into the
-// composer, ready to edit or send.
+// Canned replies (managed in Einstellungen → Chats, synced across devices):
+// tap to drop one into the composer, ready to edit or send. A reply with a
+// "/shortcut" can also be expanded inline by typing "/shortcut " (see below).
 function quickReplyMenu(e, ta) {
-  const replies = prefs.get('quickReplies') || [];
+  const replies = quickreplies.list();
   if (!replies.length) { toast('Lege Schnellantworten in den Einstellungen an.'); return; }
-  openMenu(e, replies.map((text) => ({ label: text, onClick: () => insertAtCursor(ta, text) })));
+  openMenu(e, replies.map((q) => ({
+    label: q.shortcut ? `/${q.shortcut} · ${q.text}` : q.text,
+    onClick: () => insertAtCursor(ta, q.text),
+  })));
 }
 
 function attachMenu(e) {
@@ -1062,8 +1076,44 @@ function chatMenu(e, chat) {
   ].filter(Boolean));
 }
 
-// Export the loaded conversation history as a plain-text file.
+// Export the *full* conversation history. The server streams the complete
+// transcript (not just what's loaded locally) as a tidy .txt or structured
+// .json; offline we fall back to a local text export of the loaded messages.
 function exportChat(chat) {
+  if (!flag('chatExport')) return localExportChat(chat);
+  openMenu(
+    { preventDefault() {}, stopPropagation() {}, clientX: innerWidth / 2, clientY: innerHeight / 2 },
+    [
+      { label: 'Als Text (.txt)', icon: 'file', onClick: () => serverExportChat(chat, 'txt') },
+      { label: 'Als JSON (.json)', icon: 'download', onClick: () => serverExportChat(chat, 'json') },
+    ]
+  );
+}
+
+async function serverExportChat(chat, format) {
+  const title = chat.self ? 'Notiz an mich' : chat.title;
+  try {
+    // Raw authenticated fetch — the export endpoint streams a file, not JSON.
+    const res = await fetch(`/api/chats/${chat.id}/export?format=${format}`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) throw new Error(`Fehler ${res.status}`);
+    const blob = await res.blob();
+    const u = URL.createObjectURL(blob);
+    const slug = (title || 'chat').replace(/\W+/g, '-').toLowerCase().replace(/^-+|-+$/g, '') || 'chat';
+    const a = el('a', { href: u, download: `ping-${slug}.${format}` });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 4000);
+    toast('Chat exportiert.', 'ok');
+  } catch (e) {
+    // Offline / failed → best-effort local export of what we have.
+    if (format === 'txt') return localExportChat(chat);
+    toast(e.message || 'Export fehlgeschlagen.', 'err');
+  }
+}
+
+// Fallback: export only the loaded history, as a plain-text file (no network).
+function localExportChat(chat) {
   const msgs = store.getHistory(chat.id);
   if (!msgs.length) { toast('Nichts zu exportieren.'); return; }
   const title = chat.self ? 'Notiz an mich' : chat.title;

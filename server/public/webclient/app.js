@@ -24,6 +24,8 @@ import * as syncqueue from './syncqueue.js';
 import { flag } from './flags.js';
 import * as activity from './activity.js';
 import * as drafts from './drafts.js';
+import * as reminders from './reminders.js';
+import * as quickreplies from './quickreplies.js';
 import { mentionsUser } from './mentions.js';
 import { openShortcuts, shortcutsOpen } from './shortcuts.js';
 import { safeId } from './validate.js';
@@ -163,6 +165,9 @@ async function enterApp() {
     store.emit('folders'); if (currentSection === 'chats') renderSection();
   })).catch(() => {});
   seedStars();
+  // Reminders + quick replies sync from the server (best-effort, never blocking).
+  if (flag('reminders')) reminders.sync();
+  if (flag('quickReplies')) quickreplies.sync();
   refreshBadges();
   refreshActivityBadge();
   updateConnectionBanner();
@@ -403,6 +408,7 @@ export function openCommandPalette() {
     { title: 'Gespeichert', icon: 'star', keywords: 'saved starred markiert', run: () => setSection('saved') },
     { title: 'Einstellungen', icon: 'settings', hint: 'Strg ,', keywords: 'settings profil konto', run: () => openSettings() },
     flag('activityCenter') ? { title: 'Aktivität', icon: 'bell', keywords: 'activity benachrichtigungen feed reaktionen erwähnungen', run: () => activity.openActivityPanel(openChatInShell) } : null,
+    flag('reminders') ? { title: 'Erinnerungen', icon: 'clock', keywords: 'erinnerung erinnere reminder nudge fällig', run: () => reminders.openReminders(openChatInShell) } : null,
     { title: 'Tastenkürzel', icon: 'bolt', hint: '?', keywords: 'shortcuts keyboard tastatur hilfe', run: () => openShortcuts() },
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
@@ -593,6 +599,12 @@ function wireSocket() {
     if (Array.isArray(p.folders)) store.state.folders = p.folders;
     store.emit('folders'); // the store.on('folders') subscription re-renders
   });
+  // Reminders: a due one firing, or list changes from another device.
+  socket.on('reminder', (p) => { if (p.reminder) reminders.onFired(p.reminder); });
+  socket.on('reminder-created', (p) => { if (p.reminder) reminders.onCreated(p.reminder); });
+  socket.on('reminder-deleted', (p) => { if (p.id) reminders.onDeleted(p.id); });
+  // Quick replies: kept in sync across this user's devices.
+  socket.on('quick-replies-updated', (p) => quickreplies.apply(p.quickReplies));
 
   socket.on('force-logout', () => { toast('Du wurdest abgemeldet.', 'err'); doLogout(true); });
   socket.onStatus((connected) => store.emit('connection', connected));

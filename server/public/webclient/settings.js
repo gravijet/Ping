@@ -17,6 +17,7 @@ import { flag } from './flags.js';
 import { openThemeStudio } from './themes.js';
 import { renderInsights } from './insights.js';
 import { openShortcuts } from './shortcuts.js';
+import * as quickreplies from './quickreplies.js';
 
 // One calm settings surface: a category list on the left, the chosen section on
 // the right — no nested tab-hunting, no sub-modals for routine rows.
@@ -30,7 +31,7 @@ const CATS = [
   ...(flag('deviceDiagnostics') ? [['Gerät', 'bolt']] : []),
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.28.0';
+const WEB_CLIENT_VERSION = '0.29.0';
 
 // A no-op placeholder for `node.append(...)` (native append would turn a bare
 // null into the literal text "null") when a row is feature-flagged off.
@@ -147,9 +148,9 @@ function chatsTab(c) {
     setRow('edit', 'Text-Formatierung', {
       sub: 'Mit *fett*, _kursiv_, ~durchgestrichen~, `Code` und ||Spoiler|| gestalten.',
       trailing: switchEl(prefs.get('messageFormatting'), (v) => prefs.set('messageFormatting', v)) }),
-    setRow('bolt', 'Schnellantworten', {
-      sub: `${(prefs.get('quickReplies') || []).length} vorbereitete Antworten · im Chat über ⚡ einfügen`,
-      onClick: () => quickRepliesEditor(() => { clear(c); chatsTab(c); }) }),
+    ...(flag('quickReplies') ? [setRow('bolt', 'Schnellantworten', {
+      sub: `${quickreplies.list().length} vorbereitete Antworten · synchron · im Chat über ⚡`,
+      onClick: () => quickRepliesEditor(() => { clear(c); chatsTab(c); }) })] : []),
     el('div', { class: 'list-section', text: 'Darstellung' }),
     setRow('chat', 'Kompakte Chat-Liste', { sub: 'Schmalere Zeilen in der Seitenleiste.',
       trailing: switchEl(prefs.get('compact'), (v) => { prefs.set('compact', v); store.emit('prefs'); }) }),
@@ -337,46 +338,56 @@ async function blockedList() {
   } catch (e) { clear(mdl.body); mdl.body.append(el('div', { class: 'formerr', text: e.message })); }
 }
 
-// Manage the canned composer replies (mirrors the native app's Schnellantworten).
+// Manage the canned composer replies. Synced across all of the user's devices
+// (the server is the source of truth); each may carry a short "/shortcut" the
+// composer expands inline.
 function quickRepliesEditor(onChange) {
   const list = el('div');
-  const input = el('input', { class: 'input', placeholder: 'Neue Schnellantwort …' });
-  const current = () => [...(prefs.get('quickReplies') || [])];
-  const save = (arr) => { prefs.set('quickReplies', arr); paint(); onChange && onChange(); };
+  const textInput = el('input', { class: 'input', placeholder: 'Neue Schnellantwort …' });
+  const scInput = el('input', { class: 'input', placeholder: 'Kürzel (optional)',
+    maxlength: '24', style: { maxWidth: '150px' } });
   const m = modal({
     title: 'Schnellantworten',
     body: (b) => b.append(
-      el('p', { class: 'hint', text: 'Kurze Standardantworten, die du im Chat über das ⚡-Symbol mit einem Tipp einfügst.' }),
+      el('p', { class: 'hint', text: 'Kurze Standardantworten, die du im Chat über das ⚡-Symbol einfügst. Mit einem Kürzel tippst du „/kürzel “ direkt im Eingabefeld. Auf allen Geräten synchron.' }),
       list,
       el('div', { class: 'field', style: { marginTop: '10px' } }, [
         el('label', { text: 'Hinzufügen' }),
-        el('div', { style: { display: 'flex', gap: '8px' } }, [
-          el('div', { style: { flex: '1' } }, input),
+        el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, [
+          el('div', { style: { flex: '1 1 200px' } }, textInput),
+          scInput,
           el('button', { class: 'btn primary sm', onClick: add }, 'OK'),
         ]),
       ]),
     ),
-    foot: [el('button', { class: 'btn ghost', onClick: reset }, 'Zurücksetzen')],
+    onClose: () => off && off(),
   });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  const off = store.on('quickReplies', () => { paint(); onChange && onChange(); });
+  textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+  scInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
   paint();
+
   function paint() {
     clear(list);
-    const arr = current();
+    const arr = quickreplies.list();
     if (!arr.length) { list.append(el('div', { class: 'hint', text: 'Noch keine Schnellantworten.' })); return; }
-    arr.forEach((text, i) => list.append(el('div', { class: 'set-row' }, [
-      el('div', { class: 'set-main' }, el('div', { class: 'set-title', text })),
-      el('button', { class: 'iconbtn', title: 'Entfernen', onClick: () => {
-        const next = current(); next.splice(i, 1); save(next); } }, icon('trash')),
-    ])));
+    arr.forEach((q) => list.append(el('div', { class: 'set-row' }, [
+      el('div', { class: 'set-main' }, [
+        q.shortcut ? el('span', { class: 'qr-chip', text: '/' + q.shortcut }) : null,
+        el('div', { class: 'set-title', text: q.text }),
+      ].filter(Boolean)),
+      q.id ? el('button', { class: 'iconbtn', title: 'Entfernen', onClick: async () => {
+        try { await quickreplies.remove(q.id); } catch (e) { toast(e.message, 'err'); }
+      } }, icon('trash')) : null,
+    ].filter(Boolean))));
   }
-  function add() {
-    const t = input.value.trim(); if (!t) return;
-    const arr = current(); if (!arr.includes(t)) arr.push(t);
-    input.value = ''; save(arr); input.focus();
-  }
-  function reset() {
-    save(['👍 Alles klar!', 'Bin gleich da 🏃', 'Melde mich später 🙂', 'Danke dir! 🙏', 'Kannst du kurz anrufen?']);
+  async function add() {
+    const text = textInput.value.trim();
+    if (!text) return;
+    try {
+      await quickreplies.add({ shortcut: scInput.value.trim(), text });
+      textInput.value = ''; scInput.value = ''; textInput.focus();
+    } catch (e) { toast(e.message, 'err'); }
   }
   return m;
 }
