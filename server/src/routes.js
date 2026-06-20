@@ -7,9 +7,28 @@ import {
   signToken,
   signPhoneToken,
   verifyPhoneToken,
+  signTwoFactorChallenge,
+  verifyTwoFactorChallenge,
   requireAuth,
   requireAdmin,
 } from './auth.js';
+import {
+  generateSecret,
+  verifyToken as verifyTotp,
+  otpauthUri,
+  generateRecoveryCodes,
+} from './totp.js';
+import {
+  getTotp,
+  is2faEnabled,
+  beginSetup,
+  enable2fa,
+  disable2fa,
+  replaceRecoveryCodes,
+  unusedRecoveryCount,
+  consumeRecoveryCode,
+} from './twofaRepo.js';
+import { recordSecurityEvent, listSecurityEvents } from './securityRepo.js';
 import { config } from './config.js';
 import { windowsInfo } from './download.js';
 import { createLink, approveLink, pollLink, cancelLink } from './linkRepo.js';
@@ -77,6 +96,13 @@ import {
   quickReplyCreateSchema,
   quickReplyUpdateSchema,
   focusSchema,
+  setUsernameSchema,
+  usernameSchema,
+  peopleSearchSchema,
+  twofaEnableSchema,
+  twofaDisableSchema,
+  twofaRegenerateSchema,
+  login2faSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
@@ -135,6 +161,15 @@ import {
   publicUser,
   privateUser,
   adminUser,
+  getUserByUsername,
+  setUsername,
+  isUsernameAvailable,
+  isReservedUsername,
+  setPrivacy,
+  setUsernameSearchable,
+  bumpTokenEpoch,
+  searchPeople,
+  usersAreConnected,
 } from './repo.js';
 import {
   getOrCreateDirectChat,
@@ -718,7 +753,55 @@ router.post(
     if (user.disabled) {
       return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
     }
-    res.json({ token: signToken(user), user: privateUser(user) });
+    // Two-factor auth: a correct password is only step 1. Hand back a short-lived
+    // challenge the client must redeem at /auth/login/2fa with a code. No token
+    // is issued here, so a leaked password alone can't open a session.
+    if (is2faEnabled(user.id)) {
+      return res.json({
+        twoFactorRequired: true,
+        challenge: signTwoFactorChallenge(user.id),
+      });
+    }
+    recordSecurityEvent(user.id, 'login', 'Passwort', req);
+    res.json({ token: signToken(user), user: privateUser(user), twoFactor: false });
+  })
+);
+
+// Step 2 of a 2FA login: redeem the challenge with a TOTP or recovery code.
+router.post(
+  '/auth/login/2fa',
+  h(async (req, res) => {
+    const { challenge, code, recoveryCode } = parse(login2faSchema, req.body);
+    const userId = verifyTwoFactorChallenge(challenge);
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ error: 'Die Anmeldung ist abgelaufen. Bitte melde dich erneut an.' });
+    }
+    const user = getUserById(userId);
+    if (!user || user.disabled) {
+      return res.status(403).json({ error: 'Dieses Konto ist nicht verfügbar.' });
+    }
+    const totp = getTotp(userId);
+    if (!totp || !totp.enabled) {
+      // 2FA was turned off between step 1 and 2 — let them straight in.
+      recordSecurityEvent(userId, 'login', 'Passwort', req);
+      return res.json({ token: signToken(user), user: privateUser(user), twoFactor: false });
+    }
+    let via = null;
+    if (recoveryCode) {
+      if (consumeRecoveryCode(userId, recoveryCode)) via = 'login_recovery';
+    } else if (code && verifyTotp(totp.secret, code)) {
+      via = 'login_2fa';
+    }
+    if (!via) {
+      return res.status(401).json({ error: 'Der Code stimmt nicht.' });
+    }
+    recordSecurityEvent(userId, via, '', req);
+    if (via === 'login_recovery') {
+      recordSecurityEvent(userId, 'recovery_used', `${unusedRecoveryCount(userId)} übrig`, req);
+    }
+    res.json({ token: signToken(user), user: privateUser(user), twoFactor: true });
   })
 );
 
@@ -804,11 +887,17 @@ router.post(
 
 // ---- Current user ----------------------------------------------------------
 
+// privateUser plus the current 2FA status — the shape every "your own account"
+// response uses so the client always knows whether 2FA is on.
+function meView(user) {
+  return { ...privateUser(user), twoFactor: is2faEnabled(user.id) };
+}
+
 router.get(
   '/me',
   requireAuth,
   h(async (req, res) => {
-    res.json({ user: privateUser(req.user) });
+    res.json({ user: meView(req.user) });
   })
 );
 
@@ -851,11 +940,15 @@ router.patch(
     }
 
     let updated = me;
-    if (email !== undefined) updated = setEmail(me.id, email);
+    if (email !== undefined) {
+      updated = setEmail(me.id, email);
+      recordSecurityEvent(me.id, 'email_changed', email, req);
+    }
     if (password !== undefined) {
       updated = setPassword(me.id, await hashPassword(password));
+      recordSecurityEvent(me.id, 'password_changed', '', req);
     }
-    res.json({ user: privateUser(updated) });
+    res.json({ user: meView(updated) });
   })
 );
 
@@ -1090,6 +1183,20 @@ router.post(
       return res
         .status(404)
         .json({ error: 'Diese Person ist (noch) nicht bei Ping. Lade sie ein!' });
+    }
+    // Privacy (0.32.0): when the recipient restricted who may message them to
+    // "contacts", a stranger can't open a fresh DM. An existing conversation
+    // (usersAreConnected) or the official account is always allowed; so is a
+    // note-to-self. This blocks cold approaches without breaking known chats.
+    if (
+      other.id !== req.user.id &&
+      other.id !== OFFICIAL_USER_ID &&
+      other.privacy_messages === 'contacts' &&
+      !usersAreConnected(req.user.id, other.id)
+    ) {
+      return res
+        .status(403)
+        .json({ error: 'Diese Person nimmt nur Nachrichten von Kontakten an.' });
     }
     // A chat with yourself ("Notiz an mich") is allowed and useful — note,
     // forward, save things to yourself, just like WhatsApp.
@@ -2221,9 +2328,17 @@ router.post(
     }
     const ids = Array.isArray(req.body?.memberIds) ? req.body.memberIds : [];
     const added = [];
+    const skipped = [];
     for (const id of ids) {
       const u = getUserById(id);
-      if (u && !isMember(req.chat.id, id)) {
+      if (!u || isMember(req.chat.id, id)) continue;
+      // Privacy (0.32.0): respect "wer darf mich zu Gruppen hinzufügen". If the
+      // target only allows contacts and the adder isn't connected to them, skip.
+      if (u.privacy_groups === 'contacts' && !usersAreConnected(req.user.id, id)) {
+        skipped.push(u.display_name);
+        continue;
+      }
+      {
         addMember(req.chat.id, id);
         added.push(u);
         const sys = createMessage({
@@ -2238,7 +2353,7 @@ router.post(
         }
       }
     }
-    res.json({ added: added.map(publicUser) });
+    res.json({ added: added.map(publicUser), skipped });
   })
 );
 
@@ -2721,16 +2836,239 @@ router.post(
 
 // ---- Privacy settings -------------------------------------------------------
 
-// Toggle whether other people may see this user's "zuletzt online". Presence
-// (online right now) stays visible — only the timestamp is hidden.
+// Update one or more privacy switches in a single PATCH-like POST:
+//   • showLastSeen      — whether others see "zuletzt online" (presence stays),
+//   • messages          — who may open a new DM with you (everyone | contacts),
+//   • groups            — who may add you to a group   (everyone | contacts),
+//   • usernameSearchable — whether your @username appears in people search.
+// The legacy { showLastSeen } body from older clients still works.
 router.post(
   '/me/privacy',
   requireAuth,
   h(async (req, res) => {
-    const { showLastSeen } = parse(privacySchema, req.body);
-    const updated = setShowLastSeen(req.user.id, showLastSeen);
+    const patch = parse(privacySchema, req.body);
+    let updated = req.user;
+    if (patch.showLastSeen !== undefined) updated = setShowLastSeen(req.user.id, patch.showLastSeen);
+    if (patch.messages !== undefined) updated = setPrivacy(req.user.id, 'messages', patch.messages);
+    if (patch.groups !== undefined) updated = setPrivacy(req.user.id, 'groups', patch.groups);
+    if (patch.usernameSearchable !== undefined) {
+      updated = setUsernameSearchable(req.user.id, patch.usernameSearchable);
+    }
+    recordSecurityEvent(req.user.id, 'privacy_changed', Object.keys(patch).join(', '), req);
     broadcastProfile(updated);
-    res.json({ user: privateUser(updated) });
+    res.json({ user: meView(updated) });
+  })
+);
+
+// ---- Usernames & people directory (0.32.0) ---------------------------------
+
+// Is a username free to claim? Returns { available, reason? } without leaking
+// who owns a taken one. Used live by the "Benutzername wählen" field.
+router.get(
+  '/me/username/check',
+  requireAuth,
+  h(async (req, res) => {
+    let name;
+    try {
+      name = parse(usernameSchema, (req.query.u || '').toString());
+    } catch (e) {
+      return res.json({ available: false, reason: e.message });
+    }
+    if (isReservedUsername(name)) {
+      return res.json({ available: false, reason: 'Dieser Benutzername ist reserviert.' });
+    }
+    const free = isUsernameAvailable(name, req.user.id);
+    res.json({ available: free, username: name, reason: free ? null : 'Schon vergeben.' });
+  })
+);
+
+// Claim or change the caller's @username (unique, lowercased).
+router.put(
+  '/me/username',
+  requireAuth,
+  h(async (req, res) => {
+    const { username } = parse(setUsernameSchema, req.body);
+    if (isReservedUsername(username)) {
+      return res.status(409).json({ error: 'Dieser Benutzername ist reserviert.' });
+    }
+    if (!isUsernameAvailable(username, req.user.id)) {
+      return res.status(409).json({ error: 'Dieser Benutzername ist schon vergeben.' });
+    }
+    let updated;
+    try {
+      updated = setUsername(req.user.id, username);
+    } catch (e) {
+      // Lost the race against the unique index between check and write.
+      return res.status(409).json({ error: 'Dieser Benutzername ist schon vergeben.' });
+    }
+    recordSecurityEvent(req.user.id, 'username_changed', `@${username}`, req);
+    broadcastProfile(updated);
+    res.json({ user: meView(updated) });
+  })
+);
+
+// Release the caller's username (back to no public handle).
+router.delete(
+  '/me/username',
+  requireAuth,
+  h(async (req, res) => {
+    const updated = setUsername(req.user.id, null);
+    recordSecurityEvent(req.user.id, 'username_changed', 'entfernt', req);
+    broadcastProfile(updated);
+    res.json({ user: meView(updated) });
+  })
+);
+
+// Public profile lookup by @username (for /u/<name> deep links).
+router.get(
+  '/users/by-username/:handle',
+  requireAuth,
+  h(async (req, res) => {
+    const handle = (req.params.handle || '').replace(/^@+/, '').toLowerCase();
+    const user = getUserByUsername(handle);
+    if (!user || user.disabled) {
+      return res.status(404).json({ error: 'Diesen Benutzernamen gibt es nicht.' });
+    }
+    res.json({ user: { ...publicUser(user), online: isOnline(user.id) } });
+  })
+);
+
+// People directory: search by @username or display-name prefix. Excludes the
+// caller and the official account; @username hits honour each user's
+// "discoverable" switch (handled in searchPeople).
+router.get(
+  '/people/search',
+  requireAuth,
+  h(async (req, res) => {
+    const q = parse(peopleSearchSchema, (req.query.q || '').toString());
+    const results = searchPeople(q)
+      .filter((u) => u.id !== req.user.id)
+      .slice(0, 20)
+      .map((u) => ({ ...publicUser(u), online: isOnline(u.id) }));
+    res.json({ results });
+  })
+);
+
+// ---- Two-factor authentication (TOTP) --------------------------------------
+
+// Current 2FA status for the signed-in user.
+router.get(
+  '/me/2fa',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({
+      enabled: is2faEnabled(req.user.id),
+      recoveryCodesLeft: unusedRecoveryCount(req.user.id),
+    });
+  })
+);
+
+// Begin setup: mint a fresh secret and hand back the otpauth URI for the QR.
+// Idempotent — calling again before confirming just rotates the pending secret.
+router.post(
+  '/me/2fa/setup',
+  requireAuth,
+  h(async (req, res) => {
+    if (is2faEnabled(req.user.id)) {
+      return res.status(409).json({ error: 'Zwei-Faktor-Authentifizierung ist bereits aktiv.' });
+    }
+    const secret = generateSecret();
+    beginSetup(req.user.id, secret);
+    res.json({
+      secret,
+      otpauth: otpauthUri(secret, req.user.email || req.user.display_name || 'Ping'),
+    });
+  })
+);
+
+// Confirm setup: verify a code against the pending secret, switch 2FA on and
+// return the one-time recovery codes (shown exactly once).
+router.post(
+  '/me/2fa/enable',
+  requireAuth,
+  h(async (req, res) => {
+    const { code } = parse(twofaEnableSchema, req.body);
+    const totp = getTotp(req.user.id);
+    if (!totp) {
+      return res.status(400).json({ error: 'Starte zuerst die Einrichtung.' });
+    }
+    if (totp.enabled) {
+      return res.status(409).json({ error: 'Zwei-Faktor-Authentifizierung ist bereits aktiv.' });
+    }
+    if (!verifyTotp(totp.secret, code)) {
+      return res.status(400).json({ error: 'Der Code stimmt nicht. Versuch es nochmal.' });
+    }
+    const codes = generateRecoveryCodes();
+    enable2fa(req.user.id, codes);
+    recordSecurityEvent(req.user.id, 'twofa_enabled', '', req);
+    res.json({ enabled: true, recoveryCodes: codes });
+  })
+);
+
+// Turn 2FA off. Requires the account password (and, if currently enabled, a
+// valid TOTP or recovery code) so a hijacked session can't quietly disable it.
+router.post(
+  '/me/2fa/disable',
+  requireAuth,
+  h(async (req, res) => {
+    const { password, code } = parse(twofaDisableSchema, req.body);
+    if (!(await verifyPassword(password, req.user.password_hash))) {
+      return res.status(403).json({ error: 'Das Passwort stimmt nicht.' });
+    }
+    const totp = getTotp(req.user.id);
+    if (totp && totp.enabled) {
+      const ok = (code && verifyTotp(totp.secret, code)) ||
+        (code && consumeRecoveryCode(req.user.id, code));
+      if (!ok) {
+        return res.status(400).json({ error: 'Bitte gib einen gültigen Code ein.' });
+      }
+    }
+    disable2fa(req.user.id);
+    recordSecurityEvent(req.user.id, 'twofa_disabled', '', req);
+    res.json({ enabled: false });
+  })
+);
+
+// Regenerate recovery codes (invalidates the old set). Requires the password.
+router.post(
+  '/me/2fa/recovery',
+  requireAuth,
+  h(async (req, res) => {
+    const { password } = parse(twofaRegenerateSchema, req.body);
+    if (!(await verifyPassword(password, req.user.password_hash))) {
+      return res.status(403).json({ error: 'Das Passwort stimmt nicht.' });
+    }
+    if (!is2faEnabled(req.user.id)) {
+      return res.status(409).json({ error: 'Zwei-Faktor-Authentifizierung ist nicht aktiv.' });
+    }
+    const codes = generateRecoveryCodes();
+    replaceRecoveryCodes(req.user.id, codes);
+    recordSecurityEvent(req.user.id, 'recovery_regenerated', '', req);
+    res.json({ recoveryCodes: codes });
+  })
+);
+
+// ---- Security centre --------------------------------------------------------
+
+// The per-user security audit feed (most recent first).
+router.get(
+  '/me/security-log',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ events: listSecurityEvents(req.user.id, 50) });
+  })
+);
+
+// "Überall abmelden": bump the session epoch so every existing token — every
+// other device — is invalidated. A fresh token is minted for *this* device so
+// the caller stays signed in.
+router.post(
+  '/me/logout-all',
+  requireAuth,
+  h(async (req, res) => {
+    const updated = bumpTokenEpoch(req.user.id);
+    recordSecurityEvent(req.user.id, 'sessions_revoked', '', req);
+    res.json({ token: signToken(updated), user: meView(updated) });
   })
 );
 

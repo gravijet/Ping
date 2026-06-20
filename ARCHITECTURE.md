@@ -257,6 +257,44 @@ reactions, pins, FTS search and push all work unchanged the moment you follow on
   `/?c=<handle>` deep link. The chat header shows a 📣 badge + subscriber count
   and swaps the composer for a read-only notice for subscribers.
 
+## Identity & protection (0.32.0)
+Account-level identity + security, kill-switchable via `usernames`, `twoFactor`
+and `privacyControls`. Four pillars, all server-enforced.
+
+- **Usernames** (`repo.js`, `db.js`): an additive `users.username` column (stored
+  lowercased) with a partial unique index `idx_users_username … WHERE username IS
+  NOT NULL`, created in `ensureColumns()` after the `ALTER`. `setUsername`,
+  `getUserByUsername`, a reserved-name guard and `searchPeople` (exact-handle hits
+  first, honouring each user's `username_searchable` switch) power
+  `GET/PUT/DELETE /me/username`, `GET /me/username/check`,
+  `GET /users/by-username/:handle` and `GET /people/search`. `publicUser` exposes
+  `username`; the web resolves `?u=@name` deep links and offers `@`-search in the
+  new-chat modal.
+- **Two-factor auth (TOTP)** (`totp.js`, `twofaRepo.js`): a dependency-free RFC
+  6238 engine on `node:crypto` (base32, HOTP/TOTP, constant-time verify with ±1
+  drift, `otpauth://` builder). `user_totp` holds a *pending* secret until the
+  first code confirms it (`enabled=1`); `recovery_codes` are sha256-hashed,
+  single-use and consumed atomically. Flow: `/me/2fa/{setup,enable,disable,
+  recovery}`; on login a 2FA account gets a short-lived
+  `purpose:'2fa_challenge'` token (no session) redeemed at `POST /auth/login/2fa`
+  with a TOTP **or** recovery code. The web has a setup wizard (QR via the same
+  `vendor/qrcode.min.js` used for device-linking) + a login challenge screen; the
+  Flutter login raises `TwoFactorRequiredException` and finishes via
+  `loginTwoFactor()`.
+- **Privacy** (`repo.js`): `privacy_messages` / `privacy_groups`
+  (`everyone|contacts`) are checked at `/chats/direct` and `/chats/:id/members`
+  using `usersAreConnected` (shared chat **or** a contact in either direction);
+  group-add returns the `skipped` names. `username_searchable` gates people search.
+- **Sessions & audit** (`auth.js`, `securityRepo.js`): every token carries a `tv`
+  claim equal to the account's `token_epoch`; `requireAuth` rejects a stale epoch,
+  and `POST /me/logout-all` bumps it to invalidate all other devices (a missing
+  `tv` reads as `0`, so the deploy logs nobody out). `security_events` is an
+  append-only feed with server-side German labels, surfaced at
+  `GET /me/security-log` and trimmed to 100 rows/user by the maintenance sweep.
+- **Web** (`security.js`): a lazily-loaded **Sicherheit** settings tab hosting the
+  username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
+  abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
+
 ## Conversation context (0.28.0)
 Two additive features that add context to messages — both kill-switchable via the
 remote flags `linkPreviews` / `editHistory`.

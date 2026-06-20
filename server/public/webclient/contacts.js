@@ -26,15 +26,26 @@ export function newChatModal() {
   const result = el('div');
   const btn = el('button', { class: 'btn primary', onClick: find }, 'Suchen');
 
+  const pickAndClose = async (user) => {
+    try { await startDirect(user.id); m.close(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+
   const m = modal({
     title: 'Neuer Chat',
-    body: (body) => body.append(
-      el('p', { class: 'hint', text: 'Gib die Handynummer der Person ein, der du schreiben möchtest.' }),
-      el('div', { class: 'field', style: { marginTop: '12px' } }, [
-        el('label', { text: 'Handynummer' }), phone]),
-      el('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, btn),
-      err, result,
-    ),
+    body: (body) => {
+      body.append(
+        el('p', { class: 'hint', text: 'Gib die Handynummer der Person ein, der du schreiben möchtest.' }),
+        el('div', { class: 'field', style: { marginTop: '12px' } }, [
+          el('label', { text: 'Handynummer' }), phone]),
+        el('div', { style: { display: 'flex', justifyContent: 'flex-end' } }, btn),
+        err, result,
+      );
+      // 0.32.0: also find people by @username or name.
+      if (flag('usernames')) {
+        body.append(el('div', { class: 'auth-or', text: 'oder' }), peopleSearchField(pickAndClose));
+      }
+    },
   });
   setTimeout(() => phone.focus(), 0);
   phone.addEventListener('keydown', (e) => e.key === 'Enter' && find());
@@ -57,14 +68,47 @@ export function newChatModal() {
 // A clickable user row (used in new-chat results and member pickers).
 export function userRow(user, onClick, { selected = null } = {}) {
   const online = store.isOnline(user.id);
+  const second = user.username ? `@${user.username}` : (user.about || (online ? 'online' : ''));
   return el('div', { class: 'urow', onClick }, [
     avatar(user, 46, { online, kind: 'user' }),
     el('div', { class: 'meta' }, [
       el('div', { class: 'uname', text: user.displayName }),
-      el('div', { class: 'uabout', text: user.about || (online ? 'online' : '') }),
+      el('div', { class: 'uabout', text: second }),
     ]),
     selected === true ? icon('check', 'check') : null,
   ].filter(Boolean));
+}
+
+// Live people search by @username or name (0.32.0). Debounced; renders rows into
+// [host], each opening a direct chat via [onPick].
+function peopleSearchField(onPick) {
+  const input = el('input', { class: 'input', placeholder: '@name oder Name',
+    autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+  const host = el('div', { class: 'people-results' });
+  let t = null;
+  let seq = 0;
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(t);
+    clear(host);
+    if (q.replace(/^@+/, '').length < 2) return;
+    const mine = ++seq;
+    host.append(el('div', { class: 'hint', text: 'Suche …' }));
+    t = setTimeout(async () => {
+      try {
+        const { results } = await api.get(`/people/search?q=${encodeURIComponent(q)}`);
+        if (mine !== seq) return; // a newer keystroke already superseded us
+        clear(host);
+        if (!results.length) { host.append(el('div', { class: 'hint', text: 'Niemand gefunden.' })); return; }
+        for (const u of results) host.append(userRow(u, () => onPick(u)));
+      } catch (e) { if (mine === seq) { clear(host); host.append(el('div', { class: 'formerr', text: e.message })); } }
+    }, 280);
+  });
+  return el('div', {}, [
+    el('div', { class: 'field', style: { marginTop: '4px' } }, [
+      el('label', { text: 'Über @Benutzername oder Namen' }), input]),
+    host,
+  ]);
 }
 
 export function openProfile(user) {
@@ -84,6 +128,7 @@ export function openProfile(user) {
       body.appendChild(el('div', { class: 'profile-pane' }, [
         avatar(user, 110, { kind: 'user', online: store.isOnline(user.id) }),
         el('h3', { text: user.displayName }),
+        user.username ? el('div', { class: 'profile-handle', text: `@${user.username}` }) : null,
         user.about ? el('p', { class: 'hint', text: user.about }) : null,
         store.isOnline(user.id)
           ? el('div', { class: 'hint', text: 'online' })

@@ -70,6 +70,8 @@ const PATHS = {
   compass: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM15.5 8.5l-2 5-5 2 2-5 5-2Z',
   megaphone: 'M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1ZM14 8a4 4 0 0 1 0 8M16.5 5a8 8 0 0 1 0 14',
   hash: 'M9 4 7 20M17 4l-2 16M5 9h15M4 15h15',
+  // Identität & Schutz (0.32.0): a key for two-factor/recovery codes.
+  key: 'M15 7a4 4 0 1 1-3.9 5H8v3H5v3H2v-4l6.1-6.1A4 4 0 0 1 15 7Zm1.5 1.5h.01',
 };
 
 export function icon(name, cls = '') {

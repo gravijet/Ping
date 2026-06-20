@@ -25,13 +25,14 @@ const CATS = [
   ['Profil', 'user'],
   ['Chats', 'chat'],
   ['Datenschutz', 'shield'],
+  ['Sicherheit', 'lock'],
   ['Design', 'palette'],
   ['Mitteilungen', 'bell'],
   ['Geräte', 'link'],
   ...(flag('deviceDiagnostics') ? [['Gerät', 'bolt']] : []),
   ['Mehr', 'info'],
 ];
-const WEB_CLIENT_VERSION = '0.29.0';
+const WEB_CLIENT_VERSION = '0.32.0';
 
 // A no-op placeholder for `node.append(...)` (native append would turn a bare
 // null into the literal text "null") when a row is feature-flagged off.
@@ -56,6 +57,7 @@ export function openSettings(startCat = 'Profil') {
       if (cat === 'Profil') profileTab(content);
       else if (cat === 'Chats') chatsTab(content);
       else if (cat === 'Datenschutz') privacyTab(content);
+      else if (cat === 'Sicherheit') securityTab(content);
       else if (cat === 'Design') designTab(content);
       else if (cat === 'Mitteilungen') notifyTab(content);
       else if (cat === 'Geräte') devicesTab(content);
@@ -169,13 +171,39 @@ function chatsTab(c) {
   );
 }
 
+// ---- Sicherheit -----------------------------------------------------------
+// Thin wrapper: the heavy lifting (username, 2FA wizard + QR, sessions, audit
+// log) lives in the lazily-loaded security.js so its markup + QR dependency
+// never weigh on first paint.
+function securityTab(c) {
+  c.append(el('div', { class: 'hint', style: { padding: '8px 4px' }, text: 'Lade …' }));
+  import('./security.js')
+    .then((m) => { clear(c); m.renderSecurityTab(c, () => { clear(c); securityTab(c); }); })
+    .catch(() => { clear(c); c.append(el('div', { class: 'hint', text: 'Konnte nicht laden.' })); });
+}
+
 // ---- Datenschutz ----------------------------------------------------------
 function privacyTab(c) {
   const me = store.state.me;
+  // 0.32.0: who may reach you. 'everyone' (default) | 'contacts'.
+  const reach = [['everyone', 'Jeder'], ['contacts', 'Nur Kontakte']];
   c.append(
     setRow('eye', '„Zuletzt online" zeigen', { sub: 'Andere sehen, wann du zuletzt aktiv warst.',
       trailing: switchEl(me.showLastSeen, async (v) => {
         await api.post('/me/privacy', { showLastSeen: v }); store.state.me.showLastSeen = v; }) }),
+    ...(flag('privacyControls') ? [
+      el('div', { class: 'list-section', text: 'Erreichbarkeit' }),
+      selectRow('Wer darf mir schreiben', me.privacyMessages || 'everyone', reach, async (v) => {
+        const { user } = await api.post('/me/privacy', { messages: v }); store.state.me = user; }),
+      selectRow('Wer darf mich zu Gruppen hinzufügen', me.privacyGroups || 'everyone', reach, async (v) => {
+        const { user } = await api.post('/me/privacy', { groups: v }); store.state.me = user; }),
+      ...(flag('usernames') ? [
+        setRow('hash', 'Über Benutzername auffindbar', {
+          sub: 'In der Personensuche per @Name erscheinen.',
+          trailing: switchEl(me.usernameSearchable !== false, async (v) => {
+            const { user } = await api.post('/me/privacy', { usernameSearchable: v }); store.state.me = user; }) }),
+      ] : []),
+    ] : []),
     setRow('doublecheck', 'Lesebestätigungen', { sub: 'Auf diesem Gerät.',
       trailing: switchEl(prefs.get('readReceipts'), (v) => { prefs.set('readReceipts', v); }) }),
     setRow('edit', 'Schreibstatus senden', { sub: 'Anderen „tippt …" anzeigen, während du schreibst.',

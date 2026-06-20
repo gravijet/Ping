@@ -68,6 +68,9 @@ function showLogin(panel, onAuthed) {
     btn.disabled = true; btn.textContent = 'Anmelden …';
     try {
       const r = await api.post('/auth/login', { login: login.value.trim(), password: pw.value });
+      // 2FA: a correct password returns a challenge, not a session. Go collect
+      // the code rather than signing in.
+      if (r.twoFactorRequired) { showTwoFactor(panel, onAuthed, r.challenge); return; }
       onAuthed(r.token, r.user);
     } catch (e) {
       err.textContent = e.message; btn.disabled = false; btn.textContent = 'Anmelden';
@@ -89,6 +92,71 @@ function showLogin(panel, onAuthed) {
       [icon('qr'), 'Mit dem Handy verknüpfen']),
   ], 'login');
   mount(panel, node); wireTabs(node, panel, onAuthed);
+}
+
+// ---- two-factor challenge (step 2 of login) -------------------------------
+function showTwoFactor(panel, onAuthed, challenge) {
+  let recovery = false;
+  const err = el('div', { class: 'formerr' });
+  const code = el('input', {
+    class: 'input', inputmode: 'numeric', autocomplete: 'one-time-code',
+    placeholder: '123456', maxlength: '6',
+    style: { letterSpacing: '0.4em', textAlign: 'center', fontSize: '1.3rem' },
+  });
+  const btn = el('button', { class: 'btn primary block' }, 'Bestätigen');
+  const toggle = el('button', { class: 'linklike' }, 'Stattdessen Wiederherstellungscode');
+
+  const submit = async () => {
+    err.textContent = '';
+    const val = code.value.trim();
+    if (!val) { err.textContent = 'Bitte gib deinen Code ein.'; return; }
+    btn.disabled = true; btn.textContent = 'Prüfe …';
+    try {
+      const body = recovery ? { challenge, recoveryCode: val } : { challenge, code: val };
+      const r = await api.post('/auth/login/2fa', body);
+      onAuthed(r.token, r.user);
+    } catch (e) {
+      err.textContent = e.message; btn.disabled = false; btn.textContent = 'Bestätigen';
+    }
+  };
+  btn.addEventListener('click', submit);
+  code.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+  // TOTP fields only accept digits; recovery codes are alphanumeric + dashes.
+  code.addEventListener('input', () => {
+    if (!recovery) code.value = code.value.replace(/\D/g, '').slice(0, 6);
+  });
+  toggle.addEventListener('click', () => {
+    recovery = !recovery;
+    code.value = '';
+    if (recovery) {
+      code.placeholder = 'xxxx-xxxx'; code.maxLength = 40; code.inputMode = 'text';
+      code.style.letterSpacing = '0.1em'; code.style.fontSize = '1.05rem';
+      toggle.textContent = 'Stattdessen App-Code';
+      label.textContent = 'Wiederherstellungscode';
+    } else {
+      code.placeholder = '123456'; code.maxLength = 6; code.inputMode = 'numeric';
+      code.style.letterSpacing = '0.4em'; code.style.fontSize = '1.3rem';
+      toggle.textContent = 'Stattdessen Wiederherstellungscode';
+      label.textContent = 'Code aus deiner Authenticator-App';
+    }
+    code.focus();
+  });
+
+  const label = el('label', { text: 'Code aus deiner Authenticator-App' });
+  const node = el('div', { class: 'auth-card' }, [
+    el('h2', { text: 'Bestätigung in zwei Schritten' }),
+    el('p', { class: 'auth-sub', text: 'Gib den 6-stelligen Code aus deiner ' +
+      'Authenticator-App ein, um die Anmeldung abzuschließen.' }),
+    el('div', { class: 'field' }, [label, code]),
+    err, btn,
+    el('div', { class: 'auth-foot' }, [
+      toggle,
+      el('button', { class: 'linklike', onClick: () => showLogin(panel, onAuthed) },
+        '← Zurück'),
+    ]),
+  ]);
+  mount(panel, node);
+  setTimeout(() => code.focus(), 50);
 }
 
 // ---- register -------------------------------------------------------------

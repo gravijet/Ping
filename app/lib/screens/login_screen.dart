@@ -92,6 +92,9 @@ class _LoginScreenState extends State<LoginScreen> {
         await state.login(_login.text.trim(), _password.text);
       }
       // On success the root widget swaps to the home screen automatically.
+    } on TwoFactorRequiredException catch (e) {
+      // Password was right; the account has 2FA. Collect the code and finish.
+      if (mounted) await _promptTwoFactor(state, e.challenge);
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -100,6 +103,107 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Modal for the second login step: a 6-digit authenticator code, with a
+  /// fallback to a recovery code. Loops until success or the user cancels.
+  Future<void> _promptTwoFactor(AppState state, String challenge) async {
+    final codeCtrl = TextEditingController();
+    bool useRecovery = false;
+    String? err;
+    bool busy = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Future<void> confirm() async {
+            final val = codeCtrl.text.trim();
+            if (val.isEmpty) {
+              setLocal(() => err = 'Bitte gib deinen Code ein.');
+              return;
+            }
+            setLocal(() {
+              busy = true;
+              err = null;
+            });
+            try {
+              await state.loginTwoFactor(
+                challenge,
+                code: useRecovery ? null : val,
+                recoveryCode: useRecovery ? val : null,
+              );
+              if (ctx.mounted) Navigator.of(ctx).pop();
+            } on ApiException catch (e) {
+              setLocal(() {
+                busy = false;
+                err = e.message;
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Bestätigung in zwei Schritten'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(useRecovery
+                    ? 'Gib einen deiner Wiederherstellungscodes ein.'
+                    : 'Gib den 6-stelligen Code aus deiner Authenticator-App ein.'),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: codeCtrl,
+                  autofocus: true,
+                  enabled: !busy,
+                  keyboardType:
+                      useRecovery ? TextInputType.text : TextInputType.number,
+                  textAlign: TextAlign.center,
+                  maxLength: useRecovery ? 40 : 6,
+                  decoration: InputDecoration(
+                    hintText: useRecovery ? 'xxxx-xxxx' : '123456',
+                    errorText: err,
+                    counterText: '',
+                  ),
+                  onSubmitted: (_) => busy ? null : confirm(),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: busy
+                        ? null
+                        : () => setLocal(() {
+                              useRecovery = !useRecovery;
+                              codeCtrl.clear();
+                              err = null;
+                            }),
+                    child: Text(useRecovery
+                        ? 'Stattdessen App-Code'
+                        : 'Wiederherstellungscode verwenden'),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.of(ctx).pop(),
+                child: const Text('Abbrechen'),
+              ),
+              FilledButton(
+                onPressed: busy ? null : confirm,
+                child: busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Bestätigen'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override

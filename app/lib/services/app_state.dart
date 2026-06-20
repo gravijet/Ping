@@ -723,11 +723,30 @@ class AppState extends ChangeNotifier {
     return (res as Map)['verifyToken'] as String;
   }
 
-  /// Log in with email or phone number + password.
+  /// Log in with email or phone number + password. When the account has
+  /// two-factor auth enabled the server returns a challenge instead of a
+  /// session — surfaced as a [TwoFactorRequiredException] for the UI to collect
+  /// the code and finish via [loginTwoFactor].
   Future<void> login(String loginId, String password) async {
     final res = await _api.post('/auth/login', {
       'login': loginId,
       'password': password,
+    });
+    if (res is Map && res['twoFactorRequired'] == true) {
+      throw TwoFactorRequiredException(res['challenge'] as String);
+    }
+    await _handleAuthSuccess(res);
+  }
+
+  /// Step 2 of a two-factor login: redeem [challenge] with a 6-digit TOTP
+  /// [code] or a [recoveryCode]. Exactly one of the two should be provided.
+  Future<void> loginTwoFactor(String challenge,
+      {String? code, String? recoveryCode}) async {
+    final res = await _api.post('/auth/login/2fa', {
+      'challenge': challenge,
+      if (code != null && code.isNotEmpty) 'code': code,
+      if (recoveryCode != null && recoveryCode.isNotEmpty)
+        'recoveryCode': recoveryCode,
     });
     await _handleAuthSuccess(res);
   }

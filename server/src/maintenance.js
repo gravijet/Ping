@@ -15,6 +15,7 @@ import {
   deleteScheduledBroadcast,
 } from './scheduledBroadcastRepo.js';
 import { purgeAutoReplies } from './focusRepo.js';
+import { trimSecurityEvents } from './securityRepo.js';
 import { dispatchBroadcast } from './broadcast.js';
 import { deliverMessage } from './deliver.js';
 
@@ -120,6 +121,9 @@ export function runMaintenance() {
  */
 export function optimizeDatabase() {
   try {
+    // Keep each user's security feed to its newest 100 rows so it can't grow
+    // without bound (cheap; runs on the slow optimisation cadence).
+    trimSecurityEvents(100);
     db.exec('PRAGMA optimize;');
     db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
   } catch (e) {

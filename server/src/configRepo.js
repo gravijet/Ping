@@ -34,6 +34,11 @@ export const DEFAULT_CONFIG = {
     // server-enforced focus mode / quiet hours with DM auto-reply.
     messageSearch: true,
     focusMode: true,
+    // Identität & Schutz (0.32.0): public @usernames + people directory,
+    // two-factor auth (TOTP), expanded privacy controls + security centre.
+    usernames: true,
+    twoFactor: true,
+    privacyControls: true,
   },
   values: {
     maxStatusSeconds: 30,

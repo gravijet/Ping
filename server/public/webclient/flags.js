@@ -41,6 +41,9 @@ export const DEFAULTS = {
   messageSearch: true,   // FTS5 global search view with filters + highlighted snippets
   focusMode: true,       // focus mode / quiet hours + DM auto-reply (server-enforced)
   communities: true,     // public, discoverable broadcast channels ("Entdecken")
+  usernames: true,       // public @usernames + people directory + /u/<name> links
+  twoFactor: true,       // TOTP two-factor auth + recovery codes
+  privacyControls: true, // who-can-DM / who-can-add-to-groups + security centre
 };
 
 function localOverrides() {

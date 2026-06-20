@@ -263,6 +263,88 @@ export function setShowLastSeen(id, show) {
   return stmts.userById.get(id);
 }
 
+// ---- Identität & Schutz (0.32.0): usernames, privacy, sessions -------------
+
+// Handles a user can never claim: reserved routes/words that would be confusing
+// or impersonating. Compared case-insensitively against the lowercased handle.
+export const RESERVED_USERNAMES = new Set([
+  'admin', 'administrator', 'ping', 'pingteam', 'ping-team', 'official', 'support',
+  'help', 'team', 'system', 'root', 'me', 'self', 'you', 'null', 'undefined',
+  'settings', 'account', 'login', 'logout', 'register', 'auth', 'api', 'about',
+  'channel', 'channels', 'group', 'groups', 'chat', 'chats', 'user', 'users',
+  'everyone', 'all', 'mod', 'moderator', 'staff', 'verified', 'premium',
+]);
+
+/** Whether [name] (already lowercased) is on the reserved list. */
+export const isReservedUsername = (name) => RESERVED_USERNAMES.has(String(name || '').toLowerCase());
+
+const identityStmts = {
+  byUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
+  setUsername: db.prepare('UPDATE users SET username = ? WHERE id = ?'),
+  setUsernameSearchable: db.prepare('UPDATE users SET username_searchable = ? WHERE id = ?'),
+  setPrivacyMessages: db.prepare('UPDATE users SET privacy_messages = ? WHERE id = ?'),
+  setPrivacyGroups: db.prepare('UPDATE users SET privacy_groups = ? WHERE id = ?'),
+  bumpEpoch: db.prepare('UPDATE users SET token_epoch = token_epoch + 1 WHERE id = ?'),
+  // People directory: exact-username matches first, then name prefix matches.
+  // Username matches honour the per-user "discoverable" switch; name matches are
+  // always allowed (a name was never private). Self + official excluded by route.
+  search: db.prepare(`
+    SELECT * FROM users
+    WHERE id != 'ping-official' AND disabled = 0
+      AND (
+        (username IS NOT NULL AND username_searchable = 1 AND username LIKE ? ESCAPE '\\')
+        OR LOWER(display_name) LIKE ? ESCAPE '\\'
+      )
+    ORDER BY (username = ?) DESC, LENGTH(display_name) ASC, display_name COLLATE NOCASE
+    LIMIT 30`),
+};
+
+/** Look up a user by their exact (lowercased) @username. */
+export const getUserByUsername = (name) =>
+  name ? identityStmts.byUsername.get(String(name).toLowerCase()) : undefined;
+
+/** Whether [name] is free to claim by [exceptId] (its current owner may re-set it). */
+export function isUsernameAvailable(name, exceptId = null) {
+  const lc = String(name || '').toLowerCase();
+  if (isReservedUsername(lc)) return false;
+  const owner = identityStmts.byUsername.get(lc);
+  return !owner || owner.id === exceptId;
+}
+
+/** Claim/replace (or clear, with null) the caller's username. Returns the row. */
+export function setUsername(id, name) {
+  identityStmts.setUsername.run(name ? String(name).toLowerCase() : null, id);
+  return stmts.userById.get(id);
+}
+
+export function setUsernameSearchable(id, on) {
+  identityStmts.setUsernameSearchable.run(on ? 1 : 0, id);
+  return stmts.userById.get(id);
+}
+
+/** Set a privacy axis. [axis] is 'messages' or 'groups'; [value] 'everyone'|'contacts'. */
+export function setPrivacy(id, axis, value) {
+  const v = value === 'contacts' ? 'contacts' : 'everyone';
+  if (axis === 'messages') identityStmts.setPrivacyMessages.run(v, id);
+  else if (axis === 'groups') identityStmts.setPrivacyGroups.run(v, id);
+  return stmts.userById.get(id);
+}
+
+/** Invalidate every existing session token for [id] ("überall abmelden"). */
+export function bumpTokenEpoch(id) {
+  identityStmts.bumpEpoch.run(id);
+  return stmts.userById.get(id);
+}
+
+/** Search people by @username or display-name prefix for the people directory. */
+export function searchPeople(q) {
+  const term = String(q || '').trim().toLowerCase();
+  if (term.length < 2) return [];
+  const handle = term.replace(/^@+/, '');
+  const esc = handle.replace(/[\\%_]/g, '\\$&');
+  return identityStmts.search.all(`${esc}%`, `%${esc}%`, handle);
+}
+
 // ---- Admin analytics -------------------------------------------------------
 
 const analytics = {
@@ -405,6 +487,8 @@ export function publicUser(u) {
   return {
     id: u.id,
     displayName: u.display_name,
+    // Public @username (null until claimed) — powers /u/<name> deep links.
+    username: u.username || null,
     avatarColor: u.avatar_color,
     // A personal accent colour (null when the user hasn't picked one).
     accentColor: u.accent_color || null,
@@ -446,6 +530,10 @@ export function privateUser(u) {
     isAdmin: !!u.is_admin,
     messageStorage: u.message_storage || 'server',
     showLastSeen: u.show_last_seen !== 0,
+    // Privacy controls (0.32.0). 'everyone' | 'contacts'.
+    privacyMessages: u.privacy_messages || 'everyone',
+    privacyGroups: u.privacy_groups || 'everyone',
+    usernameSearchable: u.username_searchable !== 0,
   };
 }
 
@@ -485,6 +573,25 @@ export const addContact = (userId, contactId) =>
 export const removeContact = (userId, contactId) =>
   contactStmts.remove.run(userId, contactId);
 export const listContacts = (userId) => contactStmts.list.all(userId);
+
+// Whether two users already "know" each other — used to enforce the 'contacts'
+// privacy tier. True when they share any chat, or when either has added the
+// other as a contact. This deliberately errs toward connected so privacy never
+// severs an existing conversation; it only blocks cold approaches by strangers.
+const connectionStmts = {
+  sharedChat: db.prepare(`
+    SELECT 1 FROM chat_members m1
+    JOIN chat_members m2 ON m1.chat_id = m2.chat_id
+    WHERE m1.user_id = ? AND m2.user_id = ? LIMIT 1`),
+  eitherContact: db.prepare(`
+    SELECT 1 FROM contacts
+    WHERE (user_id = ? AND contact_id = ?) OR (user_id = ? AND contact_id = ?) LIMIT 1`),
+};
+export function usersAreConnected(a, b) {
+  if (!a || !b || a === b) return true;
+  if (connectionStmts.sharedChat.get(a, b)) return true;
+  return !!connectionStmts.eitherContact.get(a, b, b, a);
+}
 
 // ---- Blocking --------------------------------------------------------------
 

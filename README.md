@@ -17,6 +17,15 @@ Online-Status, Lesebestätigungen).
 
 ## Features
 
+- **Benutzernamen & Zwei-Faktor** (seit 0.32.0) – sichere dir einen eindeutigen
+  **`@Benutzernamen`** und lass dich darüber finden und anschreiben (mit
+  Personensuche und `?u=@name`-Profil-Links) – ganz ohne deine Telefonnummer.
+  Schütze dein Konto optional mit **Zwei-Faktor-Authentifizierung (TOTP)** inkl.
+  QR-Einrichtung und **Wiederherstellungscodes**. Neue **Privatsphäre-Regeln**
+  legen fest, **wer dir schreiben** und **wer dich zu Gruppen hinzufügen** darf;
+  ein **Sicherheits-Center** zeigt ein Anmelde-/Sicherheitsprotokoll und meldet
+  dich auf Wunsch **überall ab**. Schaltbar über `usernames`, `twoFactor`,
+  `privacyControls`.
 - **WhatsApp-artiges Design in Blau** – Material 3, Chat-Tabs (Chats & Status),
   Sprechblasen mit Haken, wählbarer Chat-Hintergrund und Hell-/Dunkelmodus.
 - **Registrierung in einem Schritt** – Handynummer, E-Mail und Passwort eingeben,

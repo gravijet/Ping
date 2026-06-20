@@ -224,6 +224,18 @@ async function fetchShim(url) {
       avatarColor: '#22c', subscriberCount: 5, joined: true },
   ] });
   if (path.startsWith('/uploads')) return jsonRes({ upload: { id: 'u', url: '/api/uploads/u', mime: 'image/png', name: 'a.png', size: 1, kind: 'image' } });
+  // Identität & Schutz (0.32.0)
+  if (path === '/me/2fa') return jsonRes({ enabled: false, recoveryCodesLeft: 0 });
+  if (path === '/me/2fa/setup') return jsonRes({ secret: 'JBSWY3DPEHPK3PXP', otpauth: 'otpauth://totp/Ping:me@e.com?secret=JBSWY3DPEHPK3PXP&issuer=Ping' });
+  if (path === '/me/2fa/enable') return jsonRes({ enabled: true, recoveryCodes: ['aaaa-bbbb', 'cccc-dddd'] });
+  if (path === '/me/security-log') return jsonRes({ events: [
+    { id: 'e1', type: 'login', label: 'Anmeldung', detail: 'Passwort', ip: '1.2.3.4', ua: 'node', createdAt: Date.now() - 5000 },
+    { id: 'e2', type: 'twofa_enabled', label: 'Zwei-Faktor aktiviert', detail: '', ip: '', ua: '', createdAt: Date.now() - 99999 },
+  ] });
+  if (path.startsWith('/me/username/check')) return jsonRes({ available: true, username: 'frei' });
+  if (path.startsWith('/people/search')) return jsonRes({ results: [
+    { id: 'u2', displayName: 'Anna', username: 'anna', about: 'Hi' },
+  ] });
   return jsonRes({ ok: true });
 }
 
@@ -312,6 +324,18 @@ await step('lock settings + lockNow', async () => { const l = await imp('lock.js
 await step('link device modal', async () => { (await imp('devices.js')).linkDeviceModal(); });
 await step('new chat modal', async () => { (await imp('contacts.js')).newChatModal(); });
 await step('new group modal', async () => { (await imp('groups.js')).newGroupModal(); });
+await step('security centre: render tab, drive 2FA wizard + recovery codes', async () => {
+  const sec = await imp('security.js');
+  const host = new El('div');
+  sec.renderSecurityTab(host, () => {});
+  await tick();
+  // Click "Aktivieren" if rendered → opens the QR setup wizard (no real canvas).
+  for (const b of host.querySelectorAll('button')) { if ((b.textContent || '').includes('Aktivieren')) { b.click(); break; } }
+  await tick();
+  // Drive the username + people-search entry points too.
+  (await imp('contacts.js')).newChatModal();
+  await tick();
+});
 await step('status pane', async () => { const head = new El('div'), body = new El('div'); (await imp('status.js')).renderStatusPane(head, body); });
 await step('calls pane', async () => { const head = new El('div'), body = new El('div'); (await imp('calls-view.js')).renderCallsPane(head, body, () => {}); });
 await step('saved pane', async () => { const head = new El('div'), body = new El('div'); (await imp('saved.js')).renderSavedPane(head, body, () => {}); });

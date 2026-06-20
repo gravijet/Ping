@@ -12,6 +12,14 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Thrown by [AppState.login] when the account has two-factor auth enabled:
+/// the password was correct but a code is still needed. [challenge] is the
+/// short-lived token redeemed at /auth/login/2fa together with the code.
+class TwoFactorRequiredException implements Exception {
+  final String challenge;
+  TwoFactorRequiredException(this.challenge);
+}
+
 /// Thin REST wrapper around the Ping backend. Holds the base URL and the auth
 /// token; every call returns decoded JSON or throws an [ApiException].
 class ApiClient {

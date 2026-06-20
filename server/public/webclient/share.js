@@ -62,9 +62,12 @@ export function shareMessage(msg) {
   return shareOrCopy({ title: 'Ping', text });
 }
 
-/** A deep link that opens a person's profile card (handled by app.js on load). */
-export function profileUrl(userId) {
-  return `${location.origin}/?u=${encodeURIComponent(userId)}`;
+/** A deep link that opens a person's profile card (handled by app.js on load).
+    Prefers a readable ?u=@username when the person has one, else their id. */
+export function profileUrl(userOrId) {
+  const u = typeof userOrId === 'object' && userOrId ? userOrId : null;
+  const key = u ? (u.username ? `@${u.username}` : u.id) : userOrId;
+  return `${location.origin}/?u=${encodeURIComponent(key)}`;
 }
 
 /** Share a link to a person. Uses a ?u= deep link that opens their profile (and
@@ -75,7 +78,7 @@ export function shareProfile(user) {
   return shareOrCopy({
     title: `${name} auf Ping`,
     text: `Schreib ${name} auf Ping.`,
-    url: user?.id ? profileUrl(user.id) : inviteUrl(),
+    url: (user?.username || user?.id) ? profileUrl(user) : inviteUrl(),
   });
 }
 

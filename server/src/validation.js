@@ -431,10 +431,80 @@ export const remoteConfigSchema = z
   })
   .strict();
 
-// Per-account privacy switches (extend here as more arrive).
-export const privacySchema = z.object({
-  showLastSeen: z.boolean(),
+// Per-account privacy switches. Every field optional so a client can PATCH just
+// one toggle; the route requires at least one. 'everyone' | 'contacts' axes gate
+// who may DM you / add you to groups; showLastSeen + usernameSearchable are
+// booleans. The legacy { showLastSeen } body from older clients still validates.
+const reachSchema = z.enum(['everyone', 'contacts']);
+export const privacySchema = z
+  .object({
+    showLastSeen: z.boolean().optional(),
+    messages: reachSchema.optional(),
+    groups: reachSchema.optional(),
+    usernameSearchable: z.boolean().optional(),
+  })
+  .refine((o) => Object.keys(o).length > 0, 'Nichts zu ändern.');
+
+// ---- Identität & Schutz (0.32.0): usernames + two-factor auth --------------
+
+// A claimable public @username. Same character family as channel handles, with
+// a stricter length and a tolerant leading-@ strip so "@Alice" → "alice".
+export const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .transform((s) => s.replace(/^@+/, ''))
+  .pipe(
+    z
+      .string()
+      .min(3, 'Der Benutzername braucht mindestens 3 Zeichen.')
+      .max(24, 'Der Benutzername darf höchstens 24 Zeichen haben.')
+      .regex(
+        /^[a-z0-9](?:[a-z0-9_]*[a-z0-9])?$/,
+        'Nur Kleinbuchstaben, Ziffern und „_" — Anfang und Ende alphanumerisch.'
+      )
+  );
+
+export const setUsernameSchema = z.object({ username: usernameSchema });
+
+// People-directory query: a name fragment or @handle, 2–40 chars.
+export const peopleSearchSchema = z
+  .string()
+  .trim()
+  .min(2, 'Bitte gib mindestens 2 Zeichen ein.')
+  .max(40, 'Die Suche ist zu lang.');
+
+// A 6-digit TOTP code (spaces tolerated, e.g. "123 456").
+const totpCodeSchema = z
+  .string()
+  .trim()
+  .transform((s) => s.replace(/\s+/g, ''))
+  .pipe(z.string().regex(/^\d{6}$/, 'Bitte gib den 6-stelligen Code ein.'));
+
+export const twofaEnableSchema = z.object({ code: totpCodeSchema });
+
+// Disabling / regenerating require the account password as a second factor so a
+// hijacked, already-authenticated session can't silently weaken the account.
+export const twofaDisableSchema = z.object({
+  password: z.string().min(1, 'Bitte gib dein Passwort ein.'),
+  code: totpCodeSchema.optional(),
 });
+
+export const twofaRegenerateSchema = z.object({
+  password: z.string().min(1, 'Bitte gib dein Passwort ein.'),
+});
+
+// Step 2 of login when 2FA is on: the challenge token plus either a TOTP code or
+// a recovery code. Exactly one of the two must be present.
+export const login2faSchema = z
+  .object({
+    challenge: z.string().min(1, 'Sitzung abgelaufen. Bitte melde dich erneut an.'),
+    code: totpCodeSchema.optional(),
+    recoveryCode: z.string().trim().min(4).max(40).optional(),
+  })
+  .refine((d) => !!d.code || !!d.recoveryCode, {
+    message: 'Bitte gib deinen Code ein.',
+  });
 
 // Global message search (home screen).
 export const searchQuerySchema = z

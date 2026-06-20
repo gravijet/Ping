@@ -843,9 +843,13 @@ function handleDeepLink() {
     const params = new URLSearchParams(location.search);
     const chatId = safeId(params.get('chat'));
     if (chatId && store.getChat(chatId)) openChatInShell(chatId);
-    // ?u=<userId> — open a person's profile card (and offer to start a chat).
-    const userId = safeId(params.get('u'));
-    if (userId && flag('profileLinks')) openProfileById(userId);
+    // ?u=<userId> or ?u=@<username> — open a person's profile card.
+    const uRaw = (params.get('u') || '').trim();
+    const userId = safeId(uRaw);
+    if (uRaw && flag('profileLinks')) {
+      if (uRaw.startsWith('@') || (!userId && flag('usernames'))) openProfileByUsername(uRaw);
+      else if (userId) openProfileById(userId);
+    }
     // ?c=<handle> — open a channel's preview card (follow / open).
     const channelHandle = params.get('c');
     if (channelHandle && flag('communities')) {
@@ -854,7 +858,7 @@ function handleDeepLink() {
     // PWA app-shortcuts (manifest) land here as query params.
     if (params.get('compose') === '1') newChatModal();
     if (params.get('view') === 'activity' && flag('activityCenter')) activity.openActivityPanel(openChatInShell);
-    if (chatId || userId || channelHandle || params.get('invite') || params.get('compose') || params.get('view')) {
+    if (chatId || uRaw || channelHandle || params.get('invite') || params.get('compose') || params.get('view')) {
       history.replaceState(null, '', location.pathname);
     }
   } catch { /* malformed URL — ignore */ }
@@ -868,6 +872,18 @@ async function openProfileById(userId) {
     if (user) { const c = await import('./contacts.js'); c.openProfile(user); }
   } catch (e) {
     toast(e.status === 404 ? 'Dieses Profil gibt es nicht.' : (e.message || 'Profil konnte nicht geladen werden.'), 'err');
+  }
+}
+
+// Resolve a shared ?u=@<username> deep link to its public profile card.
+async function openProfileByUsername(raw) {
+  const handle = raw.replace(/^@+/, '').toLowerCase();
+  if (!handle) return;
+  try {
+    const { user } = await api.get('/users/by-username/' + encodeURIComponent(handle));
+    if (user) { const c = await import('./contacts.js'); c.openProfile(user); }
+  } catch (e) {
+    toast(e.status === 404 ? 'Diesen Benutzernamen gibt es nicht.' : (e.message || 'Profil konnte nicht geladen werden.'), 'err');
   }
 }
 

@@ -556,6 +556,46 @@ db.exec(`
     PRIMARY KEY (user_id, peer_id)
   );
   CREATE INDEX IF NOT EXISTS idx_focus_autoreplies_sent ON focus_autoreplies(sent_at);
+
+  -- ---- Identität & Schutz (0.32.0) -----------------------------------------
+  --
+  -- Two-factor authentication (TOTP, RFC 6238). One row per user. The row
+  -- exists from the moment a setup begins; enabled flips to 1 only once the
+  -- user has confirmed a code, so a half-finished setup never gates login.
+  CREATE TABLE IF NOT EXISTS user_totp (
+    user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    secret       TEXT NOT NULL,         -- base32 shared secret
+    enabled      INTEGER NOT NULL DEFAULT 0,
+    confirmed_at INTEGER,               -- when the first valid code was entered
+    created_at   INTEGER NOT NULL
+  );
+
+  -- One-time recovery codes, used when an authenticator is lost. Stored hashed
+  -- (sha256) so a database leak can't replay them; used_at stamps consumption.
+  CREATE TABLE IF NOT EXISTS recovery_codes (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash  TEXT NOT NULL,
+    used_at    INTEGER,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+  );
+  CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id);
+
+  -- A per-user security audit feed surfaced in the "Sicherheits-Center":
+  -- logins, 2FA changes, password/email/username changes, privacy changes and
+  -- "log out everywhere". Append-only; trimmed to the most recent rows per user
+  -- by the maintenance sweep so it can't grow without bound.
+  CREATE TABLE IF NOT EXISTS security_events (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,           -- 'login' | 'twofa_enabled' | ...
+    detail     TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    ua         TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_security_events_user
+    ON security_events(user_id, created_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -719,6 +759,35 @@ function ensureColumns() {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_chats_public ON chats(visibility) WHERE visibility = 'public'"
+  );
+  // ---- Identität & Schutz (0.32.0): usernames, privacy, session epoch -------
+  // A unique, public @username (lowercase, null until claimed). Powers people
+  // search and /u/<name> deep links. Stored already-lowercased.
+  if (!userCols.includes('username')) {
+    db.exec('ALTER TABLE users ADD COLUMN username TEXT');
+  }
+  // Who may open a *new* direct chat with this user: 'everyone' (default) or
+  // 'contacts' (only people already in their contacts / sharing a chat).
+  if (!userCols.includes('privacy_messages')) {
+    db.exec("ALTER TABLE users ADD COLUMN privacy_messages TEXT NOT NULL DEFAULT 'everyone'");
+  }
+  // Who may add this user to a group: 'everyone' (default) or 'contacts'.
+  if (!userCols.includes('privacy_groups')) {
+    db.exec("ALTER TABLE users ADD COLUMN privacy_groups TEXT NOT NULL DEFAULT 'everyone'");
+  }
+  // Whether the user is discoverable by their @username in people search.
+  if (!userCols.includes('username_searchable')) {
+    db.exec('ALTER TABLE users ADD COLUMN username_searchable INTEGER NOT NULL DEFAULT 1');
+  }
+  // Monotonic session epoch. Every issued token carries the epoch it was signed
+  // under; "überall abmelden" bumps this, instantly invalidating older tokens.
+  if (!userCols.includes('token_epoch')) {
+    db.exec('ALTER TABLE users ADD COLUMN token_epoch INTEGER NOT NULL DEFAULT 0');
+  }
+  // Unique on the lowercase username; depends on the column above, so created
+  // here rather than in the initial CREATE TABLE block.
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL'
   );
   const msgCols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
   if (!msgCols.includes('expires_at')) {
