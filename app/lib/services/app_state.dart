@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme.dart';
 import '../models/call.dart';
 import '../models/chat.dart';
+import '../models/chat_folder.dart';
 import '../models/message.dart';
 import '../models/remote_config.dart';
 import '../models/scheduled_message.dart';
@@ -353,9 +354,17 @@ class AppState extends ChangeNotifier {
   /// configured lock engages on cold start.
   bool _lockArmed = false;
 
-  /// Unsent composer drafts per chat (device-local). The chat list shows a
-  /// "Entwurf: …" preview, and reopening the chat restores the text.
+  /// Unsent composer drafts per chat. Kept device-local for instant restore and
+  /// (0.27.0) mirrored to the server so they follow the user across devices.
   final Map<String, String> _drafts = {};
+
+  /// 0.27.0 "Ordnung & Ausdruck": pinned messages per chat (chatId → list,
+  /// newest pin first) and the user's chat folders, both synced from the server.
+  final Map<String, List<Message>> _pins = {};
+  final List<ChatFolder> folders = [];
+
+  /// Per-chat debounce timers for mirroring composer drafts to the server.
+  final Map<String, Timer> _draftSyncTimers = {};
 
   AuthStatus status = AuthStatus.unknown;
   PingUser? me;
@@ -1334,6 +1343,83 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- Pinned messages (0.27.0 "Ordnung & Ausdruck") -----------------------
+
+  /// A chat's pinned messages (newest pin first), as last synced.
+  List<Message> pinsFor(String chatId) => _pins[chatId] ?? const [];
+
+  /// Fetch a chat's pinned messages from the server (called on chat open).
+  Future<void> loadPins(String chatId) async {
+    try {
+      final res = await _api.get('/chats/$chatId/pins');
+      _pins[chatId] = ((res['pins'] as List?) ?? const [])
+          .map((e) => Message.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final i = chats.indexWhere((c) => c.id == chatId);
+      if (i != -1) chats[i].pinnedCount = _pins[chatId]!.length;
+      notifyListeners();
+    } catch (_) {
+      /* offline — keep whatever is cached */
+    }
+  }
+
+  /// Pin or unpin a message. The server echoes `chat-pins-updated` to every
+  /// member (handled below); a manual refresh keeps it instant if the socket is
+  /// briefly down. Throws [ApiException] (e.g. the per-chat pin limit).
+  Future<void> setMessagePinned(Message m, bool pinned) async {
+    if (pinned) {
+      await _api.post('/chats/${m.chatId}/messages/${m.id}/pin');
+    } else {
+      await _api.delete('/chats/${m.chatId}/messages/${m.id}/pin');
+    }
+    await loadPins(m.chatId);
+  }
+
+  // ---- Chat folders (0.27.0) -----------------------------------------------
+
+  /// Folders that contain [chatId], for the chat-list folder chips.
+  bool chatInFolder(String folderId, String chatId) {
+    final f = folders.firstWhere((x) => x.id == folderId,
+        orElse: () => const ChatFolder(id: '', name: ''));
+    return f.id.isNotEmpty && f.contains(chatId);
+  }
+
+  Future<void> loadFolders() async {
+    try {
+      final res = await _api.get('/me/folders');
+      folders
+        ..clear()
+        ..addAll(((res['folders'] as List?) ?? const [])
+            .map((e) => ChatFolder.fromJson(e as Map<String, dynamic>)));
+      notifyListeners();
+    } catch (_) {
+      /* offline — keep the cached folder list */
+    }
+  }
+
+  Future<void> createFolder(String name, {String emoji = ''}) async {
+    await _api.post('/me/folders', {'name': name, 'emoji': emoji});
+    await loadFolders();
+  }
+
+  Future<void> renameFolder(String id, String name, {String emoji = ''}) async {
+    await _api.patch('/me/folders/$id', {'name': name, 'emoji': emoji});
+    await loadFolders();
+  }
+
+  Future<void> deleteFolder(String id) async {
+    await _api.delete('/me/folders/$id');
+    folders.removeWhere((f) => f.id == id);
+    notifyListeners();
+  }
+
+  /// Replace the set of chats inside a folder (the server drops any the user
+  /// isn't a member of).
+  Future<void> setFolderChats(String id, List<String> chatIds) async {
+    await _api.put('/me/folders/$id/chats', {'chatIds': chatIds});
+    await loadFolders();
+  }
+
   // ---- App lock (local PIN gate) -------------------------------------------
 
   /// Whether an app-lock PIN is configured (the gate is usable).
@@ -1445,13 +1531,37 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kDrafts, jsonEncode(_drafts));
     notifyListeners();
+    _syncDraftToServer(chatId, trimmed.isEmpty ? '' : text);
+  }
+
+  /// Apply a draft pushed from the server (another device) without echoing it
+  /// back — local store + notify only, no PUT.
+  void _hydrateDraft(String chatId, String text) {
+    if (text.trim().isEmpty) {
+      if (_drafts.remove(chatId) == null) return;
+    } else {
+      if (_drafts[chatId] == text) return;
+      _drafts[chatId] = text;
+    }
+    notifyListeners();
+  }
+
+  /// Debounced mirror of a draft to the server (700 ms), so a half-typed message
+  /// follows the user across devices. Best-effort — offline keeps it local.
+  void _syncDraftToServer(String chatId, String text) {
+    _draftSyncTimers[chatId]?.cancel();
+    _draftSyncTimers[chatId] = Timer(const Duration(milliseconds: 700), () {
+      _api.put('/chats/$chatId/draft', {'text': text}).catchError((_) => null);
+    });
   }
 
   // ---- Starred ("Gespeichert") messages ------------------------------------
 
   bool isStarred(String messageId) => starredIds.contains(messageId);
 
-  /// Bookmark or un-bookmark a message; the snapshot is stored on-device.
+  /// Bookmark or un-bookmark a message. The snapshot is stored on-device for the
+  /// "Gespeichert" screen and (0.27.0) mirrored to the server so the bookmark
+  /// shows up on the web client and the user's other devices.
   Future<void> toggleStar(Message message, String chatTitle) async {
     final nowStarred = await starredStore.toggle(message, chatTitle);
     if (nowStarred) {
@@ -1460,6 +1570,10 @@ class AppState extends ChangeNotifier {
       starredIds.remove(message.id);
     }
     notifyListeners();
+    // Fire-and-forget server sync (the endpoint just toggles, mirroring us).
+    _api
+        .post('/chats/${message.chatId}/messages/${message.id}/star')
+        .catchError((_) => null);
   }
 
   Future<List<StarredMessage>> starredMessages() => starredStore.load();
@@ -1914,12 +2028,19 @@ class AppState extends ChangeNotifier {
             .map((e) => Chat.fromJson(e as Map<String, dynamic>)));
       for (final c in chats) {
         _cacheChatUsers(c);
+        // 0.27.0: adopt the server-synced draft if this device has nothing newer
+        // typed locally (the local draft always wins while you're composing).
+        if (c.draft.isNotEmpty && (_drafts[c.id] ?? '').isEmpty) {
+          _drafts[c.id] = c.draft;
+        }
       }
       _sortChats();
       online = true;
       chatCache.save(List<Chat>.from(chats));
       _publishShortcuts();
       notifyListeners();
+      // Folders sync alongside the chat list (best-effort, never blocks it).
+      loadFolders();
     } on ApiException catch (e) {
       if (e.status == null) {
         // Offline: surface it (banner) and fall back to the cached list when we
@@ -2733,6 +2854,35 @@ class AppState extends ChangeNotifier {
       case 'message-updated':
         _replaceMessage(
             Message.fromJson(payload['message'] as Map<String, dynamic>));
+        notifyListeners();
+        break;
+
+      // 0.27.0 — someone pinned/unpinned a message: refresh the banner + count.
+      case 'chat-pins-updated':
+        final pinChatId = payload['chatId'] as String;
+        _pins[pinChatId] = ((payload['pins'] as List?) ?? const [])
+            .map((e) => Message.fromJson(e as Map<String, dynamic>))
+            .toList();
+        final pci = chats.indexWhere((c) => c.id == pinChatId);
+        if (pci != -1) {
+          chats[pci].pinnedCount =
+              (payload['count'] as int?) ?? _pins[pinChatId]!.length;
+        }
+        notifyListeners();
+        break;
+
+      // A draft I changed on another device — adopt it here.
+      case 'draft-updated':
+        _hydrateDraft(
+            payload['chatId'] as String, (payload['text'] ?? '') as String);
+        break;
+
+      // My folder set changed on another device.
+      case 'folders-updated':
+        folders
+          ..clear()
+          ..addAll(((payload['folders'] as List?) ?? const [])
+              .map((e) => ChatFolder.fromJson(e as Map<String, dynamic>)));
         notifyListeners();
         break;
 

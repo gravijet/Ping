@@ -11,6 +11,12 @@ const KEY = 'ping.drafts';
 const MAX = 200; // cap stored drafts so a long-lived device can't grow unbounded
 const subs = new Set();
 
+// Optional server-sync hook. The app wires this to a debounced PUT /chats/:id/
+// draft so a half-typed message follows you across devices; left null it stays
+// purely device-local (and importable under the test DOM shim).
+let syncFn = null;
+export function setSyncHandler(fn) { syncFn = fn; }
+
 function read() {
   try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; }
   catch { return {}; }
@@ -46,10 +52,25 @@ export function set(chatId, text) {
   const trimmed = String(text || '');
   if (!trimmed.trim()) {
     if (map[chatId]) { delete map[chatId]; write(map); notify(chatId); }
+    syncFn?.(chatId, ''); // mirror the clear to the server
     return;
   }
   const prev = map[chatId]?.text;
   if (prev === trimmed) return; // no-op, skip a needless write + notify
+  map[chatId] = { text: trimmed.slice(0, 8000), t: Date.now() };
+  write(map);
+  notify(chatId);
+  syncFn?.(chatId, map[chatId].text);
+}
+
+/** Apply a draft pushed from the server (another device) without echoing it
+ *  back — local write + notify only, so it never loops through the sync hook. */
+export function hydrate(chatId, text) {
+  if (!chatId) return;
+  const map = read();
+  const trimmed = String(text || '');
+  if (!trimmed.trim()) { if (map[chatId]) { delete map[chatId]; write(map); notify(chatId); } return; }
+  if (map[chatId]?.text === trimmed) return;
   map[chatId] = { text: trimmed.slice(0, 8000), t: Date.now() };
   write(map);
   notify(chatId);

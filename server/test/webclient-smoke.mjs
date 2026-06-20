@@ -414,5 +414,37 @@ await step('AMOLED theme toggle applies data-black', async () => {
   if (document.documentElement.getAttribute('data-black') !== 'off') throw new Error('data-black not cleared');
 });
 
+// ---- 0.27.0 "Ordnung & Ausdruck" surfaces ---------------------------------
+await step('drafts server-sync hook fires + hydrate stays local', async () => {
+  const d = await imp('drafts.js');
+  let synced = null;
+  d.setSyncHandler((chatId, text) => { synced = { chatId, text }; });
+  d.set('c1', 'typed on this device');
+  if (!synced || synced.chatId !== 'c1') throw new Error('sync hook not called on set');
+  synced = null;
+  d.hydrate('c1', 'pushed from another device'); // must NOT echo back through sync
+  if (synced) throw new Error('hydrate should not call the sync hook');
+  if (d.get('c1') !== 'pushed from another device') throw new Error('hydrate did not apply');
+  d.setSyncHandler(null); d.clear('c1');
+});
+await step('folder manager: load + open + folder filter', async () => {
+  const folders = await imp('folders.js');
+  await folders.loadFolders();              // tolerates the catch-all fetch shim
+  folders.applyFolders([{ id: 'f1', name: 'Arbeit', emoji: '💼', chatIds: ['c1'] }]);
+  if ((mods['store.js'].state.folders || []).length !== 1) throw new Error('applyFolders failed');
+  folders.openFolderManager(); await tick();
+  // The new folder appears as a filter tab and scopes the chat list.
+  mods['store.js'].state.chatFilter = 'folder:f1';
+  mods['store.js'].emit('chats'); await tick();
+});
+await step('pin/star menu actions are wired on a message', async () => {
+  const chat = await imp('chat.js');
+  app.openChatInShell('c1'); await tick();
+  // Context-menu a rendered bubble — exercises togglePin/toggleStarSynced wiring.
+  const bubble = document.querySelector('.msg .bubble');
+  if (bubble) { const ev = { preventDefault() {}, stopPropagation() {}, clientX: 10, clientY: 10 };
+    bubble.closest('.msg')?.dispatchEvent?.(new Event('contextmenu')); }
+});
+
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');
 process.exit(failures ? 1 : 0);

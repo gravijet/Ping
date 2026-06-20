@@ -501,6 +501,33 @@ export const expireTimerSchema = z.object({
     .refine((s) => s === 0 || s >= 60, 'Mindestens 1 Minute.'),
 });
 
+// ---- Ordnung & Ausdruck (0.27.0) -------------------------------------------
+
+// A per-chat draft. Capped at the same length as a message; whitespace-only is
+// treated as "clear the draft" by the repo, so an empty string is valid.
+export const draftSchema = z.object({
+  text: z.string().max(8000, 'Der Entwurf ist zu lang.').default(''),
+});
+
+// A chat folder: a short name, an optional single-emoji icon and a sort weight.
+export const folderSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib einen Namen ein.')
+    .max(40, 'Der Name ist zu lang.'),
+  emoji: z.string().trim().max(16, 'Ungültiges Emoji.').default(''),
+  sort: z.number().int().min(0).max(9999).optional().default(0),
+});
+
+// Setting a folder's chats: a (de-duplicated by the repo) list of chat ids.
+export const folderChatsSchema = z.object({
+  chatIds: z
+    .array(z.string().trim().min(1).max(64))
+    .max(1000, 'Zu viele Chats.')
+    .default([]),
+});
+
 // ---- Newsroom + changelog (public content) ---------------------------------
 
 // A cover image / link: either one of our own uploads or an absolute https URL.

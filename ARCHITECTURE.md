@@ -200,6 +200,32 @@ no upload path at all.
   fade-through `PageTransitionsBuilder` in `theme.dart`; both collapse to a static
   / instant form when *reduce motion* is on.
 
+## Organising conversations (0.27.0)
+Four additive, full-stack features that all follow the same shape: a small SQLite
+table, REST endpoints behind `requireAuth` + `memberGuard`, a realtime WebSocket
+event for live/cross-device sync, and UI on web + Android.
+- **Pinned messages** — `pinned_messages(chat_id, message_id, pinned_by,
+  pinned_at)`. `POST`/`DELETE /chats/:id/messages/:msgId/pin`, `GET
+  /chats/:id/pins`; `messageView.pinned` + `chatView.pinnedCount`. The
+  `chat-pins-updated` event carries the per-viewer-rendered pin list so banners
+  update without a refetch. Cap `MAX_PINS_PER_CHAT = 50`.
+- **Saved/starred** — `starred_messages(user_id, message_id, chat_id,
+  created_at)`. `POST /chats/:id/messages/:msgId/star` (toggle), `GET
+  /me/starred`; per-viewer `messageView.starred`; `starred-updated` echoes to the
+  user's own devices. The Flutter app keeps its local `starredStore` for the
+  offline Saved screen and mirrors toggles up; the web client seeds from the
+  server on launch.
+- **Drafts** — `chat_drafts(user_id, chat_id, text, updated_at)`. `PUT
+  /chats/:id/draft` (empty clears); `chatView.draft` + `draft-updated`. Both
+  clients debounce the upload (~700 ms) and keep working offline/local-first.
+- **Folders** — `chat_folders` + `chat_folder_members` (`foldersRepo.js`).
+  `GET/POST/PATCH/DELETE /me/folders`, `PUT /me/folders/:id/chats`;
+  `folders-updated`. Chat assignment is intersected with the user's real
+  memberships server-side. Cap `MAX_FOLDERS = 20`. Rendered as filter
+  chips/tabs above the chat list, exclusive with the built-in quick filters.
+- **In-chat search** — `GET /messages/search?chatId=…` reuses the LIKE search,
+  constrained to one (membership-checked) chat.
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

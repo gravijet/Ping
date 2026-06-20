@@ -47,6 +47,15 @@ Online-Status, Lesebestätigungen).
   oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Angepinnte Nachrichten** (seit 0.27.0) – wichtige Nachrichten anpinnen; alle
+  im Chat sehen sie in einem Banner unter dem Kopf, tippen zum Springen (und
+  Durchblättern mehrerer Pins), bis zu 50 pro Chat, in Echtzeit für alle.
+- **Chat-Ordner** (seit 0.27.0) – Unterhaltungen in eigene Ordner gruppieren und
+  die Chatliste per Filter-Chip danach filtern; Ordner synchronisieren über alle
+  Geräte.
+- **Gespeicherte Nachrichten & Entwürfe – geräteübergreifend** (seit 0.27.0) –
+  markierte Nachrichten und angefangene Texte werden serverseitig synchronisiert
+  und tauchen auf deinen anderen Geräten und im Web wieder auf.
 - **Selbstlöschende Nachrichten** – per-Chat-Timer (1 h bis 90 Tage); neue
   Nachrichten verschwinden danach automatisch für alle.
 - **Blockieren** – Kontakte blockieren; die Verbindung ist in beide Richtungen
@@ -362,7 +371,7 @@ Alles oben läuft zusätzlich automatisch in **GitHub Actions** (`.github/workfl
 bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
 **Windows** (`windows-build.yml`) erzeugst du manuell über den Actions-Tab.
 
-- **Backend:** 130+ Tests decken Registrierung (Nummer + E-Mail + Passwort,
+- **Backend:** 170+ Tests decken Registrierung (Nummer + E-Mail + Passwort,
   Pflichtfelder, Dubletten), Anmeldung per Nummer/E-Mail, den privatsphäre-
   schonenden **Telefon-Kontaktabgleich** (E-Mail-Discovery ist abgeschaltet),
   Direktnachrichten per Nummer/ID mit Lesebestätigung über echte WebSockets,
@@ -374,10 +383,14 @@ bei jedem Push und PR. Release-Builds für **Android** (`android-build.yml`) und
   Geprüft wird außerdem, dass öffentliche Antworten nie Nummer oder E-Mail leaken.
   Dazu kommen Unit-Tests für die **Ping-Web-Logik** (Erwähnungen, Theme-Codes,
   Entwürfe, Insights sowie seit 0.22.0 der **Offline-Cache**, die **Sync-Queue**,
-  die **Deeplink-Validierung** und die **Leistungsmetriken**).
+  die **Deeplink-Validierung** und die **Leistungsmetriken**). Seit 0.27.0
+  zusätzlich **angepinnte Nachrichten**, **gespeicherte Nachrichten**,
+  **Entwurf-Sync**, **Chat-Ordner** (inkl. Eigentums-Prüfung) und die
+  **In-Chat-Suche**.
 - **App:** Modelle und UI-Widgets sind durch Unit-/Widget-Tests abgedeckt
-  (104 Tests), seit 0.26.0 inklusive der **On-Device-Diagnose** (Crash-Erfassung,
-  Redaktion, geschützte Zone) und der **opt-in-Statistik** (Zähler, 7-Tage-Reihe).
+  (113 Tests), seit 0.26.0 inklusive der **On-Device-Diagnose** (Crash-Erfassung,
+  Redaktion, geschützte Zone) und der **opt-in-Statistik** (Zähler, 7-Tage-Reihe);
+  seit 0.27.0 die Modelle für **Pins/gespeichert/Entwürfe/Ordner**.
 
 ---
 

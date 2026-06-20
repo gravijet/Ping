@@ -24,6 +24,12 @@ class Chat {
   bool muted;
   final int updatedAt;
 
+  /// 0.27.0: how many messages are pinned in this chat (drives the banner) and
+  /// the server-synced draft text, so a half-typed message follows you across
+  /// devices. Both are mutable so live socket updates can patch them in place.
+  int pinnedCount;
+  String draft;
+
   Chat({
     required this.id,
     required this.type,
@@ -44,6 +50,8 @@ class Chat {
     this.lastMessage,
     this.unread = 0,
     this.muted = false,
+    this.pinnedCount = 0,
+    this.draft = '',
   });
 
   bool get isGroup => type == 'group';
@@ -90,6 +98,8 @@ class Chat {
         if (lastMessage != null) 'lastMessage': lastMessage!.toJson(),
         'unread': unread,
         'muted': muted,
+        'pinnedCount': pinnedCount,
+        if (draft.isNotEmpty) 'draft': draft,
         'updatedAt': updatedAt,
       };
 
@@ -120,6 +130,8 @@ class Chat {
             : null,
         unread: (json['unread'] ?? 0) as int,
         muted: (json['muted'] ?? false) as bool,
+        pinnedCount: (json['pinnedCount'] ?? 0) as int,
+        draft: (json['draft'] ?? '') as String,
         updatedAt: (json['updatedAt'] ?? json['createdAt'] ?? 0) as int,
       );
 
@@ -132,6 +144,8 @@ class Chat {
     int? updatedAt,
     PingUser? otherUser,
     List<PingUser>? members,
+    int? pinnedCount,
+    String? draft,
   }) =>
       Chat(
         id: id,
@@ -152,6 +166,8 @@ class Chat {
         lastMessage: lastMessage ?? this.lastMessage,
         unread: unread ?? this.unread,
         muted: muted ?? this.muted,
+        pinnedCount: pinnedCount ?? this.pinnedCount,
+        draft: draft ?? this.draft,
         updatedAt: updatedAt ?? this.updatedAt,
       );
 }

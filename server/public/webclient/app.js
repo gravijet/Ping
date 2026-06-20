@@ -23,10 +23,12 @@ import * as cache from './cache.js';
 import * as syncqueue from './syncqueue.js';
 import { flag } from './flags.js';
 import * as activity from './activity.js';
+import * as drafts from './drafts.js';
 import { mentionsUser } from './mentions.js';
 import { openShortcuts, shortcutsOpen } from './shortcuts.js';
 import { safeId } from './validate.js';
 import { syncWebPush } from './webpush.js';
+import { messagePreview } from './format.js';
 
 setImageResolver(authedObjectUrl);
 prefs.applyVisual();
@@ -39,6 +41,41 @@ outbox.install();
 cache.install();
 syncqueue.install();
 registerServiceWorker();
+
+// Mirror per-chat drafts to the server (debounced) so a half-typed message
+// follows you across devices. Purely additive — drafts still work fully local.
+const draftSyncTimers = new Map();
+drafts.setSyncHandler((chatId, text) => {
+  clearTimeout(draftSyncTimers.get(chatId));
+  draftSyncTimers.set(chatId, setTimeout(() => {
+    api.put(`/chats/${chatId}/draft`, { text }).catch(() => {});
+  }, 700));
+});
+
+// Build a Saved-pane snapshot for a starred message pulled from the server.
+function starSnapshotFor(m) {
+  const chat = store.getChat(m.chatId);
+  const sender = chat?.members?.find((u) => u.id === m.senderId) || chat?.otherUser;
+  return {
+    preview: messagePreview(m),
+    senderName: sender?.displayName || '',
+    chatTitle: chat?.title || '',
+    createdAt: m.createdAt,
+  };
+}
+
+// Pull the user's saved (starred) messages into the local star store, so the
+// "Gespeichert" pane reflects stars set on any of their devices.
+async function seedStars() {
+  try {
+    const { messages } = await api.get('/me/starred');
+    if (!Array.isArray(messages)) return;
+    for (const m of messages) {
+      if (!prefs.isStarred(m.chatId, m.id)) prefs.toggleStar(m.chatId, m.id, starSnapshotFor(m));
+    }
+    store.emit('prefs');
+  } catch { /* offline — local stars stand */ }
+}
 
 const root = document.getElementById('app');
 
@@ -114,10 +151,18 @@ async function enterApp() {
   try {
     const { chats } = await api.get('/chats');
     store.setChats(chats);
+    // Hydrate server-synced drafts onto this device (only when nothing newer is
+    // typed locally — drafts.hydrate is a no-op if the local text already wins).
+    for (const c of chats || []) if (c.draft) drafts.hydrate(c.id, c.draft);
   } catch (e) {
     // With a cache we stay usable offline — don't alarm the user.
     if (!hydrated) toast(e.message || 'Chats konnten nicht geladen werden.', 'err');
   }
+  // Folders + saved messages sync from the server (best-effort, never blocking).
+  import('./folders.js').then((m) => m.loadFolders().then(() => {
+    store.emit('folders'); if (currentSection === 'chats') renderSection();
+  })).catch(() => {});
+  seedStars();
   refreshBadges();
   refreshActivityBadge();
   updateConnectionBanner();
@@ -271,16 +316,26 @@ function renderChatsSection() {
   renderChatList(list, (chatId) => openChatInShell(chatId));
 }
 
-// Quick filters above the chat list: Alle · Ungelesen · Favoriten · Gruppen.
+// Quick filters above the chat list: the built-ins (Alle · Ungelesen ·
+// Favoriten · Gruppen) followed by the user's folders and a "+" to manage them.
 function buildChatFilters() {
-  const filters = [['all', 'Alle'], ['unread', 'Ungelesen'], ['fav', 'Favoriten'], ['groups', 'Gruppen']];
-  const seg = el('div', { class: 'seg chat-filters' }, filters.map(([id, label]) =>
-    el('button', { class: store.state.chatFilter === id ? 'on' : '', dataset: { filter: id },
-      onClick: () => {
-        store.state.chatFilter = id;
-        seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.filter === id));
-        store.emit('chats');
-      } }, label)));
+  const builtins = [['all', 'Alle'], ['unread', 'Ungelesen'], ['fav', 'Favoriten'], ['groups', 'Gruppen']];
+  const folders = (store.state.folders || []).map((f) => [
+    'folder:' + f.id, (f.emoji ? f.emoji + ' ' : '') + f.name,
+  ]);
+  const seg = el('div', { class: 'seg chat-filters' });
+  const select = (id) => {
+    store.state.chatFilter = id;
+    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.filter === id));
+    store.emit('chats');
+  };
+  for (const [id, label] of [...builtins, ...folders]) {
+    seg.appendChild(el('button', { class: store.state.chatFilter === id ? 'on' : '',
+      dataset: { filter: id }, onClick: () => select(id) }, label));
+  }
+  seg.appendChild(el('button', { class: 'chat-filter-add', dataset: { filter: '__manage' },
+    title: 'Ordner verwalten', 'aria-label': 'Ordner verwalten',
+    onClick: () => import('./folders.js').then((m) => m.openFolderManager()) }, icon('plus', 'sm')));
   return seg;
 }
 
@@ -471,6 +526,8 @@ function wireSocket() {
   store.on('open-chat', (chatId) => openChatInShell(chatId));
   store.on('open-splash', () => showSplash());
   store.on('chats', refreshBadges);
+  // Rebuild the chat-list filter bar whenever the folder set changes.
+  store.on('folders', () => { if (currentSection === 'chats') renderSection(); });
   // Keep the nav-rail bell badge in sync as activity is recorded.
   activity.onChange(refreshActivityBadge);
 
@@ -520,6 +577,23 @@ function wireSocket() {
   });
 
   socket.on('user-updated', (p) => { if (p.user) store.emit('user:' + p.user.id, p.user); });
+
+  // 0.27.0 — pins / stars / drafts / folders sync events.
+  socket.on('chat-pins-updated', (p) => {
+    const chat = store.getChat(p.chatId);
+    if (chat) chat.pinnedCount = p.count || 0;
+    store.emit('pins:' + p.chatId, p); // the open chat refreshes its banner
+  });
+  socket.on('starred-updated', () => { seedStars(); });
+  socket.on('draft-updated', (p) => {
+    drafts.hydrate(p.chatId, p.text || '');
+    store.emit('chats'); // refresh the "✎ Entwurf" hint
+  });
+  socket.on('folders-updated', (p) => {
+    if (Array.isArray(p.folders)) store.state.folders = p.folders;
+    store.emit('folders'); // the store.on('folders') subscription re-renders
+  });
+
   socket.on('force-logout', () => { toast('Du wurdest abgemeldet.', 'err'); doLogout(true); });
   socket.onStatus((connected) => store.emit('connection', connected));
 

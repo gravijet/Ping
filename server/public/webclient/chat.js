@@ -98,14 +98,18 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   const thread = el('div', { class: 'thread', id: 'thread' });
   const composerWrap = el('div', { id: 'composer-wrap' });
   const head = buildHead(chat, onBack);
+  // Pinned-messages banner: lives between the header and the thread, hidden
+  // until the chat actually has pins (kept in cur.pins, refreshed below).
+  const pinBar = el('div', { class: 'pin-bar', id: 'pin-bar', hidden: true });
   const chev = icon('chevron');
   chev.style.transform = 'rotate(90deg)';
   const jump = el('button', { class: 'jump-btn', title: 'Nach unten', 'aria-label': 'Zu den neuesten Nachrichten',
     onClick: () => { thread.scrollTop = thread.scrollHeight; markBottomSeen(); } }, chev);
-  clear(slot).append(head, thread, jump, composerWrap);
+  clear(slot).append(head, pinBar, thread, jump, composerWrap);
   // Subtle, reduced-motion-safe entrance when switching conversations.
   slot.classList.remove('fade-in'); void slot.offsetWidth; slot.classList.add('fade-in');
   cur.thread = thread; cur.head = head; cur.composerWrap = composerWrap; cur.jump = jump;
+  cur.pinBar = pinBar; cur.pins = []; cur.pinIdx = 0;
   renderComposer();
 
   cur.unsubs.push(store.on('messages:' + chatId, () => renderThread()));
@@ -113,6 +117,12 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   cur.unsubs.push(store.on('presence', () => updateHeadSub()));
   cur.unsubs.push(store.on('chat:' + chatId, () => { const c = store.getChat(chatId);
     if (c) clear(head).append(...buildHead(c, onBack).childNodes); }));
+  // Live pin updates pushed by the server (someone pinned/unpinned a message).
+  cur.unsubs.push(store.on('pins:' + chatId, (p) => {
+    if (Array.isArray(p?.pins)) { cur.pins = p.pins; cur.pinIdx = 0; renderPinBar(); renderThread(); }
+    else refreshPins();
+  }));
+  refreshPins();
 
   // Offline-first: paint the cached history (if any) before the network answers,
   // so the conversation opens instantly and stays readable with no connection.
@@ -198,6 +208,57 @@ function updateHeadSub() {
   }
 }
 
+// ---- pinned messages ------------------------------------------------------
+// The pin banner shows the chat's pinned messages (newest first). Tapping it
+// jumps to the message and cycles to the next pin, WhatsApp-style.
+async function refreshPins() {
+  const chatId = cur?.chatId;
+  if (!chatId) return;
+  try {
+    const { pins } = await api.get(`/chats/${chatId}/pins`);
+    if (cur?.chatId !== chatId) return;
+    cur.pins = Array.isArray(pins) ? pins : [];
+    if ((cur.pinIdx || 0) >= cur.pins.length) cur.pinIdx = 0;
+    renderPinBar();
+  } catch { /* offline or no pins — leave the bar hidden */ }
+}
+
+function renderPinBar() {
+  const bar = cur?.pinBar;
+  if (!bar) return;
+  const pins = cur.pins || [];
+  clear(bar);
+  if (!pins.length) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const idx = Math.min(cur.pinIdx || 0, pins.length - 1);
+  const m = pins[idx];
+  const body = el('button', { class: 'pin-body', title: 'Zur angepinnten Nachricht springen',
+    onClick: () => { scrollToMessage(m.id); cur.pinIdx = (idx + 1) % pins.length; renderPinBar(); } }, [
+    icon('pin', 'sm'),
+    el('div', { class: 'pin-text' }, [
+      el('div', { class: 'pin-label',
+        text: pins.length > 1 ? `Angepinnte Nachrichten · ${idx + 1}/${pins.length}` : 'Angepinnte Nachricht' }),
+      el('div', { class: 'pin-preview', text: messagePreview(m) || '(Anhang)' }),
+    ]),
+  ]);
+  const unpin = el('button', { class: 'iconbtn pin-x', title: 'Loslösen', 'aria-label': 'Nachricht loslösen',
+    onClick: (e) => { e.stopPropagation(); togglePin(m); } }, icon('close'));
+  bar.append(body, unpin);
+}
+
+async function togglePin(m) {
+  const chatId = cur?.chatId;
+  if (!chatId) return;
+  const pinned = m.pinned || (cur.pins || []).some((p) => p.id === m.id);
+  try {
+    if (pinned) { await api.del(`/chats/${chatId}/messages/${m.id}/pin`); toast('Losgelöst.'); }
+    else { await api.post(`/chats/${chatId}/messages/${m.id}/pin`, {}); toast('Angepinnt.'); }
+    m.pinned = !pinned;
+    // The socket echo refreshes everyone; refresh now too so it's instant here.
+    refreshPins();
+  } catch (e) { toast(e.message || 'Aktion fehlgeschlagen.', 'err'); }
+}
+
 // ---- thread ---------------------------------------------------------------
 function nearBottom(node) { return node.scrollHeight - node.scrollTop - node.clientHeight < 120; }
 
@@ -279,8 +340,9 @@ function renderMessage(m, chat, first) {
   }
 
   if (!m.deleted) {
-    const starred = prefs.isStarred(cur.chatId, m.id);
+    const starred = m.starred ?? prefs.isStarred(cur.chatId, m.id);
     const meta = el('span', { class: 'meta' }, [
+      m.pinned ? icon('pin', 'sm pin-flag') : null,
       starred ? icon('star', 'sm starred-flag fill') : null,
       m.editedAt ? el('span', { class: 'edited', text: 'bearbeitet · ' }) : null,
       el('span', { text: timeOf(m.createdAt) }),
@@ -336,18 +398,37 @@ function buildMsgActions(m, mine) {
   ]);
 }
 
+// Optimistically flip a star locally (so the offline Saved pane updates at
+// once), then reconcile with the server's authoritative answer.
+async function toggleStarSynced(m) {
+  const chatId = cur.chatId;
+  prefs.toggleStar(chatId, m.id, starSnapshot(m));
+  m.starred = prefs.isStarred(chatId, m.id);
+  renderThread();
+  try {
+    const { starred } = await api.post(`/chats/${chatId}/messages/${m.id}/star`, {});
+    if (typeof starred === 'boolean' && starred !== prefs.isStarred(chatId, m.id)) {
+      prefs.toggleStar(chatId, m.id, starSnapshot(m));
+      m.starred = starred; renderThread();
+    }
+  } catch { /* offline: the local star stands and re-syncs later */ }
+}
+
 function msgMenu(e, m, mine) {
-  const starred = prefs.isStarred(cur.chatId, m.id);
+  const starred = m.starred ?? prefs.isStarred(cur.chatId, m.id);
   const chat = store.getChat(cur.chatId);
   const canReplyPrivately = chat?.type === 'group' && !mine && m.senderId;
+  const pinned = m.pinned || (cur.pins || []).some((p) => p.id === m.id);
   openMenu(e, [
     { label: 'Antworten', icon: 'reply', onClick: () => setReply(m) },
     canReplyPrivately ? { label: 'Privat antworten', icon: 'user',
       onClick: () => import('./contacts.js').then((c) => c.startDirect(m.senderId)) } : null,
     { label: 'Weiterleiten', icon: 'forward', onClick: () => forwardMessage(m) },
     { label: 'Auswählen', icon: 'check', onClick: () => enterSelect(m) },
+    chat?.type !== 'system' ? { label: pinned ? 'Loslösen' : 'Anpinnen', icon: 'pin',
+      onClick: () => togglePin(m) } : null,
     { label: starred ? 'Markierung entfernen' : 'Markieren', icon: 'star',
-      onClick: () => { prefs.toggleStar(cur.chatId, m.id, starSnapshot(m)); renderThread(); } },
+      onClick: () => toggleStarSynced(m) },
     mine && m.type === 'text' && !m.attachment
       ? { label: 'Bearbeiten', icon: 'edit', onClick: () => setEdit(m) } : null,
     (m.body || m.type === 'text')

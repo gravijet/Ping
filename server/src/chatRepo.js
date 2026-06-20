@@ -331,6 +331,11 @@ export function chatView(chat, viewerId) {
 
   base.unread = s.unreadCount.get(chat.id, viewerId).n;
 
+  // 0.27.0: how many pinned messages this chat has (the banner shows the newest)
+  // and the viewer's saved draft text, so it follows them across devices.
+  base.pinnedCount = pinnedCount(chat.id);
+  base.draft = getDraft(viewerId, chat.id);
+
   base.updatedAt = last ? last.created_at : chat.created_at;
   return base;
 }
@@ -410,6 +415,115 @@ export function purgeExpiredMessages() {
 
 export const getMessage = (id) => m.byId.get(id);
 
+// ---- Pins / stars / drafts (0.27.0 "Ordnung & Ausdruck") -------------------
+
+const org = {
+  pinInsert: db.prepare(`
+    INSERT OR IGNORE INTO pinned_messages (chat_id, message_id, pinned_by, pinned_at)
+    VALUES (?, ?, ?, ?)`),
+  pinDelete: db.prepare(
+    'DELETE FROM pinned_messages WHERE chat_id = ? AND message_id = ?'
+  ),
+  pinCount: db.prepare('SELECT COUNT(*) AS n FROM pinned_messages WHERE chat_id = ?'),
+  isPinned: db.prepare('SELECT 1 FROM pinned_messages WHERE message_id = ?'),
+  pinList: db.prepare(`
+    SELECT m.* FROM pinned_messages p
+    JOIN messages m ON m.id = p.message_id
+    WHERE p.chat_id = ? AND m.deleted_at IS NULL
+    ORDER BY p.pinned_at DESC`),
+  starInsert: db.prepare(`
+    INSERT OR IGNORE INTO starred_messages (user_id, message_id, chat_id, created_at)
+    VALUES (?, ?, ?, ?)`),
+  starDelete: db.prepare(
+    'DELETE FROM starred_messages WHERE user_id = ? AND message_id = ?'
+  ),
+  isStarred: db.prepare(
+    'SELECT 1 FROM starred_messages WHERE user_id = ? AND message_id = ?'
+  ),
+  starList: db.prepare(`
+    SELECT m.* FROM starred_messages s
+    JOIN messages m ON m.id = s.message_id
+    WHERE s.user_id = ? AND m.deleted_at IS NULL
+      AND (m.expires_at IS NULL OR m.expires_at > ?)
+    ORDER BY s.created_at DESC LIMIT ?`),
+  draftGet: db.prepare('SELECT text FROM chat_drafts WHERE user_id = ? AND chat_id = ?'),
+  draftUpsert: db.prepare(`
+    INSERT INTO chat_drafts (user_id, chat_id, text, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, chat_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`),
+  draftDelete: db.prepare('DELETE FROM chat_drafts WHERE user_id = ? AND chat_id = ?'),
+};
+
+// A chat can hold at most this many pinned messages (matches the WhatsApp feel:
+// a short, curated banner list rather than an archive).
+export const MAX_PINS_PER_CHAT = 50;
+
+/// Pin a message in its chat. Returns { ok, count } or { error } when the chat
+/// is already at the pin ceiling. Idempotent — re-pinning is a no-op.
+export function pinMessage(chatId, messageId, userId) {
+  if (org.isPinned.get(messageId)) return { ok: true, count: org.pinCount.get(chatId).n };
+  if (org.pinCount.get(chatId).n >= MAX_PINS_PER_CHAT) {
+    return { error: 'limit', count: MAX_PINS_PER_CHAT };
+  }
+  org.pinInsert.run(chatId, messageId, userId, now());
+  return { ok: true, count: org.pinCount.get(chatId).n };
+}
+
+export function unpinMessage(chatId, messageId) {
+  org.pinDelete.run(chatId, messageId);
+  return { ok: true, count: org.pinCount.get(chatId).n };
+}
+
+export function isMessagePinned(messageId) {
+  return !!org.isPinned.get(messageId);
+}
+
+export function pinnedCount(chatId) {
+  return org.pinCount.get(chatId).n;
+}
+
+/// The pinned messages of a chat, newest pin first, rendered for [viewerId].
+export function listPins(chatId, viewerId) {
+  return org.pinList.all(chatId).map((row) => messageView(row, viewerId));
+}
+
+/// Toggle a personal bookmark on a message. Returns { starred } reflecting the
+/// new state.
+export function toggleStar(userId, messageId, chatId) {
+  if (org.isStarred.get(userId, messageId)) {
+    org.starDelete.run(userId, messageId);
+    return { starred: false };
+  }
+  org.starInsert.run(userId, messageId, chatId, now());
+  return { starred: true };
+}
+
+export function isMessageStarred(userId, messageId) {
+  return !!org.isStarred.get(userId, messageId);
+}
+
+/// Every message [userId] has saved, newest first, rendered for them.
+export function listStarred(userId, limit = 200) {
+  return org.starList
+    .all(userId, now(), Math.min(limit, 500))
+    .map((row) => messageView(row, userId));
+}
+
+/// Upsert (or clear, when text is empty) a per-chat draft for [userId].
+export function setDraft(userId, chatId, text) {
+  const t = (text || '').toString();
+  if (!t.trim()) {
+    org.draftDelete.run(userId, chatId);
+    return '';
+  }
+  org.draftUpsert.run(userId, chatId, t, now());
+  return t;
+}
+
+export function getDraft(userId, chatId) {
+  const row = org.draftGet.get(userId, chatId);
+  return row ? row.text : '';
+}
+
 export function editMessage(id, body) {
   m.edit.run(body, now(), id);
   return m.byId.get(id);
@@ -457,11 +571,30 @@ const searchStmt = db.prepare(`
   ORDER BY m.created_at DESC
   LIMIT ?`);
 
-export function searchMessages(userId, q, limit = 30) {
+// Same as searchStmt but constrained to a single chat (in-chat "find in
+// conversation"). Membership is checked by the caller before this runs.
+const searchInChatStmt = db.prepare(`
+  SELECT m.* FROM messages m
+  WHERE m.chat_id = ?
+    AND m.deleted_at IS NULL
+    AND m.type != 'system'
+    AND (m.expires_at IS NULL OR m.expires_at > ?)
+    AND NOT EXISTS (
+      SELECT 1 FROM hidden_messages h
+      WHERE h.message_id = m.id AND h.user_id = ?)
+    AND m.body LIKE ? ESCAPE '\\'
+  ORDER BY m.created_at DESC
+  LIMIT ?`);
+
+export function searchMessages(userId, q, { limit = 30, chatId = null } = {}) {
   const needle = (q || '').trim();
   if (needle.length < 2) return [];
   const like = `%${needle.replace(/[\\%_]/g, '\\$&')}%`;
-  return searchStmt.all(userId, now(), userId, like, Math.min(limit, 50));
+  const cap = Math.min(limit, 50);
+  if (chatId) {
+    return searchInChatStmt.all(chatId, now(), userId, like, cap);
+  }
+  return searchStmt.all(userId, now(), userId, like, cap);
 }
 
 // Mark every unread message in a chat (from others) as read for this viewer.
@@ -680,5 +813,8 @@ export function messageView(msg, viewerId) {
     myReactions: msg.deleted_at ? [] : myReactions(msg.id, viewerId),
     // Poll payload (question/options/votes) for 'poll' messages.
     poll: msg.type === 'poll' && !msg.deleted_at ? pollView(msg.id, viewerId) : null,
+    // 0.27.0: chat-wide pin state + this viewer's personal bookmark.
+    pinned: msg.deleted_at ? false : isMessagePinned(msg.id),
+    starred: msg.deleted_at ? false : isMessageStarred(viewerId, msg.id),
   };
 }

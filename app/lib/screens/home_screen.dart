@@ -10,6 +10,7 @@ import '../services/api_client.dart';
 import '../services/app_state.dart';
 import '../services/notification_target.dart';
 import '../utils/chat_filter.dart';
+import '../models/chat_folder.dart';
 import '../widgets/brand.dart';
 import '../widgets/changelog_view.dart';
 import '../widgets/chat_tile.dart';
@@ -45,6 +46,8 @@ class _HomeScreenState extends State<HomeScreen>
   String? _error;
   String _chatQuery = '';
   ChatFilter _filter = ChatFilter.all;
+  // 0.27.0: the active user folder ("Arbeit", …), or null for no folder filter.
+  String? _folderFilter;
 
   // Global message search (server-side, across the full history).
   Timer? _searchDebounce;
@@ -325,6 +328,191 @@ class _HomeScreenState extends State<HomeScreen>
         MaterialPageRoute(builder: (_) => const SettingsScreen()),
       );
 
+  // ---- Chat folders (0.27.0) -----------------------------------------------
+
+  void _folderError(Object e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(e is ApiException ? e.message : 'Aktion fehlgeschlagen.'),
+    ));
+  }
+
+  Future<void> _manageFolders() async {
+    final state = context.read<AppState>();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetCtx) => AnimatedBuilder(
+        animation: state,
+        builder: (ctx, _) {
+          final folders = state.folders;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                    child: Text('Ordner',
+                        style: Theme.of(ctx).textTheme.titleLarge),
+                  ),
+                  if (folders.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(12, 8, 12, 20),
+                      child: Text(
+                        'Noch keine Ordner. Lege einen an, um deine Chats zu '
+                        'gruppieren.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  for (final f in folders)
+                    ListTile(
+                      leading: Text(f.emoji.isNotEmpty ? f.emoji : '🗂️',
+                          style: const TextStyle(fontSize: 22)),
+                      title: Text(f.name),
+                      subtitle: Text(
+                          '${f.chatIds.length} ${f.chatIds.length == 1 ? 'Chat' : 'Chats'}'),
+                      onTap: () => _assignFolderChats(f),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        tooltip: 'Löschen',
+                        onPressed: () async {
+                          try {
+                            await state.deleteFolder(f.id);
+                          } catch (e) {
+                            _folderError(e);
+                          }
+                        },
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Neuen Ordner anlegen'),
+                      onPressed:
+                          folders.length >= 20 ? null : _createFolderDialog,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _createFolderDialog() async {
+    final state = context.read<AppState>();
+    final nameCtrl = TextEditingController();
+    final emojiCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Neuer Ordner'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: emojiCtrl,
+              maxLength: 8,
+              decoration: const InputDecoration(
+                  labelText: 'Symbol (optional)', counterText: ''),
+            ),
+            TextField(
+              controller: nameCtrl,
+              maxLength: 40,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Anlegen')),
+        ],
+      ),
+    );
+    if (ok == true && nameCtrl.text.trim().isNotEmpty) {
+      try {
+        await state.createFolder(nameCtrl.text.trim(),
+            emoji: emojiCtrl.text.trim());
+      } catch (e) {
+        _folderError(e);
+      }
+    }
+  }
+
+  Future<void> _assignFolderChats(ChatFolder folder) async {
+    final state = context.read<AppState>();
+    final selected = {...folder.chatIds};
+    final chats = state.chats.where((c) => !c.archived).toList();
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text('„${folder.name}" · Chats',
+                    style: Theme.of(ctx).textTheme.titleMedium),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final c in chats)
+                      CheckboxListTile(
+                        value: selected.contains(c.id),
+                        title: Text(c.displayTitle,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onChanged: (v) => setSheet(() {
+                          if (v == true) {
+                            selected.add(c.id);
+                          } else {
+                            selected.remove(c.id);
+                          }
+                        }),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('Speichern'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved == true) {
+      try {
+        await state.setFolderChats(folder.id, selected.toList());
+      } catch (e) {
+        _folderError(e);
+      }
+    }
+  }
+
   String _emptyFilterText() => switch (_filter) {
         ChatFilter.unread => 'Keine ungelesenen Chats',
         ChatFilter.favorites => 'Noch keine Favoriten — tippe einen Chat lang '
@@ -354,9 +542,25 @@ class _HomeScreenState extends State<HomeScreen>
         searching ? state.chats : state.chats.where((c) => !c.archived).toList();
     // The quick filter (Alle/Ungelesen/Favoriten/Gruppen) only applies when not
     // searching — a search always looks across everything.
-    final filtered = (searching || _filter == ChatFilter.all)
+    var filtered = (searching || _filter == ChatFilter.all)
         ? source
         : applyChatFilter(source, _filter, isFavorite: state.isFavorite);
+    // 0.27.0: narrow to the selected folder (cleared automatically if the folder
+    // was deleted on another device).
+    if (!searching && _folderFilter != null) {
+      ChatFolder? folder;
+      for (final f in state.folders) {
+        if (f.id == _folderFilter) {
+          folder = f;
+          break;
+        }
+      }
+      if (folder == null) {
+        _folderFilter = null;
+      } else {
+        filtered = filtered.where((c) => folder!.contains(c.id)).toList();
+      }
+    }
     final chats = !searching
         ? filtered
         : filtered
@@ -388,10 +592,23 @@ class _HomeScreenState extends State<HomeScreen>
                 .where((c) => !c.archived && c.unread > 0)
                 .length,
             favoriteCount: state.favoriteCount,
+            folders: state.folders,
+            selectedFolderId: _folderFilter,
             onSelect: (f) {
               state.feedback.tap();
-              setState(() => _filter = f);
+              setState(() {
+                _filter = f;
+                _folderFilter = null; // built-in filters and folders are exclusive
+              });
             },
+            onSelectFolder: (id) {
+              state.feedback.tap();
+              setState(() {
+                _folderFilter = id;
+                _filter = ChatFilter.all;
+              });
+            },
+            onManageFolders: _manageFolders,
           ),
         Expanded(
           child: (chats.isEmpty && !searching)
@@ -704,16 +921,26 @@ class _FilterBar extends StatelessWidget {
   final int unreadCount;
   final int favoriteCount;
   final ValueChanged<ChatFilter> onSelect;
+  // 0.27.0: user folders rendered as extra chips after the built-in filters.
+  final List<ChatFolder> folders;
+  final String? selectedFolderId;
+  final ValueChanged<String> onSelectFolder;
+  final VoidCallback onManageFolders;
   const _FilterBar({
     required this.current,
     required this.unreadCount,
     required this.favoriteCount,
     required this.onSelect,
+    required this.folders,
+    required this.selectedFolderId,
+    required this.onSelectFolder,
+    required this.onManageFolders,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final folderActive = selectedFolderId != null;
     int? badgeFor(ChatFilter f) => switch (f) {
           ChatFilter.unread => unreadCount > 0 ? unreadCount : null,
           ChatFilter.favorites => favoriteCount > 0 ? favoriteCount : null,
@@ -752,11 +979,31 @@ class _FilterBar extends StatelessWidget {
                     ],
                   ],
                 ),
-                selected: current == f,
+                selected: !folderActive && current == f,
                 showCheckmark: false,
                 onSelected: (_) => onSelect(f),
               ),
             ),
+          for (final folder in folders)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(folder.emoji.isNotEmpty
+                    ? '${folder.emoji} ${folder.name}'
+                    : folder.name),
+                selected: selectedFolderId == folder.id,
+                showCheckmark: false,
+                onSelected: (_) => onSelectFolder(folder.id),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ActionChip(
+              avatar: const Icon(Icons.create_new_folder_outlined, size: 18),
+              label: const Text('Ordner'),
+              onPressed: onManageFolders,
+            ),
+          ),
         ],
       ),
     );

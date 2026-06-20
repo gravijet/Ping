@@ -58,6 +58,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Show a "jump to latest" button once the user scrolls up a fair distance.
   bool _showScrollDown = false;
 
+  // Which pinned message the banner is currently showing (cycles on tap).
+  int _pinIndex = 0;
+
   // In-chat search over the loaded messages.
   bool _searching = false;
   final _searchController = TextEditingController();
@@ -108,6 +111,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _loadInitial() async {
     final state = context.read<AppState>();
     state.loadScheduled(widget.chatId); // show any "send later" messages
+    state.loadPins(widget.chatId); // 0.27.0: pinned-messages banner
     try {
       final fetched = await state.loadMessages(widget.chatId, reset: true);
       if (fetched.length < 40) _hasMore = false;
@@ -326,6 +330,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       appBar: _searching ? _buildSearchAppBar() : _buildAppBar(state, chat),
       body: Column(
         children: [
+          if (!_searching && state.pinsFor(widget.chatId).isNotEmpty)
+            _PinnedBanner(
+              pins: state.pinsFor(widget.chatId),
+              index: _pinIndex % state.pinsFor(widget.chatId).length,
+              onTap: () {
+                final pins = state.pinsFor(widget.chatId);
+                if (pins.isEmpty) return;
+                final i = _pinIndex % pins.length;
+                _jumpToMessage(pins[i].id);
+                setState(() => _pinIndex = i + 1);
+              },
+              onUnpin: () => _togglePin(
+                  state.pinsFor(widget.chatId)[
+                      _pinIndex % state.pinsFor(widget.chatId).length]),
+            ),
           Expanded(
             child: Stack(
               children: [
@@ -815,6 +834,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         label: starred ? 'Nicht mehr speichern' : 'Markieren',
         onTap: () => _toggleStar(m),
       ),
+      if (!selfChat)
+        MessageAction(
+          icon: (m.pinned || state.pinsFor(widget.chatId).any((p) => p.id == m.id))
+              ? Icons.push_pin_rounded
+              : Icons.push_pin_outlined,
+          label: (m.pinned || state.pinsFor(widget.chatId).any((p) => p.id == m.id))
+              ? 'Loslösen'
+              : 'Anpinnen',
+          onTap: () => _togglePin(m),
+        ),
       if (isMine && !selfChat)
         MessageAction(
           icon: Icons.info_outline_rounded,
@@ -905,6 +934,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _toggleStar(Message m) {
     context.read<AppState>().toggleStar(m, _chat?.displayTitle ?? 'Chat');
+  }
+
+  Future<void> _togglePin(Message m) async {
+    final state = context.read<AppState>();
+    final wasPinned =
+        m.pinned || state.pinsFor(widget.chatId).any((p) => p.id == m.id);
+    try {
+      await state.setMessagePinned(m, !wasPinned);
+      if (mounted) _showError(wasPinned ? 'Losgelöst.' : 'Angepinnt.');
+    } catch (e) {
+      if (mounted) {
+        _showError(e is ApiException ? e.message : 'Aktion fehlgeschlagen.');
+      }
+    }
   }
 
   Future<void> _forwardMessage(Message m) async {
@@ -2161,6 +2204,75 @@ class _ScheduledBar extends StatelessWidget {
               ),
               Icon(Icons.expand_less_rounded,
                   size: 20, color: scheme.onSecondaryContainer),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 0.27.0: the pinned-messages banner shown below the app bar. Tapping it jumps
+/// to the current pin and cycles to the next; the trailing button unpins it.
+class _PinnedBanner extends StatelessWidget {
+  final List<Message> pins;
+  final int index;
+  final VoidCallback onTap;
+  final VoidCallback onUnpin;
+  const _PinnedBanner({
+    required this.pins,
+    required this.index,
+    required this.onTap,
+    required this.onUnpin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final i = index.clamp(0, pins.length - 1);
+    final m = pins[i];
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+          child: Row(
+            children: [
+              Container(width: 3, height: 30, color: scheme.primary),
+              const SizedBox(width: 10),
+              Icon(Icons.push_pin_rounded, size: 16, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      pins.length > 1
+                          ? 'Angepinnt · ${i + 1}/${pins.length}'
+                          : 'Angepinnte Nachricht',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: scheme.primary),
+                    ),
+                    Text(
+                      m.preview,
+                      style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                tooltip: 'Loslösen',
+                visualDensity: VisualDensity.compact,
+                color: scheme.onSurfaceVariant,
+                onPressed: onUnpin,
+              ),
             ],
           ),
         ),

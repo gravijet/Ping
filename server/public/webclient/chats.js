@@ -45,11 +45,18 @@ function sortChats(list) {
 }
 
 function passesFilter(c) {
-  switch (store.state.chatFilter) {
+  const f = store.state.chatFilter;
+  switch (f) {
     case 'unread': return !!(c.unread || prefs.isMarkedUnread(c.id));
     case 'fav': return prefs.isPinned(c.id);
     case 'groups': return c.type === 'group';
-    default: return true;
+    default:
+      // A user-defined folder: "folder:<id>" → only its assigned chats.
+      if (typeof f === 'string' && f.startsWith('folder:')) {
+        const folder = (store.state.folders || []).find((x) => x.id === f.slice(7));
+        return !!folder && folder.chatIds.includes(c.id);
+      }
+      return true;
   }
 }
 

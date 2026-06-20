@@ -15,9 +15,10 @@ export const state = {
   lastSeen: new Map(),  // userId -> ts
   typing: new Map(),    // chatId -> Map<userId, timeoutHandle>
   search: '',
-  chatFilter: 'all',    // 'all' | 'unread' | 'fav' | 'groups'
+  chatFilter: 'all',    // 'all' | 'unread' | 'fav' | 'groups' | 'folder:<id>'
   chatsLoaded: false,   // false until the first /chats fetch resolves (skeletons)
   mentions: new Set(),  // chatIds with an unread @-mention of me
+  folders: [],          // user-defined chat folders: { id, name, emoji, chatIds }
 };
 
 export function on(event, fn) {

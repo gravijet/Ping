@@ -389,6 +389,63 @@ db.exec(`
     PRIMARY KEY (day, app, metric, bucket)
   );
   CREATE INDEX IF NOT EXISTS idx_device_metrics_day ON device_metrics(day);
+
+  -- 0.27.0 "Ordnung & Ausdruck" ------------------------------------------------
+
+  -- Pinned messages: a chat-wide list of important messages anyone in the chat
+  -- sees as a banner. One row per (chat, message); pinned_by records who pinned
+  -- it (for the system notice). Deleting the message cascades the pin away.
+  CREATE TABLE IF NOT EXISTS pinned_messages (
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    pinned_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    pinned_at  INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pinned_chat ON pinned_messages(chat_id, pinned_at);
+
+  -- Saved/starred messages: a personal bookmark list that now syncs across a
+  -- user's devices (previously local-only). One row per (user, message); chat_id
+  -- is denormalised so "Gespeicherte Nachrichten" can group by conversation.
+  CREATE TABLE IF NOT EXISTS starred_messages (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_starred_user ON starred_messages(user_id, created_at);
+
+  -- Server-synced per-chat drafts: the unsent text a user has typed in a chat,
+  -- so switching devices carries it over. One row per (user, chat); empty text
+  -- deletes the row.
+  CREATE TABLE IF NOT EXISTS chat_drafts (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    text       TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+  );
+
+  -- Chat folders: user-defined groupings ("Arbeit", "Familie") shown as filter
+  -- tabs above the chat list. A folder belongs to one user; chat membership is
+  -- many-to-many via chat_folder_members.
+  CREATE TABLE IF NOT EXISTS chat_folders (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    emoji      TEXT NOT NULL DEFAULT '',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_folders_user ON chat_folders(user_id, sort);
+
+  CREATE TABLE IF NOT EXISTS chat_folder_members (
+    folder_id TEXT NOT NULL REFERENCES chat_folders(id) ON DELETE CASCADE,
+    chat_id   TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    PRIMARY KEY (folder_id, chat_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_folder_members_chat ON chat_folder_members(chat_id);
 `);
 
 // ---- Migrations ------------------------------------------------------------

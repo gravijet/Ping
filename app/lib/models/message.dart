@@ -165,6 +165,11 @@ class Message {
   final Map<String, int> reactions;
   final Set<String> myReactions;
 
+  /// 0.27.0 "Ordnung & Ausdruck": chat-wide pin state and this user's personal
+  /// bookmark ("Markiert"). Both ride along on every message view + update.
+  final bool pinned;
+  final bool starred;
+
   /// A lightweight snapshot of the message this one replies to, supplied by the
   /// server so the quote always renders — even when the original is outside the
   /// loaded window. Null when this isn't a reply.
@@ -187,6 +192,8 @@ class Message {
     this.quoted,
     this.reactions = const {},
     this.myReactions = const {},
+    this.pinned = false,
+    this.starred = false,
   });
 
   /// True when the disappearing-messages timer of this message has run out
@@ -254,6 +261,8 @@ class Message {
     Map<String, int>? reactions,
     Set<String>? myReactions,
     PollData? poll,
+    bool? pinned,
+    bool? starred,
   }) =>
       Message(
         id: id,
@@ -272,6 +281,8 @@ class Message {
         quoted: quoted,
         reactions: reactions ?? this.reactions,
         myReactions: myReactions ?? this.myReactions,
+        pinned: pinned ?? this.pinned,
+        starred: starred ?? this.starred,
       );
 
   /// Serialise for the on-device cache (round-trips through [Message.fromJson]).
@@ -293,6 +304,8 @@ class Message {
           'status': status!.name,
         if (reactions.isNotEmpty) 'reactions': reactions,
         if (myReactions.isNotEmpty) 'myReactions': myReactions.toList(),
+        if (pinned) 'pinned': true,
+        if (starred) 'starred': true,
         if (quoted != null)
           'quoted': {
             'id': quoted!.id,
@@ -329,6 +342,8 @@ class Message {
         myReactions:
             ((json['myReactions'] as List?)?.cast<String>() ?? const [])
                 .toSet(),
+        pinned: (json['pinned'] ?? false) as bool,
+        starred: (json['starred'] ?? false) as bool,
         quoted: json['quoted'] != null
             ? Message._fromQuoted(
                 json['quoted'] as Map<String, dynamic>,

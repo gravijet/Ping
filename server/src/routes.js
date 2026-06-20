@@ -48,6 +48,9 @@ import {
   pollCreateSchema,
   pollVoteSchema,
   expireTimerSchema,
+  draftSchema,
+  folderSchema,
+  folderChatsSchema,
   adminCreateSchema,
   adminUpdateSchema,
   adminBroadcastSchema,
@@ -164,7 +167,26 @@ import {
   adminDeleteChat,
   adminChatMessages,
   adminChatMembers,
+  pinMessage,
+  unpinMessage,
+  listPins,
+  pinnedCount,
+  toggleStar,
+  listStarred,
+  setDraft,
+  MAX_PINS_PER_CHAT,
 } from './chatRepo.js';
+import {
+  listFolders,
+  getFolder,
+  createFolder,
+  updateFolder,
+  deleteFolder,
+  setFolderChats,
+  folderCount,
+  pruneFolders,
+  MAX_FOLDERS,
+} from './foldersRepo.js';
 import {
   saveUpload,
   getUploadMeta,
@@ -1513,6 +1535,183 @@ router.post(
   })
 );
 
+// ---- 0.27.0: pinned messages ----------------------------------------------
+
+// Tell every member that a chat's pin set changed, so banners update live. The
+// pin list is rendered per recipient (messageView is viewer-specific).
+function broadcastPins(chatId, msg) {
+  const count = pinnedCount(chatId);
+  for (const memberId of getMemberIds(chatId)) {
+    if (msg) sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    sendToUser(memberId, 'chat-pins-updated', {
+      chatId,
+      count,
+      pins: listPins(chatId, memberId),
+    });
+  }
+}
+
+// Pin a message so the whole chat sees it in the pinned banner. Anyone in the
+// chat may pin (like WhatsApp groups with default settings).
+router.post(
+  '/chats/:id/messages/:msgId/pin',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const result = pinMessage(req.chat.id, msg.id, req.user.id);
+    if (result.error === 'limit') {
+      return res.status(409).json({
+        error: `Höchstens ${MAX_PINS_PER_CHAT} angepinnte Nachrichten pro Chat.`,
+      });
+    }
+    broadcastPins(req.chat.id, msg);
+    res.json({ ok: true, count: result.count, message: messageView(msg, req.user.id) });
+  })
+);
+
+router.delete(
+  '/chats/:id/messages/:msgId/pin',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const result = unpinMessage(req.chat.id, msg.id);
+    broadcastPins(req.chat.id, msg);
+    res.json({ ok: true, count: result.count, message: messageView(msg, req.user.id) });
+  })
+);
+
+// The chat's pinned messages, newest pin first (powers the banner + pin list).
+router.get(
+  '/chats/:id/pins',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    res.json({ pins: listPins(req.chat.id, req.user.id) });
+  })
+);
+
+// ---- 0.27.0: saved/starred messages (personal, device-synced) -------------
+
+// Toggle a personal bookmark on any message the user can see. Echoed to the
+// user's other devices so the star state stays in sync.
+router.post(
+  '/chats/:id/messages/:msgId/star',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const { starred } = toggleStar(req.user.id, msg.id, req.chat.id);
+    sendToUser(req.user.id, 'message-updated', { message: messageView(msg, req.user.id) });
+    sendToUser(req.user.id, 'starred-updated', { messageId: msg.id, starred });
+    res.json({ ok: true, starred });
+  })
+);
+
+// Every message the user has saved, newest first.
+router.get(
+  '/me/starred',
+  requireAuth,
+  h(async (req, res) => {
+    const limitRaw = Number(req.query.limit);
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 500) : 200;
+    res.json({ messages: listStarred(req.user.id, limit) });
+  })
+);
+
+// ---- 0.27.0: server-synced per-chat drafts --------------------------------
+
+// Save (or, with empty text, clear) the unsent draft for a chat. Mirrored to the
+// user's other devices so a half-typed message follows them around.
+router.put(
+  '/chats/:id/draft',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const { text } = parse(draftSchema, req.body);
+    const saved = setDraft(req.user.id, req.chat.id, text);
+    sendToUser(req.user.id, 'draft-updated', { chatId: req.chat.id, text: saved });
+    res.json({ ok: true, text: saved });
+  })
+);
+
+// ---- 0.27.0: chat folders -------------------------------------------------
+
+function broadcastFolders(userId) {
+  sendToUser(userId, 'folders-updated', { folders: listFolders(userId) });
+}
+
+router.get(
+  '/me/folders',
+  requireAuth,
+  h(async (req, res) => {
+    pruneFolders(req.user.id);
+    res.json({ folders: listFolders(req.user.id) });
+  })
+);
+
+router.post(
+  '/me/folders',
+  requireAuth,
+  h(async (req, res) => {
+    if (folderCount(req.user.id) >= MAX_FOLDERS) {
+      return res.status(409).json({ error: `Höchstens ${MAX_FOLDERS} Ordner.` });
+    }
+    const data = parse(folderSchema, req.body);
+    const folder = createFolder(req.user.id, data);
+    broadcastFolders(req.user.id);
+    res.status(201).json({ folder });
+  })
+);
+
+router.patch(
+  '/me/folders/:id',
+  requireAuth,
+  h(async (req, res) => {
+    const data = parse(folderSchema, req.body);
+    const folder = updateFolder(req.user.id, req.params.id, data);
+    if (!folder) return res.status(404).json({ error: 'Diesen Ordner gibt es nicht.' });
+    broadcastFolders(req.user.id);
+    res.json({ folder });
+  })
+);
+
+router.delete(
+  '/me/folders/:id',
+  requireAuth,
+  h(async (req, res) => {
+    if (!deleteFolder(req.user.id, req.params.id)) {
+      return res.status(404).json({ error: 'Diesen Ordner gibt es nicht.' });
+    }
+    broadcastFolders(req.user.id);
+    res.json({ ok: true });
+  })
+);
+
+// Replace the set of chats inside a folder. Ids the user isn't a member of are
+// dropped by the repo, so a folder can only ever hold the owner's own chats.
+router.put(
+  '/me/folders/:id/chats',
+  requireAuth,
+  h(async (req, res) => {
+    const { chatIds } = parse(folderChatsSchema, req.body);
+    const folder = setFolderChats(req.user.id, req.params.id, chatIds);
+    if (!folder) return res.status(404).json({ error: 'Diesen Ordner gibt es nicht.' });
+    broadcastFolders(req.user.id);
+    res.json({ folder });
+  })
+);
+
 // Turn the disappearing-messages timer for a chat on/off. In groups only the
 // owner may change it; in a direct chat either side can (like WhatsApp).
 router.post(
@@ -2154,7 +2353,13 @@ router.get(
   requireAuth,
   h(async (req, res) => {
     const q = parse(searchQuerySchema, (req.query.q || '').toString());
-    const messages = searchMessages(req.user.id, q).map((m) =>
+    // Optional ?chatId= scopes the search to one conversation ("find in chat").
+    // Only honoured when the caller actually belongs to that chat.
+    const chatId =
+      req.query.chatId && isMember(req.query.chatId.toString(), req.user.id)
+        ? req.query.chatId.toString()
+        : null;
+    const messages = searchMessages(req.user.id, q, { chatId }).map((m) =>
       messageView(m, req.user.id)
     );
     res.json({ messages });
