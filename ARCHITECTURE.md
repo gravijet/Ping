@@ -278,6 +278,32 @@ Three additive, owner-scoped features — kill-switchable via the remote flags
   the web client downloads it via an authenticated raw fetch (local export is
   the offline fallback).
 
+## Find & focus (0.30.0)
+Two additive features, kill-switchable via `messageSearch` / `focusMode`.
+
+- **Full-text search.** `db.js` creates an external-content FTS5 table
+  `messages_fts` (`content='messages'`, `content_rowid='rowid'`) maintained by
+  `AFTER INSERT/UPDATE/DELETE` triggers on `messages`, backfilled once on boot.
+  It probes FTS5 and exports `ftsAvailable`; `chatRepo.searchMessages` uses
+  `MATCH` + `bm25()` + `snippet()` when available and **falls back to the LIKE
+  scan** otherwise. `parseSearchQuery` extracts filter operators (`von:`/`from:`,
+  `typ:`/`type:`, `nach:`/`after:`, `vor:`/`before:`); the free-text part is
+  sanitised to letters/digits before becoming a prefix `MATCH` (no FTS-syntax
+  injection). `GET /messages/search` stays membership-scoped and adds
+  `snippet`/`chatTitle`/`senderName` to each hit. Web `search.js` renders the
+  dedicated, debounced, skeleton-loaded surface with `<mark>` highlighting (DOM
+  nodes, XSS-safe) and jumps to the message via `openChat({ focusMessageId })`.
+- **Focus mode / quiet hours.** `focusRepo.js` + `user_focus` (manual
+  `focus_until` + quiet-hours window as minutes-of-day with a 7-bit day mask) and
+  `focus_autoreplies` (per-peer throttle). `isUserSilenced()` (handles a window
+  crossing midnight) gates push in `deliver.js` via `filterAudible()` — the live
+  socket fan-out is untouched, so enforcement is server-side and applies to every
+  client. `GET/PUT /me/focus` (validated by `focusSchema`, broadcast over
+  `focus-updated`). `maybeAutoReply()` sends a one-time canned reply to DMs for a
+  silenced recipient (DM-only, block-aware, throttled, delivered with `auto:true`
+  so it can't recurse); the maintenance sweep purges stale throttle rows. Web
+  `focus.js` owns the dialog + nav-rail indicator.
+
 ## Deploy
 - **Web/server:** this checkout is the live host. Edit in place, then
   `sudo systemctl restart ping-server` (loads new server code + creates new

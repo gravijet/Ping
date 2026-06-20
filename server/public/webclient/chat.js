@@ -91,7 +91,7 @@ export function closeChat() {
   closeInfoPanel();
 }
 
-export async function openChat(slot, chatId, { onBack } = {}) {
+export async function openChat(slot, chatId, { onBack, focusMessageId } = {}) {
   closeChat();
   const chat = store.getChat(chatId);
   if (!chat) return;
@@ -149,6 +149,19 @@ export async function openChat(slot, chatId, { onBack } = {}) {
   }
   renderThread(true);
   markRead();
+
+  // Jump-to-message (from global search / reminders): highlight it once the
+  // thread is painted. Best-effort — if the target is older than the loaded
+  // window it simply isn't on screen yet, so we retry briefly as layout settles.
+  if (focusMessageId) {
+    let tries = 0;
+    const tryScroll = () => {
+      if (cur?.chatId !== chatId) return;
+      if (document.getElementById('msg-' + focusMessageId)) { scrollToMessage(focusMessageId); return; }
+      if (++tries < 6) setTimeout(tryScroll, 150);
+    };
+    setTimeout(tryScroll, 60);
+  }
 
   thread.addEventListener('scroll', onScroll);
   wireDropZone(thread);

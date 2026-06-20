@@ -29,6 +29,10 @@ export const DEFAULT_CONFIG = {
     reminders: true,
     quickReplies: true,
     chatExport: true,
+    // Finden & Fokus (0.30.0): FTS5 full-text search with filters + a
+    // server-enforced focus mode / quiet hours with DM auto-reply.
+    messageSearch: true,
+    focusMode: true,
   },
   values: {
     maxStatusSeconds: 30,

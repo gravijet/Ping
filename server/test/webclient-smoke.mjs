@@ -198,7 +198,13 @@ async function fetchShim(url) {
   if (path.startsWith('/chats/c1/messages')) return jsonRes({ messages: msgs });
   if (path.startsWith('/chats/c2/messages')) return jsonRes({ messages: [] });
   if (/^\/chats\/[^/]+$/.test(path)) return jsonRes({ chat: chatDirect });
-  if (path.startsWith('/messages/search')) return jsonRes({ messages: [] });
+  if (path.startsWith('/messages/search')) return jsonRes({ messages: [
+    { id: 'm1', chatId: 'c1', senderId: 'u2', type: 'text', body: 'Hallo Welt Apfelkuchen',
+      snippet: 'Hallo Welt Apfelkuchen', chatTitle: 'Anna', senderName: 'Anna', createdAt: Date.now() },
+  ] });
+  if (path === '/me/focus') return jsonRes({ focus: { focusUntil: 0, focusActive: false,
+    quietEnabled: false, quietStart: 1320, quietEnd: 420, quietDays: 127, inQuietHours: false,
+    autoReply: '', updatedAt: 0 } });
   if (path.startsWith('/link-preview')) return jsonRes({ preview: { title: 'Beispielseite', description: 'Hallo Welt', image: '', siteName: 'example.com', url: 'https://example.com/artikel' } });
   if (path === '/blocks') return jsonRes({ blocked: [] });
   if (path.startsWith('/users/')) return jsonRes({ user: { ...me, id: 'u2', displayName: 'Anna', about: 'Hi', city: 'Wien' } });
@@ -310,6 +316,39 @@ await step('in-chat search toggle', async () => {
 });
 await step('forward multiple messages', async () => {
   (await imp('forward.js')).forwardMessages([{ id: 'm1', type: 'text', body: 'hi' }, { id: 'x', type: 'text', body: 'yo' }]);
+});
+await step('global search opens, queries + renders highlighted results', async () => {
+  const search = await imp('search.js');
+  let jumped = null;
+  search.openSearch((chatId, msgId) => { jumped = [chatId, msgId]; });
+  await tick();
+  const input = document.querySelector('.search-input');
+  if (!input) throw new Error('search input not rendered');
+  input.value = 'apfel';
+  input.dispatch('input', { target: input });
+  await new Promise((r) => setTimeout(r, 260)); // past the debounce
+  const results = document.querySelectorAll('.search-result');
+  if (!results.length) throw new Error('no search results rendered');
+  if (!document.querySelector('.sr-text mark')) throw new Error('matched term not highlighted');
+  // quick chip appends an operator token (while the modal is still open)
+  document.querySelector('.search-chips .chip')?.click(); await tick();
+  if (!/typ:/.test(document.querySelector('.search-input').value)) throw new Error('type chip did not add operator');
+  // clicking a result jumps to (chatId, messageId) and closes the modal
+  document.querySelectorAll('.search-result')[0].click();
+  if (!jumped) throw new Error('clicking a result did not jump to the chat');
+});
+await step('focus mode: sync, open settings, toggle quiet hours + a day', async () => {
+  const focus = await imp('focus.js');
+  await focus.sync();
+  if (focus.isSilenced() !== false) throw new Error('default focus should not be silenced');
+  focus.openFocus(); await tick();
+  const sw = document.querySelector('.focus-h.with-toggle .switch');
+  if (!sw) throw new Error('quiet-hours toggle not rendered');
+  sw.click(); await tick(); // enable quiet hours (PUT /me/focus)
+  const day = document.querySelector('.focus-day');
+  if (!day) day; else { day.click(); await tick(); }
+  const quick = document.querySelector('.focus-quick .btn');
+  if (!quick) throw new Error('focus quick-set buttons missing');
 });
 
 // Phase C: the 0.20.0 offline / diagnostics / dev-tools modules.

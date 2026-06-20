@@ -73,6 +73,7 @@ import {
   reminderCreateSchema,
   quickReplyCreateSchema,
   quickReplyUpdateSchema,
+  focusSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
@@ -234,7 +235,8 @@ import {
   disconnectUser,
 } from './hub.js';
 import { sendPushToUsers, pushEnabled } from './push.js';
-import { deliverMessage, pushMessage } from './deliver.js';
+import { deliverMessage, pushMessage, maybeAutoReply } from './deliver.js';
+import { getFocus, setFocus, focusView } from './focusRepo.js';
 import { listBackups, backupNow, backupFilePath } from './backup.js';
 import {
   savePushToken,
@@ -1244,6 +1246,8 @@ router.post(
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
     }
     pushForMessage(req.chat, msg, req.user.id);
+    // 0.30.0: if the recipient is in Focus with an auto-reply, send it back now.
+    maybeAutoReply(req.chat, msg, req.user.id);
     res.status(201).json({ message: messageView(msg, req.user.id) });
   })
 );
@@ -1794,6 +1798,32 @@ router.delete(
     }
     broadcastQuickReplies(req.user.id);
     res.status(204).end();
+  })
+);
+
+// ---- 0.30.0 "Finden & Fokus": focus mode & quiet hours --------------------
+
+// The signed-in user's notification controls. Defaults (never configured) come
+// straight from focusRepo, so a fresh account gets sensible quiet-hours values.
+router.get(
+  '/me/focus',
+  requireAuth,
+  h(async (req, res) => {
+    res.json({ focus: focusView(getFocus(req.user.id)) });
+  })
+);
+
+// Update focus / quiet hours / auto-reply. PATCH-style: only the fields present
+// change. Broadcast to the user's other devices so the toggle stays in sync.
+router.put(
+  '/me/focus',
+  requireAuth,
+  h(async (req, res) => {
+    const patch = parse(focusSchema, req.body || {});
+    const settings = setFocus(req.user.id, patch);
+    const focus = focusView(settings);
+    sendToUser(req.user.id, 'focus-updated', { focus });
+    res.json({ focus });
   })
 );
 
@@ -2588,9 +2618,27 @@ router.get(
       req.query.chatId && isMember(req.query.chatId.toString(), req.user.id)
         ? req.query.chatId.toString()
         : null;
-    const messages = searchMessages(req.user.id, q, { chatId }).map((m) =>
-      messageView(m, req.user.id)
-    );
+    const uid = req.user.id;
+    const hits = searchMessages(uid, q, { chatId });
+    // Enrich each hit with the highlightable snippet + light chat/sender context
+    // so the global search view can render a result row without a second fetch.
+    // chatView is memoised per chat so a busy conversation isn't re-resolved.
+    const titleCache = new Map();
+    const titleOf = (cid) => {
+      if (titleCache.has(cid)) return titleCache.get(cid);
+      const c = getChat(cid);
+      const t = c ? chatView(c, uid).title || '' : '';
+      titleCache.set(cid, t);
+      return t;
+    };
+    const messages = hits.map((m) => {
+      const view = messageView(m, uid);
+      if (m.searchSnippet) view.snippet = m.searchSnippet;
+      view.chatTitle = titleOf(m.chat_id);
+      const sender = m.sender_id ? getUserById(m.sender_id) : null;
+      view.senderName = sender ? sender.display_name : '';
+      return view;
+    });
     res.json({ messages });
   })
 );

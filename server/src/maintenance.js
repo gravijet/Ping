@@ -14,6 +14,7 @@ import {
   dueScheduledBroadcasts,
   deleteScheduledBroadcast,
 } from './scheduledBroadcastRepo.js';
+import { purgeAutoReplies } from './focusRepo.js';
 import { dispatchBroadcast } from './broadcast.js';
 import { deliverMessage } from './deliver.js';
 
@@ -98,6 +99,8 @@ export function runMaintenance() {
   }
   // Drop reminders that fired long enough ago that the user has seen them.
   purgeFiredReminders();
+  // 0.30.0: drop stale focus auto-reply throttle rows (older than the cool-down).
+  purgeAutoReplies();
   purgeExpiredStatuses();
   // Expired OTP rows are useless after their window; keep an hour of slack for
   // debugging ("why didn't my code work?") before dropping them.

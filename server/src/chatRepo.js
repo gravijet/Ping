@@ -1,4 +1,4 @@
-import { db, now, tx } from './db.js';
+import { db, now, tx, ftsAvailable } from './db.js';
 import { uid, pickAvatarColor, getUserById, publicUser } from './repo.js';
 
 const s = {
@@ -585,46 +585,123 @@ export function getHistory(chatId, { before, limit = 40, viewerId = '' } = {}) {
   return rows.reverse();
 }
 
-// Full-history text search across every chat the user belongs to (newest
-// first). Powers the global search on the home screen. The LIKE wildcards in
-// the query itself are escaped so they're matched literally.
-const searchStmt = db.prepare(`
-  SELECT m.* FROM messages m
-  JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
-  WHERE m.deleted_at IS NULL
-    AND m.type != 'system'
-    AND (m.expires_at IS NULL OR m.expires_at > ?)
-    AND NOT EXISTS (
-      SELECT 1 FROM hidden_messages h
-      WHERE h.message_id = m.id AND h.user_id = ?)
-    AND m.body LIKE ? ESCAPE '\\'
-  ORDER BY m.created_at DESC
-  LIMIT ?`);
+// 0.30.0 "Finden & Fokus": full-history search across every chat the user
+// belongs to. Backed by an FTS5 index (ranked + highlightable) when available,
+// with a LIKE fallback (chatRepo never hard-fails if FTS5 is missing). On top of
+// free text the query understands a few filter operators — German or English:
+//   von:/from:<name>   sender display-name contains <name>
+//   typ:/type:<kind>   message kind (foto/bild→image, video, datei→file, …)
+//   nach:/after:<date> on/after a YYYY-MM-DD day
+//   vor:/before:<date> strictly before a YYYY-MM-DD day
+// so "von:anna typ:foto urlaub" finds Anna's photos mentioning "urlaub".
 
-// Same as searchStmt but constrained to a single chat (in-chat "find in
-// conversation"). Membership is checked by the caller before this runs.
-const searchInChatStmt = db.prepare(`
-  SELECT m.* FROM messages m
-  WHERE m.chat_id = ?
-    AND m.deleted_at IS NULL
-    AND m.type != 'system'
-    AND (m.expires_at IS NULL OR m.expires_at > ?)
-    AND NOT EXISTS (
-      SELECT 1 FROM hidden_messages h
-      WHERE h.message_id = m.id AND h.user_id = ?)
-    AND m.body LIKE ? ESCAPE '\\'
-  ORDER BY m.created_at DESC
-  LIMIT ?`);
+// Map a filter word to a stored message `type`. Accepts German + English.
+const TYPE_ALIASES = {
+  text: 'text', image: 'image', foto: 'image', photo: 'image', bild: 'image',
+  video: 'video', gif: 'gif', audio: 'audio', voice: 'voice', sprachnachricht: 'voice',
+  sprache: 'voice', file: 'file', datei: 'file', dokument: 'file', location: 'location',
+  ort: 'location', standort: 'location', poll: 'poll', umfrage: 'poll',
+};
+
+// Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
+function dayStart(s) {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec((s || '').trim());
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/** Split a raw query into { text, from, type, after, before }. */
+export function parseSearchQuery(raw) {
+  const out = { text: '', from: '', type: null, after: null, before: null };
+  const rest = [];
+  for (const tok of String(raw || '').trim().split(/\s+/)) {
+    const m = /^([a-zA-ZäöüÄÖÜ]+):(.*)$/.exec(tok);
+    if (!m) { rest.push(tok); continue; }
+    const key = m[1].toLowerCase();
+    const val = m[2];
+    if ((key === 'von' || key === 'from') && val) out.from = val;
+    else if ((key === 'typ' || key === 'type') && TYPE_ALIASES[val.toLowerCase()]) out.type = TYPE_ALIASES[val.toLowerCase()];
+    else if ((key === 'nach' || key === 'after') && dayStart(val) != null) out.after = dayStart(val);
+    else if ((key === 'vor' || key === 'before') && dayStart(val) != null) out.before = dayStart(val);
+    else rest.push(tok); // unknown operator → treat literally
+  }
+  out.text = rest.join(' ').trim();
+  return out;
+}
+
+// Turn free text into a safe FTS5 MATCH expression: keep only letters/digits/_,
+// prefix-match each token, AND them together. Returns '' when nothing usable is
+// left (e.g. an emoji-only query) so the caller can fall back to LIKE.
+function ftsMatch(text) {
+  const terms = String(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_]+/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => `${t}*`);
+  return terms.join(' ');
+}
 
 export function searchMessages(userId, q, { limit = 30, chatId = null } = {}) {
-  const needle = (q || '').trim();
-  if (needle.length < 2) return [];
-  const like = `%${needle.replace(/[\\%_]/g, '\\$&')}%`;
-  const cap = Math.min(limit, 50);
-  if (chatId) {
-    return searchInChatStmt.all(chatId, now(), userId, like, cap);
+  const f = parseSearchQuery(q);
+  const cap = Math.min(Math.max(Number(limit) || 30, 1), 50);
+  const hasFilter = f.from || f.type || f.after != null || f.before != null;
+  // Need *something* to search on: either free text or at least one filter.
+  if (f.text.length < 2 && !hasFilter) return [];
+
+  // Shared WHERE fragments + bound params (same for FTS and LIKE paths).
+  const where = [
+    "m.deleted_at IS NULL",
+    "m.type != 'system'",
+    '(m.expires_at IS NULL OR m.expires_at > @nowTs)',
+    'NOT EXISTS (SELECT 1 FROM hidden_messages h WHERE h.message_id = m.id AND h.user_id = @uid)',
+  ];
+  const params = { uid: userId, nowTs: now(), cap };
+  if (chatId) { where.push('m.chat_id = @chatId'); params.chatId = chatId; }
+  else { where.push('EXISTS (SELECT 1 FROM chat_members cm WHERE cm.chat_id = m.chat_id AND cm.user_id = @uid)'); }
+  if (f.type) { where.push('m.type = @type'); params.type = f.type; }
+  if (f.after != null) { where.push('m.created_at >= @after'); params.after = f.after; }
+  if (f.before != null) { where.push('m.created_at < @before'); params.before = f.before; }
+  if (f.from) {
+    where.push("EXISTS (SELECT 1 FROM users u WHERE u.id = m.sender_id AND u.display_name LIKE @from ESCAPE '\\')");
+    params.from = `%${f.from.replace(/[\\%_]/g, '\\$&')}%`;
   }
-  return searchStmt.all(userId, now(), userId, like, cap);
+
+  const match = f.text.length >= 2 ? ftsMatch(f.text) : '';
+
+  // FTS path: ranked by relevance (bm25) with a highlighted snippet.
+  if (ftsAvailable && match) {
+    try {
+      const sql = `
+        SELECT m.*, snippet(messages_fts, 0, '', '', '…', 10) AS _snip
+        FROM messages_fts
+        JOIN messages m ON m.rowid = messages_fts.rowid
+        WHERE messages_fts MATCH @match
+          AND ${where.join(' AND ')}
+        ORDER BY bm25(messages_fts), m.created_at DESC
+        LIMIT @cap`;
+      const rows = db.prepare(sql).all({ ...params, match });
+      for (const r of rows) { r.searchSnippet = r._snip || null; delete r._snip; }
+      return rows;
+    } catch {
+      // Malformed MATCH or an FTS hiccup → fall through to the LIKE path.
+    }
+  }
+
+  // LIKE fallback (also the only path when the query is filter-only or FTS is
+  // unavailable). Newest first; no relevance ranking.
+  const likeClauses = [...where];
+  if (f.text.length >= 2) {
+    likeClauses.push("m.body LIKE @like ESCAPE '\\'");
+    params.like = `%${f.text.replace(/[\\%_]/g, '\\$&')}%`;
+  }
+  const sql = `
+    SELECT m.* FROM messages m
+    WHERE ${likeClauses.join(' AND ')}
+    ORDER BY m.created_at DESC
+    LIMIT @cap`;
+  return db.prepare(sql).all(params);
 }
 
 // Mark every unread message in a chat (from others) as read for this viewer.

@@ -638,6 +638,29 @@ export const quickReplyUpdateSchema = z
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
 
+// ---- Finden & Fokus (0.30.0) -----------------------------------------------
+
+// Focus mode + quiet hours. Every field is optional (PATCH-style) but at least
+// one must be present. focusUntil is an absolute epoch-ms expiry (0 turns the
+// manual toggle off); quiet times are minutes-of-day (0–1439); quietDays is a
+// 7-bit mask (bit 0 = Monday). autoReply is the one-time canned DM reply.
+const minutesOfDay = z.number().int().min(0).max(1439);
+export const focusSchema = z
+  .object({
+    focusUntil: z
+      .number()
+      .int()
+      .min(0)
+      .max(Date.now() + 366 * 86400_000, 'Höchstens 1 Jahr im Voraus.')
+      .optional(),
+    quietEnabled: z.boolean().optional(),
+    quietStart: minutesOfDay.optional(),
+    quietEnd: minutesOfDay.optional(),
+    quietDays: z.number().int().min(0).max(127).optional(),
+    autoReply: z.string().trim().max(500, 'Die Auto-Antwort ist zu lang.').optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
+
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {
   const result = schema.safeParse(data);

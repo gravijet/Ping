@@ -512,6 +512,34 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_quick_replies_user
     ON quick_replies(user_id, sort);
+
+  -- 0.30.0 "Finden & Fokus": per-user notification controls. One row per user,
+  -- created lazily on first write. Quiet hours are stored as minutes-of-day in
+  -- the server's local timezone with a 7-bit day mask (bit 0 = Monday); a manual
+  -- "Fokus" toggle is an absolute epoch-ms expiry (0 = off). While silenced the
+  -- server withholds *push* (live socket delivery is untouched) and may send a
+  -- one-time auto-reply to incoming direct messages.
+  CREATE TABLE IF NOT EXISTS user_focus (
+    user_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    focus_until    INTEGER NOT NULL DEFAULT 0,
+    quiet_enabled  INTEGER NOT NULL DEFAULT 0,
+    quiet_start    INTEGER NOT NULL DEFAULT 1320, -- 22:00
+    quiet_end      INTEGER NOT NULL DEFAULT 420,  -- 07:00
+    quiet_days     INTEGER NOT NULL DEFAULT 127,  -- every day
+    auto_reply     TEXT NOT NULL DEFAULT '',
+    updated_at     INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Throttle table for focus auto-replies: at most one auto-reply per
+  -- (focused user, peer) per cool-down window, so a chatty peer can't make the
+  -- server fire dozens of canned replies.
+  CREATE TABLE IF NOT EXISTS focus_autoreplies (
+    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    peer_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sent_at   INTEGER NOT NULL,
+    PRIMARY KEY (user_id, peer_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_focus_autoreplies_sent ON focus_autoreplies(sent_at);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -749,6 +777,55 @@ function migrateStatusType() {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 migrateStatusType();
+
+// ---- Full-text search (FTS5) ----------------------------------------------
+//
+// 0.30.0 "Finden & Fokus": an external-content FTS5 index over messages.body so
+// global search is ranked (bm25) and can highlight matches (snippet()) instead
+// of a plain substring LIKE scan. The index is kept in sync entirely by triggers
+// — createMessage/editMessage/deleteMessage/purge all funnel through INSERT,
+// UPDATE and DELETE on `messages`, so nothing in the repo layer has to know the
+// index exists. FTS5 is compiled into Node's bundled SQLite, but we still probe
+// for it and degrade gracefully to the LIKE path (chatRepo.searchMessages) if a
+// build ever ships without it, so search never hard-fails.
+export let ftsAvailable = false;
+function setupFts() {
+  try {
+    const existing = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'")
+      .get();
+    if (!existing) {
+      // Probe FTS5 on a throwaway table first so a missing module can't leave a
+      // half-built schema behind.
+      db.exec('CREATE VIRTUAL TABLE IF NOT EXISTS _fts_probe USING fts5(x); DROP TABLE _fts_probe;');
+      db.exec(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+          body,
+          content='messages',
+          content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+        CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN
+          INSERT INTO messages_fts(rowid, body) VALUES (new.rowid, new.body);
+        END;
+        CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, body) VALUES('delete', old.rowid, old.body);
+        END;
+        CREATE TRIGGER messages_fts_au AFTER UPDATE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, body) VALUES('delete', old.rowid, old.body);
+          INSERT INTO messages_fts(rowid, body) VALUES (new.rowid, new.body);
+        END;
+      `);
+      // Backfill the index from the existing history in one pass.
+      db.exec('INSERT INTO messages_fts(rowid, body) SELECT rowid, body FROM messages;');
+    }
+    ftsAvailable = true;
+  } catch (e) {
+    ftsAvailable = false;
+    console.warn('[db] FTS5 nicht verfügbar, Suche nutzt LIKE-Fallback:', e.message);
+  }
+}
+setupFts();
 
 export function now() {
   return Date.now();

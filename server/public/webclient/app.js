@@ -26,6 +26,8 @@ import * as activity from './activity.js';
 import * as drafts from './drafts.js';
 import * as reminders from './reminders.js';
 import * as quickreplies from './quickreplies.js';
+import * as focus from './focus.js';
+import { openSearch } from './search.js';
 import { mentionsUser } from './mentions.js';
 import { openShortcuts, shortcutsOpen } from './shortcuts.js';
 import { safeId } from './validate.js';
@@ -168,6 +170,8 @@ async function enterApp() {
   // Reminders + quick replies sync from the server (best-effort, never blocking).
   if (flag('reminders')) reminders.sync();
   if (flag('quickReplies')) quickreplies.sync();
+  // Focus mode / quiet hours: load current state so the nav indicator is right.
+  if (flag('focusMode')) focus.sync().then(refreshFocusNav);
   refreshBadges();
   refreshActivityBadge();
   updateConnectionBanner();
@@ -234,6 +238,18 @@ function buildNavRail(me) {
         title: 'Aktivität', onClick: () => activity.openActivityPanel(openChatInShell) }, icon('bell'))
     : null;
 
+  // Global full-text search — opens the dedicated search surface.
+  const searchBtn = flag('messageSearch')
+    ? el('button', { class: 'nav-item', id: 'nav-search', 'data-label': 'Suche',
+        title: 'Suche (Strg/⌘ K)', onClick: () => openSearch(openChatInShell) }, icon('search'))
+    : null;
+
+  // Focus / quiet-hours toggle — lights up while push is being held back.
+  const focusBtn = flag('focusMode')
+    ? el('button', { class: 'nav-item', id: 'nav-focus', 'data-label': 'Fokus',
+        title: 'Fokus & Ruhezeiten', onClick: () => focus.openFocus() }, icon('moon'))
+    : null;
+
   const navAvatar = el('div', { class: 'nav-avatar', id: 'nav-avatar', title: 'Profil & Einstellungen',
     onClick: openSettings }, avatar(me, 42, { kind: 'user' }));
 
@@ -241,6 +257,8 @@ function buildNavRail(me) {
     el('div', { class: 'nav-logo', text: 'P' }),
     items,
     el('div', { class: 'nav-spacer' }),
+    searchBtn,
+    focusBtn,
     activityBtn,
     themeBtn,
     el('button', { class: 'nav-item', 'data-label': 'Einstellungen', title: 'Einstellungen',
@@ -256,6 +274,18 @@ function refreshActivityBadge() {
   btn.querySelector('.nav-badge')?.remove();
   const n = activity.unseenCount();
   if (n > 0) btn.appendChild(el('span', { class: 'nav-badge', text: n > 99 ? '99+' : String(n) }));
+}
+
+// Light up the nav-rail focus button while push is being held back, and show a
+// small badge so the state is obvious at a glance.
+function refreshFocusNav() {
+  const btn = document.getElementById('nav-focus');
+  if (!btn) return;
+  const on = flag('focusMode') && focus.isSilenced();
+  btn.classList.toggle('focus-on', on);
+  btn.querySelector('.nav-dot')?.remove();
+  if (on) btn.appendChild(el('span', { class: 'nav-dot', 'aria-hidden': 'true' }));
+  btn.title = on ? 'Fokus aktiv — Benachrichtigungen pausiert' : 'Fokus & Ruhezeiten';
 }
 
 function navItem(section, iconName, label) {
@@ -360,15 +390,15 @@ export function showSplash() {
   document.getElementById('shell')?.classList.remove('has-active');
 }
 
-function openChatInShell(chatId) {
+function openChatInShell(chatId, messageId) {
   // Opening a chat always brings the user back to the Chats section context.
   if (currentSection !== 'chats') setSection('chats');
   store.state.activeId = chatId;
   prefs.setMarkedUnread(chatId, false);
   store.clearMention(chatId);
   document.getElementById('shell')?.classList.add('has-active');
-  openChat(mainSlot, chatId, { onBack: () => { store.state.activeId = null; showSplash();
-    store.emit('chats'); } });
+  openChat(mainSlot, chatId, { focusMessageId: messageId, onBack: () => {
+    store.state.activeId = null; showSplash(); store.emit('chats'); } });
   store.emit('chats');
 }
 // Let other modules (search results, contacts, groups) jump into a chat.
@@ -400,8 +430,10 @@ export function openCommandPalette() {
   const cmds = [
     { title: 'Neuer Chat', icon: 'edit', keywords: 'new chat kontakt nachricht', run: () => newChatModal() },
     { title: 'Neue Gruppe', icon: 'group', keywords: 'group gruppe', run: () => import('./groups.js').then((m) => m.newGroupModal()) },
-    { title: 'Nachrichten durchsuchen', icon: 'search', keywords: 'search suche finden', run: () => {
+    { title: 'Nachrichten durchsuchen', icon: 'search', keywords: 'search suche finden volltext', run: () => {
+      if (flag('messageSearch')) return openSearch(openChatInShell);
       setSection('chats'); setTimeout(() => document.querySelector('.search-box input')?.focus(), 0); } },
+    flag('focusMode') ? { title: 'Fokus & Ruhezeiten', icon: 'moon', keywords: 'focus fokus ruhe dnd nicht stören still quiet hours auto-antwort', run: () => focus.openFocus() } : null,
     { title: 'Chats', icon: 'chat', keywords: 'unterhaltungen', run: () => setSection('chats') },
     { title: 'Status', icon: 'status', keywords: 'stories', run: () => setSection('status') },
     { title: 'Anrufe', icon: 'phone', keywords: 'calls anrufverlauf', run: () => setSection('calls') },
@@ -532,6 +564,8 @@ function wireSocket() {
   store.on('open-chat', (chatId) => openChatInShell(chatId));
   store.on('open-splash', () => showSplash());
   store.on('chats', refreshBadges);
+  // Keep the nav-rail focus indicator in sync with the focus/quiet-hours state.
+  store.on('focus', refreshFocusNav);
   // Rebuild the chat-list filter bar whenever the folder set changes.
   store.on('folders', () => { if (currentSection === 'chats') renderSection(); });
   // Keep the nav-rail bell badge in sync as activity is recorded.
@@ -605,6 +639,8 @@ function wireSocket() {
   socket.on('reminder-deleted', (p) => { if (p.id) reminders.onDeleted(p.id); });
   // Quick replies: kept in sync across this user's devices.
   socket.on('quick-replies-updated', (p) => quickreplies.apply(p.quickReplies));
+
+  socket.on('focus-updated', (p) => { if (p.focus) focus.apply(p.focus); });
 
   socket.on('force-logout', () => { toast('Du wurdest abgemeldet.', 'err'); doLogout(true); });
   socket.onStatus((connected) => store.emit('connection', connected));

@@ -47,6 +47,19 @@ Online-Status, Lesebestätigungen).
   oder an alle Nutzer; der „Ping-Team"-Kanal ist schreibgeschützt und gebrandet.
 - **Umfragen** – Frage + bis zu 12 Antworten in jeden Chat senden; Abstimmen
   per Tipp, Live-Ergebnisbalken, optional mit Mehrfachauswahl.
+- **Erweiterte Suche** (seit 0.30.0) – Volltextsuche über alle Chats mit
+  **SQLite FTS5**: relevanz-sortiert (bm25), mit **hervorgehobenen Treffern** und
+  Filtern direkt in der Suchzeile – `von:` (Absender), `typ:` (foto · video ·
+  datei · sprache · umfrage), `nach:` / `vor:` (Datum). Eigene Such-Ansicht mit
+  Skeletons und Sprung direkt zur Nachricht. (Fällt automatisch auf die einfache
+  Suche zurück, falls FTS5 fehlt.)
+- **Fokus & Ruhezeiten** (seit 0.30.0) – ein kontogebundener, geräteübergreifend
+  synchroner Schalter, der den Server **Push zurückhalten** lässt, während du im
+  **Fokus** bist (Schnellwahl 30 Min / 1 Std / 4 Std / *bis morgen*) oder in
+  deinem **Ruhezeit-Fenster** (Start/Ende + Wochentage). Live-Nachrichten kommen
+  weiterhin sofort – du wirst nur nicht angepingt. Optionale **Auto-Antwort** auf
+  Direktnachrichten (höchstens alle 2 Std je Kontakt). Serverseitig erzwungen,
+  gilt also für **alle** Clients inkl. Android.
 - **Erinnerungen – „Erinnere mich"** (seit 0.29.0) – lass dich an jede Nachricht
   zu einem gewählten Zeitpunkt erinnern (Vorlagen wie *in 20 Min*, *heute Abend*,
   *morgen früh*, oder eigener Termin). Die Erinnerung wird mit einem Schnappschuss

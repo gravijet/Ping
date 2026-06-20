@@ -38,6 +38,8 @@ export const DEFAULTS = {
   reminders: true,       // "Erinnere mich" — message reminders (server-fired)
   quickReplies: true,    // canned composer replies, synced across devices
   chatExport: true,      // full server-side per-chat transcript export (txt/json)
+  messageSearch: true,   // FTS5 global search view with filters + highlighted snippets
+  focusMode: true,       // focus mode / quiet hours + DM auto-reply (server-enforced)
 };
 
 function localOverrides() {
