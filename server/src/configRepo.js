@@ -46,13 +46,13 @@ export const DEFAULT_CONFIG = {
     // ── „Alles" (0.34.0) — Mega-Release, 25 Features ──────────────────────
     // A. Kommunikation & Anrufe
     threads: true,            // threaded replies / Antwortketten in any chat
-    groupCalls: false,        // mesh group voice/video (rides on the calls infra)
+    groupCalls: true,         // mesh group voice/video (rides on the calls infra)
     scheduledCalls: true,     // schedule a call; reminder fired by the sweep
     liveLocation: true,       // continuously-updating shared location (livelocation type)
-    voiceTranscription: false,// on-prem Whisper transcription of voice notes (needs WHISPER_BIN)
+    voiceTranscription: true, // on-prem Whisper transcription of voice notes (needs WHISPER_BIN)
     // B. Medien & Ausdruck
     stickers: true,           // sticker packs (sticker message type)
-    gifSearch: false,         // server-proxied GIF search (needs TENOR_KEY)
+    gifSearch: true,          // server-proxied GIF search (needs TENOR_KEY)
     photoEditor: true,        // crop/markup/draw on images before sending (client-only)
     viewOnce: true,           // view-once photos/videos
     chatThemes: true,         // per-chat wallpaper + accent, synced
@@ -65,13 +65,13 @@ export const DEFAULT_CONFIG = {
     webhooks: true,           // incoming/outgoing webhooks + slash-command bots
     miniGames: true,          // in-chat mini-games (game message type)
     // D. Sicherheit & Privatsphäre
-    e2ee: false,              // opt-in end-to-end encryption for DMs (beta)
+    e2ee: true,               // opt-in end-to-end encryption for DMs (beta)
     chatLock: true,           // per-chat lock / hidden chats
     loginApproval: true,      // approve new logins from an existing device
     defaultTtl: true,         // per-chat default disappearing-message timer
     screenshotAlerts: true,   // screenshot notice (Android native; degrades elsewhere)
     // E. Smart / KI — sparsam & privat
-    translation: false,       // inline message translation (needs LIBRETRANSLATE_URL)
+    translation: true,        // inline message translation (needs LIBRETRANSLATE_URL)
     catchUp: true,            // "Hol mich ab" unread summary (heuristic, on-device)
     smartReplies: true,       // heuristic suggested quick replies
   },

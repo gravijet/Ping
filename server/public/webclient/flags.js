@@ -48,12 +48,12 @@ export const DEFAULTS = {
   taskLists: true,       // collaborative task lists / checklists in chats
   // ── „Alles" (0.34.0) — Mega-Release ────────────────────────────────────
   threads: true,          // threaded replies / Antwortketten in any chat
-  groupCalls: false,      // mesh group voice/video calls
+  groupCalls: true,       // mesh group voice/video calls
   scheduledCalls: true,   // schedule a call with a reminder
   liveLocation: true,     // continuously-updating shared location
-  voiceTranscription: false, // on-prem transcription of voice notes
+  voiceTranscription: true, // on-prem transcription of voice notes
   stickers: true,         // sticker packs
-  gifSearch: false,       // server-proxied GIF search
+  gifSearch: true,        // server-proxied GIF search
   photoEditor: true,      // crop/markup/draw on images before sending
   viewOnce: true,         // view-once photos/videos
   chatThemes: true,       // per-chat wallpaper + accent, synced
@@ -64,12 +64,12 @@ export const DEFAULTS = {
   chatMediaHub: true,     // shared media/files/links gallery per chat
   webhooks: true,         // incoming/outgoing webhooks + bots
   miniGames: true,        // in-chat mini-games
-  e2ee: false,            // opt-in end-to-end encryption for DMs (beta)
+  e2ee: true,             // opt-in end-to-end encryption for DMs (beta)
   chatLock: true,         // per-chat lock / hidden chats
   loginApproval: true,    // approve new logins from an existing device
   defaultTtl: true,       // per-chat default disappearing-message timer
   screenshotAlerts: true, // screenshot notice
-  translation: false,     // inline message translation
+  translation: true,      // inline message translation
   catchUp: true,          // "Hol mich ab" unread summary (heuristic)
   smartReplies: true,     // heuristic suggested quick replies
 };
