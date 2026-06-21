@@ -24,6 +24,19 @@ import { sendPushToUsers } from './push.js';
 // devices at once (phone + desktop), so we keep a Set per user id.
 const sockets = new Map(); // userId -> Set<ws>
 const typing = new Map(); // chatId -> Map<userId, timeoutHandle>
+// 0.34.0 group calls: a mesh "room" per (chatId:callId) holding its participants.
+const callRooms = new Map(); // "chatId:callId" -> Set<userId>
+
+// Remove a user from every group-call room and tell those chats the new roster.
+function leaveAllCallRooms(userId) {
+  for (const [key, room] of callRooms) {
+    if (!room.has(userId)) continue;
+    room.delete(userId);
+    const [chatId, callId] = key.split(':');
+    if (room.size === 0) callRooms.delete(key);
+    broadcastToChat(chatId, 'group-call-roster', { chatId, callId, participants: [...room] });
+  }
+}
 
 export function isOnline(userId) {
   return sockets.has(userId) && sockets.get(userId).size > 0;
@@ -177,6 +190,8 @@ export function createHub(server) {
     ws.on('close', () => {
       removeSocket(user.id, ws);
       touchLastSeen(user.id);
+      // Leave any group calls if this was the user's last socket.
+      if (!isOnline(user.id)) leaveAllCallRooms(user.id);
       // Clear any typing state from this user.
       for (const [chatId, map] of typing) {
         if (map.has(user.id)) {
@@ -280,6 +295,55 @@ async function handleMessage(ws, msg) {
           data: { type: 'call-cancel', callId: payload?.callId ?? '' },
         }).catch(() => {});
       }
+      break;
+    }
+    // 0.34.0 group calls (mesh): join/leave maintain a room and broadcast its
+    // roster to the chat; offer/answer/ice are relayed to a specific peer `to`,
+    // so each pair builds its own RTCPeerConnection.
+    case 'group-call-join': {
+      const { chatId, callId, video } = payload;
+      if (!chatId || !callId || !isMember(chatId, userId)) break;
+      const key = `${chatId}:${callId}`;
+      let room = callRooms.get(key);
+      if (!room) { room = new Set(); callRooms.set(key, room); }
+      const firstJoiner = room.size === 0;
+      room.add(userId);
+      broadcastToChat(chatId, 'group-call-roster', { chatId, callId, participants: [...room] });
+      // Ring the rest of the chat when the call first opens.
+      if (firstJoiner) {
+        const from = publicUser(getUserById(userId));
+        sendPushToUsers(getMemberIds(chatId).filter((id) => id !== userId), {
+          channelId: 'ping_calls',
+          android: { priority: 'high', ttl: '45s' },
+          data: {
+            type: 'group-call', callId, chatId,
+            video: video ? '1' : '',
+            callerName: from?.displayName || from?.label || 'Gruppenanruf',
+          },
+        }).catch(() => {});
+      }
+      break;
+    }
+    case 'group-call-leave': {
+      const { chatId, callId } = payload;
+      if (!chatId || !callId) break;
+      const key = `${chatId}:${callId}`;
+      const room = callRooms.get(key);
+      if (room) {
+        room.delete(userId);
+        if (room.size === 0) callRooms.delete(key);
+        broadcastToChat(chatId, 'group-call-roster', { chatId, callId, participants: [...room] });
+      }
+      break;
+    }
+    case 'group-call-offer':
+    case 'group-call-answer':
+    case 'group-call-ice': {
+      const to = payload?.to;
+      if (typeof to !== 'string' || to === userId) break;
+      if (hasBlocked(to, userId) || hasBlocked(userId, to)) break;
+      const from = publicUser(getUserById(userId));
+      sendToUser(to, type, { ...payload, from, fromId: userId });
       break;
     }
     case 'ping':

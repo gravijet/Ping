@@ -17,6 +17,19 @@ Online-Status, Lesebestätigungen).
 
 ## Features
 
+- **„Alles" – das Mega-Update** (seit 0.34.0) – **25 neue Funktionen** auf einmal,
+  jede einzeln zuschaltbar, quer durch alle Bereiche: **Threads** (Antwortketten),
+  **Gruppenanrufe**, **geplante Anrufe**, **Live-Standort** und **on-prem
+  Sprach­transkription**; **Sticker**, **GIF-Suche**, **Einmal-ansehen**-Medien und
+  **Chat-Optik** pro Chat; **Kanban-Boards**, **Mini-Spiele**, **Gruppen-Notizen**,
+  **wiederkehrende Termine**, eine **Medien-/Datei-/Link-Galerie** und **Webhooks/
+  Bots**; **opt-in Ende-zu-Ende-Verschlüsselung (Beta)** für DMs, **Chat-Sperre**,
+  **Anmelde-Freigabe** vom Zweitgerät, ein **Standard-Selbstzerstörungs-Timer** und
+  ein **Screenshot-Hinweis**; dazu **sparsame, komplett private KI** – Übersetzung
+  (selbst-gehostetes LibreTranslate), Sprach­transkription (whisper.cpp), die
+  **„Hol mich ab"**-Zusammenfassung (rein lokal) und heuristische **Smart Replies**.
+  Kein Cloud-LLM, keine Datenabflüsse. Volle Oberfläche im **Web & Windows**, alle
+  Server-Funktionen für **Android** per OTA.
 - **Termine & Aufgaben** (seit 0.33.0) – plane **Termine** direkt im Chat (Titel,
   Datum, Ort, Beschreibung) und lass alle mit **Zusage / Vielleicht / Absage**
   antworten – mit Live-Zählung, Teilnehmerliste und einer chat­übergreifenden

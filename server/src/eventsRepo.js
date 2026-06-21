@@ -15,8 +15,8 @@ const RSVP_STATES = new Set(['going', 'maybe', 'declined']);
 const s = {
   insert: db.prepare(`
     INSERT INTO events
-      (id, message_id, chat_id, creator_id, title, description, location, start_at, remind_at, created_at)
-    VALUES (@id, @messageId, @chatId, @creatorId, @title, @description, @location, @startAt, @remindAt, @createdAt)`),
+      (id, message_id, chat_id, creator_id, title, description, location, start_at, remind_at, recur, created_at)
+    VALUES (@id, @messageId, @chatId, @creatorId, @title, @description, @location, @startAt, @remindAt, @recur, @createdAt)`),
   byId: db.prepare('SELECT * FROM events WHERE id = ?'),
   byMessage: db.prepare('SELECT * FROM events WHERE message_id = ?'),
   counts: db.prepare(
@@ -51,6 +51,13 @@ const s = {
      WHERE e.remind_at IS NOT NULL AND e.reminded_at IS NULL
        AND e.remind_at <= ? AND m.deleted_at IS NULL`),
   markReminded: db.prepare('UPDATE events SET reminded_at = ? WHERE id = ?'),
+  // 0.34.0: recurring events. A series member that has started and still carries a
+  // recur rule spawns its successor, then clears its own rule so it spawns once.
+  dueRecurring: db.prepare(`
+    SELECT e.* FROM events e
+      JOIN messages m ON m.id = e.message_id
+     WHERE e.recur != '' AND e.start_at <= ? AND m.deleted_at IS NULL`),
+  clearRecur: db.prepare("UPDATE events SET recur = '' WHERE id = ?"),
 };
 
 /** Create the event row backing a freshly-created 'event' message. */
@@ -63,6 +70,7 @@ export function createEvent({
   location = '',
   startAt,
   remindMinutes = 0,
+  recur = '',
 }) {
   const id = uid();
   const remindAt =
@@ -78,10 +86,25 @@ export function createEvent({
     startAt,
     // A reminder already in the past at creation time is pointless — drop it.
     remindAt: remindAt && remindAt > now() ? remindAt : null,
+    recur: recur || '',
     createdAt: now(),
   });
   return s.byId.get(id);
 }
+
+// Next start for a recurrence rule. Returns the same clock time, advanced by one
+// day / week / month from the previous start.
+export function nextOccurrence(startAt, recur) {
+  const d = new Date(startAt);
+  if (recur === 'daily') d.setDate(d.getDate() + 1);
+  else if (recur === 'weekly') d.setDate(d.getDate() + 7);
+  else if (recur === 'monthly') d.setMonth(d.getMonth() + 1);
+  else return null;
+  return d.getTime();
+}
+
+export const dueRecurringEvents = (ts = now()) => s.dueRecurring.all(ts);
+export const clearEventRecur = (id) => s.clearRecur.run(id);
 
 export const getEventByMessage = (messageId) => s.byMessage.get(messageId);
 
@@ -113,6 +136,7 @@ export function eventView(messageId, viewerId) {
     location: ev.location || '',
     startAt: ev.start_at,
     remindAt: ev.remind_at || null,
+    recur: ev.recur || '',
     creatorId: ev.creator_id,
     counts: tally,
     attendees: s.attendees.all(ev.id),

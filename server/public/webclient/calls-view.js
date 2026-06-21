@@ -7,13 +7,18 @@ import * as store from './store.js';
 import { el, clear, icon, avatar, chatTime, toast, confirmModal } from './ui.js';
 import { startCall } from './calls.js';
 import { startDirect } from './contacts.js';
+import { flag } from './flags.js';
 
-export async function renderCallsPane(head, body) {
+export async function renderCallsPane(head, body, openChat) {
   clear(head).append(
     el('div', { class: 'pane-title', text: 'Anrufe' }),
     el('div', { class: 'actions' }, [
+      flag('scheduledCalls')
+        ? el('button', { class: 'iconbtn', title: 'Geplante Anrufe',
+            onClick: () => import('./scheduledcalls.js').then((m) => m.openUpcomingCalls(openChat)) }, icon('calendar'))
+        : null,
       el('button', { class: 'iconbtn', title: 'Verlauf leeren', onClick: () => clearLog(body) }, icon('trash')),
-    ]),
+    ].filter(Boolean)),
   );
   clear(body).append(el('div', { class: 'pane-empty', text: 'Lade …' }));
   await load(body);

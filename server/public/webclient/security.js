@@ -43,6 +43,27 @@ export function renderSecurityTab(c, rerender) {
         el('div', { class: 'hint', text: 'Status nicht verfügbar.' })); });
   }
 
+  // ---- 0.34.0: account-level default disappearing timer -------------------
+  if (flag('defaultTtl')) {
+    c.append(el('div', { class: 'list-section', text: 'Standard-Selbstzerstörung' }));
+    const ttlHost = el('div');
+    c.append(ttlHost);
+    ttlHost.append(setRow('clock', 'Standard-Timer für neue Chats', {
+      sub: 'Neue Direktchats starten mit diesem Verfalls-Timer.',
+      onClick: () => defaultTtlModal(),
+    }));
+  }
+
+  // ---- 0.34.0: login approvals from this device ---------------------------
+  if (flag('loginApproval')) {
+    c.append(el('div', { class: 'list-section', text: 'Anmelde-Freigaben' }));
+    const apprHost = el('div', { class: 'sec-approvals' });
+    c.append(apprHost);
+    apprHost.append(el('div', { class: 'sec-loading hint', text: 'Lade …' }));
+    api.get('/me/login-approvals').then(({ approvals }) => paintApprovals(apprHost, approvals))
+      .catch(() => { clear(apprHost); apprHost.append(el('div', { class: 'hint', text: 'Keine offenen Freigaben.' })); });
+  }
+
   // ---- Sessions -----------------------------------------------------------
   c.append(el('div', { class: 'list-section', text: 'Sitzungen' }));
   c.append(setRow('logout', 'Überall abmelden', {
@@ -71,6 +92,55 @@ export function renderSecurityTab(c, rerender) {
   api.get('/me/security-log').then(({ events }) => paintLog(logHost, events))
     .catch(() => { clear(logHost); logHost.append(
       el('div', { class: 'hint', text: 'Protokoll nicht verfügbar.' })); });
+}
+
+// ---- 0.34.0: account default disappearing timer ---------------------------
+const TTL_OPTIONS = [[0, 'Aus'], [3600, '1 Stunde'], [86400, '24 Stunden'], [604800, '7 Tage'], [7776000, '90 Tage']];
+async function defaultTtlModal() {
+  let seconds = 0;
+  try { ({ seconds } = await api.get('/me/default-ttl')); } catch { /* default off */ }
+  const sel = el('select', { class: 'input' },
+    TTL_OPTIONS.map(([v, l]) => el('option', { value: String(v), selected: v === seconds ? 'selected' : null }, l)));
+  const m = modal({
+    title: 'Standard-Timer',
+    body: (b) => b.append(
+      el('p', { class: 'hint', text: 'Neue Direktchats starten automatisch mit diesem Timer für verschwindende Nachrichten. Bestehende Chats bleiben unverändert.' }),
+      el('div', { class: 'field' }, [el('label', { text: 'Timer' }), sel]),
+    ),
+    foot: [el('button', { class: 'btn primary', onClick: save }, 'Speichern')],
+  });
+  async function save() {
+    try { await api.put('/me/default-ttl', { seconds: Number(sel.value) }); toast('Gespeichert.', 'ok'); m.close(); }
+    catch (e) { toast(e.message || 'Fehlgeschlagen.', 'err'); }
+  }
+}
+
+// ---- 0.34.0: pending login approvals --------------------------------------
+function paintApprovals(host, approvals) {
+  clear(host);
+  if (!approvals?.length) {
+    host.append(el('div', { class: 'hint', text: 'Keine offenen Anmelde-Anfragen.' }));
+    return;
+  }
+  for (const a of approvals) {
+    const row = el('div', { class: 'appr-row' }, [
+      el('div', { class: 'appr-meta' }, [
+        el('div', { class: 'appr-dev', text: a.device || 'Unbekanntes Gerät' }),
+        el('div', { class: 'appr-sub', text: `Code ${a.code} · ${a.ip || ''}` }),
+      ]),
+      el('div', { class: 'appr-actions' }, [
+        el('button', { class: 'btn ghost sm', onClick: () => decide(a.id, false) }, 'Ablehnen'),
+        el('button', { class: 'btn primary sm', onClick: () => decide(a.id, true) }, 'Freigeben'),
+      ]),
+    ]);
+    host.append(row);
+    async function decide(id, approve) {
+      try { await api.post(`/me/login-approvals/${id}/decision`, { approve }); row.remove();
+        toast(approve ? 'Anmeldung freigegeben.' : 'Abgelehnt.', 'ok');
+        if (!host.querySelector('.appr-row')) host.append(el('div', { class: 'hint', text: 'Keine offenen Anmelde-Anfragen.' })); }
+      catch (e) { toast(e.message || 'Fehlgeschlagen.', 'err'); }
+    }
+  }
 }
 
 // ---- Username --------------------------------------------------------------

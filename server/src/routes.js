@@ -108,6 +108,30 @@ import {
   twofaDisableSchema,
   twofaRegenerateSchema,
   login2faSchema,
+  threadReplySchema,
+  liveLocationStartSchema,
+  liveLocationUpdateSchema,
+  scheduledCallSchema,
+  boardCreateSchema,
+  boardColumnSchema,
+  boardCardSchema,
+  boardCardMoveSchema,
+  boardCardEditSchema,
+  gameCreateSchema,
+  gameMoveSchema,
+  stickerSendSchema,
+  stickerPackCreateSchema,
+  stickerAddSchema,
+  chatAppearanceSchema,
+  noteCreateSchema,
+  noteUpdateSchema,
+  webhookCreateSchema,
+  webhookPostSchema,
+  e2eeIdentitySchema,
+  e2eeToggleSchema,
+  translateSchema,
+  defaultTtlSchema,
+  approvalDecisionSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
@@ -215,6 +239,13 @@ import {
   toggleReaction,
   getHistory,
   messageView,
+  threadReplies,
+  openViewOnce,
+  chatMedia,
+  setMemberChatLock,
+  getMemberChatLockState,
+  getUserDefaultTtl,
+  setUserDefaultTtl,
   markChatRead,
   messageReceipts,
   detachCreatedChats,
@@ -250,7 +281,9 @@ import {
   readUpload,
   isInlineMime,
   kindForMime,
+  uploadFilePath,
 } from './uploads.js';
+import { queueTranscription } from './transcribe.js';
 import { detectImageMime as sniffImage } from './avatars.js';
 import {
   createStatus,
@@ -337,6 +370,61 @@ import {
   setTaskItemDone,
   taskListView,
 } from './tasksRepo.js';
+import {
+  setLiveLocation,
+  updateLiveLocation,
+  stopLiveLocation,
+  liveLocationView,
+} from './liveLocationRepo.js';
+import {
+  createScheduledCall,
+  getScheduledCall,
+  deleteScheduledCall,
+  scheduledCallView,
+  upcomingCallsForUser,
+} from './scheduledCallsRepo.js';
+import {
+  createBoard,
+  addBoardColumn,
+  addBoardCard,
+  moveBoardCard,
+  editBoardCard,
+  deleteBoardCard,
+  boardView,
+} from './boardsRepo.js';
+import { createGame, applyMove, gameView } from './gamesRepo.js';
+import { createPack, addSticker, getSticker, ownsPack, packsForUser } from './stickersRepo.js';
+import { setChatAppearance, getChatAppearance } from './chatAppearanceRepo.js';
+import {
+  createNote,
+  getNote,
+  updateNote,
+  deleteNote,
+  listNotes,
+  viewNote,
+} from './notesRepo.js';
+import {
+  createWebhook,
+  getWebhookByToken,
+  touchWebhook,
+  revokeWebhook,
+  getWebhook,
+  listWebhooks,
+} from './webhooksRepo.js';
+import {
+  publishIdentity,
+  getIdentity,
+  setSessionEnabled,
+  sessionView,
+} from './e2eeRepo.js';
+import {
+  createApproval,
+  getApproval,
+  listPendingApprovals,
+  decideApproval,
+  deleteApproval,
+} from './loginApprovalsRepo.js';
+import { translateText, translationEnabled } from './translate.js';
 import { recordAudit, listAudit } from './auditRepo.js';
 import {
   createApiKey,
@@ -413,6 +501,8 @@ function broadcastSelf(user) {
 // A short, notification-friendly preview of a message (no message body leaks
 // for media — just an icon + label, matching the in-app preview style).
 function messagePreview(msg) {
+  if (msg.enc) return '🔒 Verschlüsselte Nachricht';
+  if (msg.view_once) return '👁️ Einmal ansehen';
   const text = (msg.body || '').trim();
   if (text) return text.length > 140 ? `${text.slice(0, 140)}…` : text;
   const att = msg.attachment
@@ -439,6 +529,14 @@ function messagePreview(msg) {
       return '📅 Termin';
     case 'tasklist':
       return '✅ Aufgabenliste';
+    case 'sticker':
+      return '🩷 Sticker';
+    case 'board':
+      return '📋 Board';
+    case 'game':
+      return '🎮 Spiel';
+    case 'livelocation':
+      return '📍 Live-Standort';
     default:
       return 'Neue Nachricht';
   }
@@ -823,6 +921,72 @@ router.post(
       recordSecurityEvent(userId, 'recovery_used', `${unusedRecoveryCount(userId)} übrig`, req);
     }
     res.json({ token: signToken(user), user: privateUser(user), twoFactor: true });
+  })
+);
+
+// ---- 0.34.0 "Alles": approve a new login from a trusted device ------------
+// A new device proves the password, then waits for one of the account's existing
+// signed-in devices to approve it before any token is issued. Additive: the
+// normal /auth/login path is untouched.
+
+router.post(
+  '/auth/login/request-approval',
+  h(async (req, res) => {
+    const { login, password } = parse(loginSchema, req.body);
+    const normalized = normalizePhone(login);
+    const user = (normalized && getUserByPhone(normalized)) || getUserByEmail(login);
+    const ok = user
+      ? await verifyPassword(password, user.password_hash)
+      : await verifyPassword(password, DUMMY_HASH);
+    if (!user || !ok) {
+      return res.status(401).json({ error: 'Nummer/E-Mail oder Passwort stimmt nicht.' });
+    }
+    if (user.disabled) return res.status(403).json({ error: 'Dieses Konto wurde gesperrt.' });
+    const device = (req.get('user-agent') || '').slice(0, 200);
+    const ip = (req.get('x-forwarded-for') || req.socket.remoteAddress || '').toString();
+    const approval = createApproval({ userId: user.id, device, ip });
+    // Nudge the account's existing devices to confirm.
+    sendToUser(user.id, 'login-request', {
+      id: approval.id, code: approval.code, device, ip, expiresAt: approval.expiresAt,
+    });
+    res.status(201).json({ approvalId: approval.id, code: approval.code, expiresAt: approval.expiresAt });
+  })
+);
+
+// The waiting device polls here; once approved it receives its session token.
+router.get(
+  '/auth/login/approval/:id',
+  h(async (req, res) => {
+    const row = getApproval(req.params.id);
+    if (!row) return res.status(404).json({ status: 'expired' });
+    if (row.status === 'pending') return res.json({ status: 'pending' });
+    if (row.status === 'denied') {
+      deleteApproval(row.id);
+      return res.json({ status: 'denied' });
+    }
+    // approved → mint the token now, then consume the row.
+    const user = getUserById(row.user_id);
+    deleteApproval(row.id);
+    if (!user || user.disabled) return res.status(403).json({ status: 'denied' });
+    recordSecurityEvent(user.id, 'login', 'Geräte-Freigabe', req);
+    res.json({ status: 'approved', token: signToken(user), user: privateUser(user) });
+  })
+);
+
+router.get(
+  '/me/login-approvals',
+  requireAuth,
+  h(async (req, res) => res.json({ approvals: listPendingApprovals(req.user.id) }))
+);
+
+router.post(
+  '/me/login-approvals/:id/decision',
+  requireAuth,
+  h(async (req, res) => {
+    const { approve } = parse(approvalDecisionSchema, req.body);
+    const status = decideApproval(req.params.id, req.user.id, approve);
+    if (!status) return res.status(404).json({ error: 'Diese Anfrage gibt es nicht mehr.' });
+    res.json({ status });
   })
 );
 
@@ -1326,6 +1490,67 @@ function messageExpiry(chat) {
   return seconds > 0 ? Date.now() + seconds * 1000 : null;
 }
 
+// Is a server feature flag on right now? (Reads the merged remote config.)
+const flagOn = (name) => !!getRemoteConfig().flags?.[name];
+
+// 0.34.0 "Hol mich ab": a purely local, extractive summary of recent messages —
+// no LLM, nothing leaves the host. Counts senders, pulls the most frequent
+// content words, and keeps a few representative lines.
+const STOPWORDS = new Set(
+  ('der die das und oder aber ich du er sie es wir ihr ist sind war ein eine einen dem den '
+   + 'mit für auf von zu im in am an als auch nicht nur noch schon mal so wie was wer wo wenn '
+   + 'dann doch ja nein ok okay the and you that this for are was with have just like').split(' ')
+);
+function summariseMessages(rows) {
+  const texts = rows.filter((m) => m.type === 'text' && (m.body || '').trim());
+  const freq = new Map();
+  for (const m of texts) {
+    for (const w of m.body.toLowerCase().match(/[\p{L}]{4,}/gu) || []) {
+      if (STOPWORDS.has(w)) continue;
+      freq.set(w, (freq.get(w) || 0) + 1);
+    }
+  }
+  const keywords = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([w]) => w);
+  const senders = new Set(rows.map((m) => m.senderId)).size;
+  // A few representative lines: the most recent non-trivial messages.
+  const snippets = texts.slice(-3).map((m) => (m.body.length > 120 ? m.body.slice(0, 119) + '…' : m.body));
+  const text = rows.length
+    ? `${rows.length} neue Nachricht${rows.length === 1 ? '' : 'en'} von ${senders} Person${senders === 1 ? '' : 'en'}`
+      + (keywords.length ? ` · Themen: ${keywords.slice(0, 4).join(', ')}` : '')
+    : 'Nichts Neues.';
+  return { count: rows.length, senders, keywords, snippets, text };
+}
+
+// Heuristic smart replies for the last inbound text — rule-based, no model.
+function smartReplies(text) {
+  const t = (text || '').toLowerCase();
+  if (!t.trim()) return ['👍', 'Alles klar!', 'Melde mich gleich'];
+  if (/\?$|\boder\b|wann|wo |wie |kannst|könntest|magst|willst/.test(t)) {
+    return ['Ja, klar!', 'Eher nicht', 'Lass mich kurz überlegen'];
+  }
+  if (/danke|super|toll|perfekt|klasse|nice/.test(t)) return ['Gerne! 😊', 'Freut mich!', '👍'];
+  if (/sorry|entschuldigung|tut mir leid/.test(t)) return ['Kein Problem!', 'Passt schon', 'Alles gut 🙂'];
+  if (/(hallo|hi|hey|moin|servus)\b/.test(t)) return ['Hey! 👋', 'Hallo!', 'Na, alles gut?'];
+  return ['👍', 'Klingt gut!', 'Okay, danke!'];
+}
+
+// 0.34.0: hand a freshly-sent voice note to the on-prem transcription worker. The
+// transcript lands in voice_transcripts and rides along in messageView.transcript;
+// when it's ready we re-broadcast the message so the chip fills in. No-op (silent)
+// when Whisper isn't configured. Audio never leaves the host.
+function queueVoiceTranscription(msg, att) {
+  const uploadId = (att.url || '').split('/').pop();
+  if (!uploadId) return;
+  const audioPath = uploadFilePath(uploadId);
+  queueTranscription(msg.id, audioPath, () => {
+    const fresh = getMessage(msg.id);
+    if (!fresh) return;
+    for (const memberId of getMemberIds(msg.chat_id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(fresh, memberId) });
+    }
+  });
+}
+
 router.post(
   '/chats/:id/messages',
   requireAuth,
@@ -1344,7 +1569,7 @@ router.post(
         .status(403)
         .json({ error: 'In diesem Kanal können nur die Betreiber posten.' });
     }
-    const { body, type = 'text', attachment, replyTo: replyRaw } = parse(
+    const { body, type = 'text', attachment, replyTo: replyRaw, viewOnce, enc } = parse(
       messageSendSchema,
       req.body || {}
     );
@@ -1382,11 +1607,18 @@ router.post(
       chatId: req.chat.id,
       senderId: req.user.id,
       type,
-      body: (body || '').trim(),
+      // E2EE bodies are opaque ciphertext — don't trim/normalise them.
+      body: enc ? (body || '') : (body || '').trim(),
       attachment: att,
       replyTo,
       expiresAt: messageExpiry(req.chat),
+      viewOnce: !!viewOnce && (type === 'image' || type === 'video'),
+      enc: !!enc,
     });
+    // 0.34.0: queue on-prem transcription for voice notes (no-op if unconfigured).
+    if (type === 'voice' && att?.url && flagOn('voiceTranscription')) {
+      queueVoiceTranscription(msg, att);
+    }
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
     }
@@ -1853,6 +2085,7 @@ router.post(
       location: data.location,
       startAt: data.startAt,
       remindMinutes: data.remindMinutes,
+      recur: data.recur,
     });
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
@@ -1981,6 +2214,821 @@ router.post(
   })
 );
 
+// ---- 0.34.0 "Alles": threads (Antwortketten) ------------------------------
+
+// List the replies in a message's thread (oldest-first).
+router.get(
+  '/chats/:id/messages/:msgId/thread',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const root = getMessage(req.params.msgId);
+    if (!root || root.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    res.json({
+      root: messageView(root, req.user.id),
+      messages: threadReplies(root.id, req.user.id),
+    });
+  })
+);
+
+// Post a reply into a message's thread. The reply stays out of the main timeline
+// (its thread_root is set); the root's "X Antworten" count ticks up live.
+router.post(
+  '/chats/:id/messages/:msgId/thread',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const root = getMessage(req.params.msgId);
+    if (!root || root.chat_id !== req.chat.id || root.deleted_at || root.thread_root) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const { body } = parse(threadReplySchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'text',
+      body,
+      threadRoot: root.id,
+      expiresAt: messageExpiry(req.chat),
+    });
+    const freshRoot = getMessage(root.id);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      // The reply (for an open thread panel) + the root's updated reply count.
+      sendToUser(memberId, 'thread-reply', {
+        rootId: root.id,
+        message: messageView(msg, memberId),
+      });
+      sendToUser(memberId, 'message-updated', { message: messageView(freshRoot, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// ---- 0.34.0 "Alles": live location (Live-Standort) ------------------------
+
+// Start sharing a continuously-updating location. Posts a 'livelocation' card;
+// the position then moves via .../update and is broadcast as 'location-update'.
+router.post(
+  '/chats/:id/livelocation',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const d = parse(liveLocationStartSchema, req.body);
+    setLiveLocation({
+      userId: req.user.id,
+      chatId: req.chat.id,
+      lat: d.lat,
+      lng: d.lng,
+      accuracy: d.accuracy ?? null,
+      heading: d.heading ?? null,
+      durationMs: d.durationMinutes * 60_000,
+    });
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'livelocation',
+      body: '',
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Push a new position for an active share.
+router.post(
+  '/chats/:id/livelocation/update',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const d = parse(liveLocationUpdateSchema, req.body);
+    const row = updateLiveLocation({
+      userId: req.user.id,
+      chatId: req.chat.id,
+      lat: d.lat,
+      lng: d.lng,
+      accuracy: d.accuracy ?? null,
+      heading: d.heading ?? null,
+    });
+    if (!row) return res.status(404).json({ error: 'Kein aktiver Standort.' });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'location-update', {
+        chatId: req.chat.id,
+        userId: req.user.id,
+        active: true,
+        lat: row.lat,
+        lng: row.lng,
+        accuracy: row.accuracy,
+        heading: row.heading,
+        updatedAt: row.updated_at,
+        expiresAt: row.expires_at,
+      });
+    }
+    res.json({ ok: true });
+  })
+);
+
+// Stop an active share.
+router.post(
+  '/chats/:id/livelocation/stop',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    stopLiveLocation(req.user.id, req.chat.id);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'location-update', {
+        chatId: req.chat.id,
+        userId: req.user.id,
+        active: false,
+      });
+    }
+    res.json({ ok: true });
+  })
+);
+
+// ---- 0.34.0 "Alles": scheduled calls (Geplante Anrufe) --------------------
+
+// Schedule a call with an optional pre-call reminder (fired by the sweep).
+router.post(
+  '/chats/:id/scheduled-calls',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const d = parse(scheduledCallSchema, req.body);
+    const row = createScheduledCall({
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title: d.title,
+      video: d.video,
+      startAt: d.startAt,
+      remindMinutes: d.remindMinutes,
+    });
+    const view = scheduledCallView(row);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'scheduled-call', { call: view });
+    }
+    res.status(201).json({ call: view });
+  })
+);
+
+// Cancel a scheduled call (creator only).
+router.delete(
+  '/chats/:id/scheduled-calls/:cid',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const row = getScheduledCall(req.params.cid);
+    if (!row || row.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diesen Anruf gibt es nicht.' });
+    }
+    if (row.creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'Nur der Ersteller kann absagen.' });
+    }
+    deleteScheduledCall(row.id);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'scheduled-call-cancel', { id: row.id, chatId: req.chat.id });
+    }
+    res.json({ ok: true });
+  })
+);
+
+// Cross-chat list of upcoming scheduled calls.
+router.get(
+  '/me/scheduled-calls',
+  requireAuth,
+  h(async (req, res) => {
+    const calls = upcomingCallsForUser(req.user.id);
+    const titleCache = new Map();
+    const titleOf = (cid) => {
+      if (titleCache.has(cid)) return titleCache.get(cid);
+      const c = getChat(cid);
+      const t = c ? chatView(c, req.user.id).title || '' : '';
+      titleCache.set(cid, t);
+      return t;
+    };
+    res.json({ calls: calls.map((c) => ({ ...c, chatTitle: titleOf(c.chatId) })) });
+  })
+);
+
+// ---- 0.34.0 "Alles": kanban boards ----------------------------------------
+
+router.post(
+  '/chats/:id/boards',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const d = parse(boardCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'board',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createBoard({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title: d.title,
+      ...(d.columns ? { columns: d.columns } : {}),
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Shared helper: re-broadcast a board message after a mutation.
+function broadcastBoard(req, msg) {
+  for (const memberId of getMemberIds(req.chat.id)) {
+    sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+  }
+}
+function boardMsgOr404(req, res) {
+  const msg = getMessage(req.params.msgId);
+  if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'board') {
+    res.status(404).json({ error: 'Dieses Board gibt es nicht.' });
+    return null;
+  }
+  return msg;
+}
+
+router.post(
+  '/chats/:id/messages/:msgId/board/columns',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = boardMsgOr404(req, res);
+    if (!msg) return;
+    const { title } = parse(boardColumnSchema, req.body);
+    if (!addBoardColumn(msg.id, title)) {
+      return res.status(409).json({ error: 'Zu viele Spalten.' });
+    }
+    broadcastBoard(req, msg);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+router.post(
+  '/chats/:id/messages/:msgId/board/cards',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = boardMsgOr404(req, res);
+    if (!msg) return;
+    const { columnId, text } = parse(boardCardSchema, req.body);
+    if (!addBoardCard(msg.id, columnId, text, req.user.id)) {
+      return res.status(400).json({ error: 'Karte konnte nicht angelegt werden.' });
+    }
+    broadcastBoard(req, msg);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+router.post(
+  '/chats/:id/messages/:msgId/board/cards/:cardId/move',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = boardMsgOr404(req, res);
+    if (!msg) return;
+    const { columnId, sort } = parse(boardCardMoveSchema, req.body);
+    if (!moveBoardCard(msg.id, req.params.cardId, columnId, sort)) {
+      return res.status(400).json({ error: 'Karte konnte nicht verschoben werden.' });
+    }
+    broadcastBoard(req, msg);
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+router.post(
+  '/chats/:id/messages/:msgId/board/cards/:cardId/edit',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = boardMsgOr404(req, res);
+    if (!msg) return;
+    const { text } = parse(boardCardEditSchema, req.body);
+    if (!editBoardCard(msg.id, req.params.cardId, text)) {
+      return res.status(404).json({ error: 'Diese Karte gibt es nicht.' });
+    }
+    broadcastBoard(req, msg);
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+router.delete(
+  '/chats/:id/messages/:msgId/board/cards/:cardId',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = boardMsgOr404(req, res);
+    if (!msg) return;
+    if (!deleteBoardCard(msg.id, req.params.cardId)) {
+      return res.status(404).json({ error: 'Diese Karte gibt es nicht.' });
+    }
+    broadcastBoard(req, msg);
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// ---- 0.34.0 "Alles": in-chat mini-games -----------------------------------
+
+router.post(
+  '/chats/:id/games',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { kind } = parse(gameCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'game',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createGame({ messageId: msg.id, chatId: req.chat.id, kind, starterId: req.user.id });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+router.post(
+  '/chats/:id/messages/:msgId/game/move',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'game') {
+      return res.status(404).json({ error: 'Dieses Spiel gibt es nicht.' });
+    }
+    const { cell } = parse(gameMoveSchema, req.body);
+    const result = applyMove(msg.id, req.user.id, cell);
+    if (!result.ok) {
+      const codes = { not_your_turn: 'Du bist nicht am Zug.', over: 'Das Spiel ist vorbei.', full: 'Das Spiel ist voll.', bad_move: 'Ungültiger Zug.' };
+      return res.status(400).json({ error: codes[result.error] || 'Ungültiger Zug.' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// ---- 0.34.0 "Alles": stickers ---------------------------------------------
+
+router.get(
+  '/stickers/packs',
+  requireAuth,
+  h(async (req, res) => res.json({ packs: packsForUser(req.user.id) }))
+);
+
+router.post(
+  '/stickers/packs',
+  requireAuth,
+  h(async (req, res) => {
+    const { name } = parse(stickerPackCreateSchema, req.body);
+    const pack = createPack({ ownerId: req.user.id, name });
+    res.status(201).json({ pack: { id: pack.id, name: pack.name, stickers: [] } });
+  })
+);
+
+router.post(
+  '/stickers/packs/:packId/stickers',
+  requireAuth,
+  h(async (req, res) => {
+    if (!ownsPack(req.params.packId, req.user.id)) {
+      return res.status(403).json({ error: 'Das ist nicht dein Sticker-Paket.' });
+    }
+    const { uploadId, emoji } = parse(stickerAddSchema, req.body);
+    if (!getUploadMeta(uploadId)) {
+      return res.status(400).json({ error: 'Upload nicht gefunden.' });
+    }
+    const sticker = addSticker({ packId: req.params.packId, uploadId, emoji });
+    res.status(201).json({ sticker: { id: sticker.id, url: `/api/uploads/${uploadId}`, emoji } });
+  })
+);
+
+router.post(
+  '/chats/:id/stickers',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    const { stickerId, replyTo } = parse(stickerSendSchema, req.body);
+    const sticker = getSticker(stickerId);
+    if (!sticker) return res.status(404).json({ error: 'Diesen Sticker gibt es nicht.' });
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'sticker',
+      body: '',
+      attachment: { kind: 'sticker', url: `/api/uploads/${sticker.upload_id}`, stickerId, emoji: sticker.emoji || '' },
+      replyTo: replyTo || null,
+      expiresAt: messageExpiry(req.chat),
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// ---- 0.34.0 "Alles": view-once media --------------------------------------
+
+// Open a view-once photo/video. The first recipient to open it gets the bytes
+// once; afterwards messageView withholds the attachment from everyone.
+router.post(
+  '/chats/:id/messages/:msgId/view',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    const result = openViewOnce(msg.id, req.user.id);
+    if (!result.ok) {
+      return res.status(410).json({ error: 'Dieser Inhalt wurde bereits angesehen.' });
+    }
+    // Tell the chat it's been seen so the sender's bubble flips to "angesehen".
+    const fresh = getMessage(msg.id);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(fresh, memberId) });
+    }
+    res.json({ attachment: result.attachment });
+  })
+);
+
+// ---- 0.34.0 "Alles": per-chat appearance (wallpaper + accent) -------------
+
+router.get(
+  '/chats/:id/appearance',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => res.json({ appearance: getChatAppearance(req.user.id, req.chat.id) }))
+);
+
+router.put(
+  '/chats/:id/appearance',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const d = parse(chatAppearanceSchema, req.body);
+    res.json({ appearance: setChatAppearance(req.user.id, req.chat.id, d) });
+  })
+);
+
+// ---- 0.34.0 "Alles": shared media / files / links hub ---------------------
+
+router.get(
+  '/chats/:id/media',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const kind = ['image', 'video', 'file', 'link'].includes(req.query.kind) ? req.query.kind : 'all';
+    res.json({ kind, messages: chatMedia(req.chat.id, kind, req.user.id) });
+  })
+);
+
+// ---- 0.34.0 "Alles": collaborative group notes ----------------------------
+
+router.get(
+  '/chats/:id/notes',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => res.json({ notes: listNotes(req.chat.id) }))
+);
+
+router.post(
+  '/chats/:id/notes',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const { title, body } = parse(noteCreateSchema, req.body);
+    const note = viewNote(createNote({ chatId: req.chat.id, title, body, userId: req.user.id }));
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'note-updated', { chatId: req.chat.id, note });
+    }
+    res.status(201).json({ note });
+  })
+);
+
+router.put(
+  '/chats/:id/notes/:noteId',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const existing = getNote(req.params.noteId);
+    if (!existing || existing.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Notiz gibt es nicht.' });
+    }
+    const d = parse(noteUpdateSchema, req.body);
+    const note = viewNote(updateNote(req.params.noteId, { ...d, userId: req.user.id }));
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'note-updated', { chatId: req.chat.id, note });
+    }
+    res.json({ note });
+  })
+);
+
+router.delete(
+  '/chats/:id/notes/:noteId',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const existing = getNote(req.params.noteId);
+    if (!existing || existing.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Notiz gibt es nicht.' });
+    }
+    deleteNote(req.params.noteId);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'note-deleted', { chatId: req.chat.id, noteId: req.params.noteId });
+    }
+    res.json({ ok: true });
+  })
+);
+
+// ---- 0.34.0 "Alles": webhooks / bots --------------------------------------
+
+router.get(
+  '/chats/:id/webhooks',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => res.json({ webhooks: listWebhooks(req.chat.id) }))
+);
+
+router.post(
+  '/chats/:id/webhooks',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const d = parse(webhookCreateSchema, req.body);
+    // The plaintext token is returned exactly once here.
+    const created = createWebhook({ chatId: req.chat.id, ownerId: req.user.id, ...d });
+    res.status(201).json({ webhook: created });
+  })
+);
+
+router.delete(
+  '/chats/:id/webhooks/:hookId',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const w = getWebhook(req.params.hookId);
+    if (!w || w.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diesen Webhook gibt es nicht.' });
+    }
+    revokeWebhook(w.id);
+    res.json({ ok: true });
+  })
+);
+
+// Incoming webhook (no auth — the token in the path IS the credential). An
+// external service POSTs here to fan a message into the chat.
+router.post(
+  '/hooks/:token',
+  h(async (req, res) => {
+    const w = getWebhookByToken(req.params.token);
+    if (!w) return res.status(404).json({ error: 'Unknown webhook.' });
+    const { text, name } = parse(webhookPostSchema, req.body);
+    const chat = getChat(w.chat_id);
+    if (!chat) return res.status(404).json({ error: 'Chat gone.' });
+    touchWebhook(w.id);
+    const label = (name || w.name || 'Bot').slice(0, 80);
+    const msg = createMessage({
+      chatId: chat.id,
+      senderId: null,
+      type: 'text',
+      body: `${label}: ${text}`,
+    });
+    for (const memberId of getMemberIds(chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(chat, msg, null);
+    res.status(201).json({ ok: true });
+  })
+);
+
+// ---- 0.34.0 "Alles": opt-in E2EE for DMs ----------------------------------
+
+router.put(
+  '/me/e2ee/identity',
+  requireAuth,
+  h(async (req, res) => {
+    const { publicKey } = parse(e2eeIdentitySchema, req.body);
+    res.json({ identity: publishIdentity(req.user.id, publicKey) });
+  })
+);
+
+router.get(
+  '/users/:id/e2ee/identity',
+  requireAuth,
+  h(async (req, res) => {
+    const identity = getIdentity(req.params.id);
+    if (!identity) return res.status(404).json({ error: 'Kein Schlüssel hinterlegt.' });
+    res.json({ identity });
+  })
+);
+
+router.get(
+  '/chats/:id/e2ee',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const peerId = req.chat.type === 'direct'
+      ? getMemberIds(req.chat.id).find((m) => m !== req.user.id)
+      : null;
+    res.json({
+      session: sessionView(req.chat.id),
+      peer: peerId ? getIdentity(peerId) : null,
+    });
+  })
+);
+
+router.post(
+  '/chats/:id/e2ee',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.type !== 'direct') {
+      return res.status(400).json({ error: 'E2EE gibt es nur in Direktchats.' });
+    }
+    const { enabled } = parse(e2eeToggleSchema, req.body);
+    setSessionEnabled(req.chat.id, enabled, req.user.id);
+    const session = sessionView(req.chat.id);
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'e2ee', { chatId: req.chat.id, session });
+    }
+    res.json({ session });
+  })
+);
+
+// ---- 0.34.0 "Alles": per-chat lock / hide (personal) ----------------------
+
+router.put(
+  '/chats/:id/lock',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const state = setMemberChatLock(req.chat.id, req.user.id, {
+      locked: typeof req.body?.locked === 'boolean' ? req.body.locked : undefined,
+      hidden: typeof req.body?.hidden === 'boolean' ? req.body.hidden : undefined,
+    });
+    if (!state) return res.status(404).json({ error: 'Chat nicht gefunden.' });
+    res.json({ lock: state });
+  })
+);
+
+router.get(
+  '/chats/:id/lock',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => res.json({ lock: getMemberChatLockState(req.chat.id, req.user.id) }))
+);
+
+// ---- 0.34.0 "Alles": account-level default disappearing timer -------------
+
+router.get(
+  '/me/default-ttl',
+  requireAuth,
+  h(async (req, res) => res.json({ seconds: getUserDefaultTtl(req.user.id) }))
+);
+
+router.put(
+  '/me/default-ttl',
+  requireAuth,
+  h(async (req, res) => {
+    const { seconds } = parse(defaultTtlSchema, req.body);
+    setUserDefaultTtl(req.user.id, seconds);
+    res.json({ seconds });
+  })
+);
+
+// ---- 0.34.0 "Alles": screenshot notice ------------------------------------
+
+// The app reports that the viewer screenshotted the chat; we drop a system
+// message so the other side knows. A privacy signal, best-effort.
+router.post(
+  '/chats/:id/screenshot-notice',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: null,
+      type: 'system',
+      body: `📸 ${req.user.display_name} hat einen Screenshot gemacht`,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    res.status(201).json({ ok: true });
+  })
+);
+
+// ---- 0.34.0 "Alles": inline translation (self-hosted, private) ------------
+
+router.get(
+  '/translate/available',
+  requireAuth,
+  h(async (req, res) => res.json({ available: translationEnabled() }))
+);
+
+router.post(
+  '/translate',
+  requireAuth,
+  h(async (req, res) => {
+    const { text, target, source } = parse(translateSchema, req.body);
+    try {
+      const out = await translateText(text, target, source);
+      res.json(out);
+    } catch (e) {
+      res.status(e.status || 502).json({ error: e.message });
+    }
+  })
+);
+
+// ---- 0.34.0 "Alles": GIF search (server-proxied, private) -----------------
+
+// Proxied through the server so the GIF provider never sees the client. Graceful
+// when no key is configured: { available:false }.
+router.get(
+  '/gifs/search',
+  requireAuth,
+  h(async (req, res) => {
+    const key = process.env.TENOR_KEY;
+    if (!key) return res.json({ available: false, results: [] });
+    const q = String(req.query.q || '').slice(0, 80);
+    try {
+      const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}`
+        + `&key=${key}&limit=24&media_filter=gif,tinygif&contentfilter=high`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!r.ok) return res.status(502).json({ error: 'GIF-Suche fehlgeschlagen.' });
+      const data = await r.json();
+      const results = (data.results || []).map((g) => ({
+        id: g.id,
+        url: g.media_formats?.gif?.url || '',
+        preview: g.media_formats?.tinygif?.url || '',
+        desc: g.content_description || '',
+      })).filter((g) => g.url);
+      res.json({ available: true, results });
+    } catch {
+      res.status(502).json({ error: 'GIF-Dienst nicht erreichbar.' });
+    }
+  })
+);
+
+// ---- 0.34.0 "Alles": "Hol mich ab" unread summary (heuristic, private) ----
+
+router.get(
+  '/chats/:id/catchup',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const since = Number(req.query.since) || 0;
+    const rows = getHistory(req.chat.id, { limit: 80, viewerId: req.user.id })
+      .filter((m) => !m.deleted_at && m.created_at > since && m.sender_id !== req.user.id);
+    res.json({ summary: summariseMessages(rows) });
+  })
+);
+
+// ---- 0.34.0 "Alles": heuristic smart replies ------------------------------
+
+router.get(
+  '/chats/:id/smart-replies',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const recent = getHistory(req.chat.id, { limit: 6, viewerId: req.user.id });
+    const last = [...recent].reverse().find((m) => !m.deleted_at && m.sender_id !== req.user.id && m.type === 'text');
+    res.json({ suggestions: smartReplies(last?.body || '') });
+  })
+);
+
 // "Für mich löschen": hide a message on this account only. Unlike DELETE (für
 // alle) this works on anyone's messages and leaves the chat untouched for
 // everyone else.
@@ -2098,6 +3146,7 @@ router.get(
 // reminder is *about* so the reminders pane renders even if the original message
 // later disappears. Mirrors deliver.js' previewOf but folds in the body.
 function reminderPreviewOf(msg) {
+  if (msg.enc) return '🔒 Verschlüsselte Nachricht';
   const body = (msg.body || '').trim();
   if (body) return body.length > 140 ? body.slice(0, 139) + '…' : body;
   switch (msg.type) {
@@ -2110,6 +3159,10 @@ function reminderPreviewOf(msg) {
     case 'poll': return '📊 Umfrage';
     case 'event': return '📅 Termin';
     case 'tasklist': return '✅ Aufgabenliste';
+    case 'sticker': return '🩷 Sticker';
+    case 'board': return '📋 Board';
+    case 'game': return '🎮 Spiel';
+    case 'livelocation': return '📍 Live-Standort';
     default: return 'Nachricht';
   }
 }

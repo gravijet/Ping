@@ -16,6 +16,10 @@ import {
 // push to members who are offline and haven't muted the chat.
 
 function previewOf(msg) {
+  // Encrypted messages must never leak plaintext into a notification.
+  if (msg.enc) return '🔒 Verschlüsselte Nachricht';
+  // View-once media is teased generically so the preview can't reveal it.
+  if (msg.view_once) return '👁️ Einmal ansehen';
   if (msg.body && msg.body.trim()) return msg.body.trim();
   switch (msg.type) {
     case 'image':
@@ -36,6 +40,14 @@ function previewOf(msg) {
       return '📅 Termin';
     case 'tasklist':
       return '✅ Aufgabenliste';
+    case 'sticker':
+      return '🩷 Sticker';
+    case 'board':
+      return '📋 Board';
+    case 'game':
+      return '🎮 Spiel';
+    case 'livelocation':
+      return '📍 Live-Standort';
     default:
       return msg.body || 'Nachricht';
   }

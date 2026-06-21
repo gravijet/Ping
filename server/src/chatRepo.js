@@ -2,6 +2,10 @@ import { db, now, tx, ftsAvailable } from './db.js';
 import { uid, pickAvatarColor, getUserById, publicUser } from './repo.js';
 import { eventView } from './eventsRepo.js';
 import { taskListView } from './tasksRepo.js';
+import { liveLocationView } from './liveLocationRepo.js';
+import { transcriptView } from './transcribe.js';
+import { boardView } from './boardsRepo.js';
+import { gameView } from './gamesRepo.js';
 
 const s = {
   insertChat: db.prepare(`
@@ -104,6 +108,9 @@ export function getOrCreateDirectChat(userA, userB) {
   }
   s.addMember.run(id, userA, 'member', ts);
   s.addMember.run(id, userB, 'member', ts);
+  // 0.34.0: apply the starter's account-level default disappearing timer.
+  const ttl = ttlStmt.get.get(userA)?.default_ttl || 0;
+  if (ttl > 0) s.setChatExpireStmt.run(ttl, id);
   return s.chatById.get(id);
 }
 
@@ -462,8 +469,14 @@ export function chatView(chat, viewerId) {
 
 const m = {
   insert: db.prepare(`
-    INSERT INTO messages (id, chat_id, sender_id, type, body, attachment, reply_to, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO messages
+      (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+       expires_at, thread_root, view_once, enc)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  // Bump the running thread-reply counter on a thread's root message.
+  bumpThread: db.prepare(
+    'UPDATE messages SET thread_count = thread_count + 1 WHERE id = ?'
+  ),
   byId: db.prepare('SELECT * FROM messages WHERE id = ?'),
   insertStatus: db.prepare(`
     INSERT OR IGNORE INTO message_status (message_id, user_id, chat_id)
@@ -473,6 +486,8 @@ const m = {
   history: db.prepare(`
     SELECT * FROM messages m WHERE m.chat_id = ? AND m.created_at < ?
       AND (m.expires_at IS NULL OR m.expires_at > ?)
+      -- Thread replies live in their thread, not the main timeline.
+      AND m.thread_root IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM hidden_messages h
         WHERE h.message_id = m.id AND h.user_id = ?)
@@ -497,6 +512,10 @@ export function createMessage({
   attachment = null,
   replyTo = null,
   expiresAt = null,
+  // 0.34.0: thread reply root, view-once media, opt-in E2EE ciphertext flag.
+  threadRoot = null,
+  viewOnce = false,
+  enc = false,
 }) {
   const id = uid();
   const ts = now();
@@ -504,7 +523,12 @@ export function createMessage({
   // One transaction: the message and its per-recipient receipt rows land
   // atomically (and as a single fsync instead of one per group member).
   tx(() => {
-    m.insert.run(id, chatId, senderId, type, body, att, replyTo, ts, expiresAt);
+    m.insert.run(
+      id, chatId, senderId, type, body, att, replyTo, ts, expiresAt,
+      threadRoot, viewOnce ? 1 : 0, enc ? 1 : 0
+    );
+    // A thread reply bumps the running count on its root message.
+    if (threadRoot) m.bumpThread.run(threadRoot);
     for (const memberId of getMemberIds(chatId)) {
       if (memberId !== senderId) m.insertStatus.run(id, memberId, chatId);
     }
@@ -532,6 +556,23 @@ export function purgeExpiredMessages() {
 }
 
 export const getMessage = (id) => m.byId.get(id);
+
+// 0.34.0 "Alles": open a view-once message. The first eligible viewer (a
+// recipient, not the sender) gets the attachment exactly once; we stamp viewed_at
+// so messageView withholds it from everyone afterwards. Returns the attachment for
+// that one response, or null if it's already spent / not theirs to open.
+const markViewedStmt = db.prepare('UPDATE messages SET viewed_at = ? WHERE id = ?');
+export function openViewOnce(messageId, viewerId) {
+  const msg = m.byId.get(messageId);
+  if (!msg || !msg.view_once || msg.deleted_at) return { ok: false };
+  if (msg.sender_id === viewerId) {
+    // The sender can re-check their own; just hand back the attachment.
+    return { ok: true, attachment: msg.attachment ? JSON.parse(msg.attachment) : null };
+  }
+  if (msg.viewed_at) return { ok: false, spent: true };
+  markViewedStmt.run(now(), messageId);
+  return { ok: true, attachment: msg.attachment ? JSON.parse(msg.attachment) : null };
+}
 
 // ---- Pins / stars / drafts (0.27.0 "Ordnung & Ausdruck") -------------------
 
@@ -721,6 +762,10 @@ const TYPE_ALIASES = {
   ort: 'location', standort: 'location', poll: 'poll', umfrage: 'poll',
   event: 'event', termin: 'event', tasklist: 'tasklist', aufgabe: 'tasklist',
   aufgaben: 'tasklist', liste: 'tasklist', checkliste: 'tasklist',
+  // 0.34.0 "Alles"
+  sticker: 'sticker', aufkleber: 'sticker', board: 'board', kanban: 'board',
+  game: 'game', spiel: 'game', livelocation: 'livelocation',
+  livestandort: 'livelocation', echtzeitstandort: 'livelocation',
 };
 
 // Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
@@ -1017,6 +1062,10 @@ export function pollView(messageId, viewerId) {
 }
 
 export function messageView(msg, viewerId) {
+  // View-once media: the payload is never delivered in the timeline to anyone
+  // but the sender — recipients must open it explicitly via the /view endpoint
+  // (which returns it exactly once). The `viewed` flag drives the UI state.
+  const viewOnceSpent = msg.view_once && msg.sender_id !== viewerId;
   return {
     id: msg.id,
     chatId: msg.chat_id,
@@ -1024,7 +1073,9 @@ export function messageView(msg, viewerId) {
     type: msg.type,
     body: msg.deleted_at ? '' : msg.body,
     attachment:
-      msg.deleted_at || !msg.attachment ? null : JSON.parse(msg.attachment),
+      msg.deleted_at || !msg.attachment || viewOnceSpent
+        ? null
+        : JSON.parse(msg.attachment),
     replyTo: msg.reply_to,
     // Inline snapshot of the quoted message (null when this isn't a reply).
     quoted: msg.reply_to ? quotedView(msg.reply_to) : null,
@@ -1045,8 +1096,83 @@ export function messageView(msg, viewerId) {
     // 0.33.0 "Pläne & Aufgaben": event (RSVP) and task-list payloads.
     event: msg.type === 'event' && !msg.deleted_at ? eventView(msg.id, viewerId) : null,
     tasklist: msg.type === 'tasklist' && !msg.deleted_at ? taskListView(msg.id) : null,
+    // 0.34.0 "Alles": board, game, live-location payloads + voice transcript.
+    board: msg.type === 'board' && !msg.deleted_at ? boardView(msg.id) : null,
+    game: msg.type === 'game' && !msg.deleted_at ? gameView(msg.id) : null,
+    liveLocation:
+      msg.type === 'livelocation' && !msg.deleted_at ? liveLocationView(msg) : null,
+    transcript:
+      msg.type === 'voice' && !msg.deleted_at ? transcriptView(msg.id) : null,
+    // 0.34.0: thread metadata, view-once + E2EE flags.
+    threadRoot: msg.thread_root || null,
+    threadCount: msg.thread_count || 0,
+    viewOnce: !!msg.view_once,
+    viewed: !!msg.viewed_at,
+    enc: !!msg.enc,
     // 0.27.0: chat-wide pin state + this viewer's personal bookmark.
     pinned: msg.deleted_at ? false : isMessagePinned(msg.id),
     starred: msg.deleted_at ? false : isMessageStarred(viewerId, msg.id),
   };
 }
+
+// 0.34.0 "Alles": the replies in a message's thread, oldest-first.
+const threadStmt = db.prepare(`
+  SELECT * FROM messages
+   WHERE thread_root = ? AND deleted_at IS NULL
+   ORDER BY created_at ASC, id ASC LIMIT ?`);
+export function threadReplies(rootId, viewerId, { limit = 200 } = {}) {
+  return threadStmt.all(rootId, Math.min(Math.max(limit, 1), 500)).map((r) => messageView(r, viewerId));
+}
+
+// ---- 0.34.0 "Alles": media hub, per-member lock, account default timer ------
+
+const mediaStmt = {
+  attachments: db.prepare(`
+    SELECT * FROM messages WHERE chat_id = ? AND deleted_at IS NULL AND thread_root IS NULL
+      AND type IN ('image','gif','video','file','voice','audio')
+    ORDER BY created_at DESC LIMIT ?`),
+  links: db.prepare(`
+    SELECT * FROM messages WHERE chat_id = ? AND deleted_at IS NULL AND thread_root IS NULL
+      AND enc = 0 AND body LIKE '%http%'
+    ORDER BY created_at DESC LIMIT ?`),
+};
+/** The chat's shared media/files/links, grouped by kind (no extra storage). */
+export function chatMedia(chatId, kind, viewerId, { limit = 300 } = {}) {
+  if (kind === 'link') {
+    return mediaStmt.links.all(chatId, limit).map((r) => messageView(r, viewerId));
+  }
+  const rows = mediaStmt.attachments.all(chatId, 800);
+  const want =
+    kind === 'image' ? ['image', 'gif']
+    : kind === 'video' ? ['video']
+    : kind === 'file' ? ['file', 'voice', 'audio']
+    : ['image', 'gif', 'video', 'file', 'voice', 'audio'];
+  return rows.filter((r) => want.includes(r.type)).slice(0, limit).map((r) => messageView(r, viewerId));
+}
+
+const lockStmt = {
+  set: db.prepare('UPDATE chat_members SET locked = ?, hidden = ? WHERE chat_id = ? AND user_id = ?'),
+  get: db.prepare('SELECT locked, hidden FROM chat_members WHERE chat_id = ? AND user_id = ?'),
+};
+export function getMemberChatLockState(chatId, userId) {
+  const r = lockStmt.get.get(chatId, userId);
+  return { locked: !!r?.locked, hidden: !!r?.hidden };
+}
+/** Lock (require unlock to open) and/or hide a chat for one member only. */
+export function setMemberChatLock(chatId, userId, { locked, hidden } = {}) {
+  const cur = lockStmt.get.get(chatId, userId);
+  if (!cur) return null;
+  lockStmt.set.run(
+    locked === undefined ? cur.locked : locked ? 1 : 0,
+    hidden === undefined ? cur.hidden : hidden ? 1 : 0,
+    chatId, userId
+  );
+  return getMemberChatLockState(chatId, userId);
+}
+
+const ttlStmt = {
+  get: db.prepare('SELECT default_ttl FROM users WHERE id = ?'),
+  set: db.prepare('UPDATE users SET default_ttl = ? WHERE id = ?'),
+};
+export const getUserDefaultTtl = (userId) => ttlStmt.get.get(userId)?.default_ttl || 0;
+export const setUserDefaultTtl = (userId, seconds) => ttlStmt.set.run(seconds, userId);

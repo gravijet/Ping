@@ -29,7 +29,7 @@ export function imageDims(file) {
 
 // Upload [file] and post it as a message in [chatId]. Optional text caption and
 // replyTo. Returns the created message (also pushed over the socket).
-export async function sendAttachment(chatId, file, { caption = '', replyTo = null } = {}) {
+export async function sendAttachment(chatId, file, { caption = '', replyTo = null, viewOnce = false } = {}) {
   const meta = await uploadFile(file);
   const dims = await imageDims(file);
   const type = meta.kind === 'gif' ? 'gif' : meta.kind;
@@ -42,6 +42,9 @@ export async function sendAttachment(chatId, file, { caption = '', replyTo = nul
   };
   if (caption) body.body = caption;
   if (replyTo) body.replyTo = replyTo;
+  // View-once (0.34.0): server only honours it for image/video; the bytes are
+  // withheld from the timeline and handed out exactly once via /…/view.
+  if (viewOnce && (type === 'image' || type === 'video')) body.viewOnce = true;
   const r = await api.post(`/chats/${chatId}/messages`, body);
   return r.message;
 }
@@ -92,8 +95,12 @@ export function renderAttachment(att, { onImageClick } = {}) {
       img.style.aspectRatio = `${att.width} / ${att.height}`;
       img.style.width = Math.min(320, att.width) + 'px';
     }
-    const obs = lazyImageObserver();
-    if (obs && att.url) { img.dataset.lazy = att.url; obs.observe(img); }
+    // Absolute URLs (e.g. proxied GIF results) load directly; authed uploads go
+    // through a token-bearing blob fetch.
+    const absolute = /^https?:\/\//.test(att.url || '');
+    const obs = absolute ? null : lazyImageObserver();
+    if (absolute) img.src = att.url;
+    else if (obs && att.url) { img.dataset.lazy = att.url; obs.observe(img); }
     else authedObjectUrl(att.url).then((u) => { if (u) img.src = u; });
     img.addEventListener('click', () => onImageClick ? onImageClick(att) : openLightbox(att));
     return img;

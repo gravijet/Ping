@@ -7,6 +7,7 @@
 import { api, authedObjectUrl } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, toast, lastSeenLabel } from './ui.js';
+import { flag } from './flags.js';
 
 let host = null; // { scrim, panel, chatId }
 
@@ -51,6 +52,7 @@ function renderDirect(body, chat) {
   const fields = el('div');
   body.append(fields);
   sharedMedia(body, chat);
+  extrasSection(body, chat);
   if (!chat.self) actionsDirect(body, chat, base);
 
   // Enrich from the server (mood, city, pronouns, birthday, about, phone).
@@ -102,6 +104,7 @@ function renderGroup(body, chat) {
   if (chat.description) body.append(el('p', { class: 'hint', style: { textAlign: 'center', lineHeight: '1.55' }, text: chat.description }));
 
   sharedMedia(body, chat);
+  extrasSection(body, chat);
 
   body.append(el('div', { class: 'ip-section', text: 'Aktionen' }), muteRow(chat), disappearingRow(chat));
 
@@ -119,6 +122,30 @@ function renderGroup(body, chat) {
     [icon('settings'), 'Mitglieder & Gruppe verwalten']));
   body.append(el('button', { class: 'btn danger block', style: { marginTop: '10px' },
     onClick: () => import('./groups.js').then((m) => m.leaveGroup(chat.id)) }, [icon('logout'), 'Gruppe verlassen']));
+}
+
+// ---- 0.34.0 "Alles": per-chat extras (notes, media hub, optics, E2EE, …) ---
+function extrasSection(body, chat) {
+  const rows = [];
+  const add = (cond, iconName, label, fn) => { if (cond) rows.push(
+    el('button', { class: 'btn ghost block', style: { marginTop: '8px' },
+      onClick: () => fn() }, [icon(iconName), label])); };
+
+  add(flag('chatMediaHub'), 'image', 'Geteilte Inhalte',
+    () => import('./mediahub.js').then((m) => m.openMediaHub(chat.id)));
+  add(flag('groupNotes'), 'tasks', 'Notizen',
+    () => import('./notes.js').then((m) => m.openNotes(chat.id)));
+  add(flag('chatThemes'), 'palette', 'Chat-Optik',
+    () => import('./chatthemes.js').then((m) => m.chatAppearanceModal(chat.id)));
+  add(flag('e2ee') && chat.type === 'direct' && !chat.self, 'lock', 'Verschlüsselung',
+    () => import('./e2ee.js').then((m) => m.e2eePanel(chat.id)));
+  add(flag('webhooks') && chat.type === 'group', 'bolt', 'Webhooks & Bots',
+    () => import('./webhooks.js').then((m) => m.openWebhooks(chat.id)));
+  add(flag('chatLock'), 'shield', 'Chat sperren',
+    () => import('./chatlock.js').then((m) => m.chatLockModal(chat.id)));
+
+  if (!rows.length) return;
+  body.append(el('div', { class: 'ip-section', text: 'Mehr' }), ...rows);
 }
 
 // ---- shared bits ----------------------------------------------------------

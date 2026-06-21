@@ -1,5 +1,28 @@
 import { db, now } from './db.js';
-import { purgeExpiredMessages, getChat } from './chatRepo.js';
+import {
+  purgeExpiredMessages,
+  getChat,
+  getMemberIds,
+  createMessage,
+  messageView,
+} from './chatRepo.js';
+import {
+  dueRecurringEvents,
+  clearEventRecur,
+  createEvent,
+  nextOccurrence,
+} from './eventsRepo.js';
+import {
+  dueScheduledCalls,
+  markCallReminded,
+  scheduledCallView,
+  purgePastScheduledCalls,
+} from './scheduledCallsRepo.js';
+import {
+  dueExpiredLiveLocations,
+  purgeExpiredLiveLocations,
+} from './liveLocationRepo.js';
+import { purgeApprovals } from './loginApprovalsRepo.js';
 import { purgeExpiredStatuses } from './statusRepo.js';
 import { broadcastToChat, sendToUser } from './hub.js';
 import { sendPushToUsers } from './push.js';
@@ -138,6 +161,79 @@ export function runMaintenance() {
       console.error('[maintenance] Termin-Erinnerung fehlgeschlagen:', e.message);
     }
   }
+  // 0.34.0 "Alles": scheduled-call reminders that have come due → nudge everyone
+  // in the chat over their sockets and via push. Stamp reminded_at first.
+  let firedCalls = 0;
+  for (const row of dueScheduledCalls()) {
+    try {
+      markCallReminded(row.id);
+      const chat = getChat(row.chat_id);
+      const where = chat?.name ? ` · ${chat.name}` : '';
+      const when = new Date(row.start_at).toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const targets = getMemberIds(row.chat_id);
+      for (const userId of targets) {
+        sendToUser(userId, 'scheduled-call-reminder', {
+          call: scheduledCallView(row),
+          chatId: row.chat_id,
+        });
+      }
+      sendPushToUsers(targets, {
+        title: `📞 ${row.title || 'Geplanter Anruf'}`,
+        body: `Beginnt um ${when}${where}`,
+        data: { type: 'scheduled-call', chatId: row.chat_id, callId: row.id },
+      }).catch(() => {});
+      firedCalls++;
+    } catch (e) {
+      console.error('[maintenance] Anruf-Erinnerung fehlgeschlagen:', e.message);
+    }
+  }
+  purgePastScheduledCalls();
+  // 0.34.0: recurring events — a series member that has started spawns its next
+  // occurrence (carrying the rule forward) and clears its own rule so it spawns
+  // exactly once. The new event lands as a normal 'event' message in the chat.
+  let spawnedEvents = 0;
+  for (const ev of dueRecurringEvents()) {
+    try {
+      clearEventRecur(ev.id); // guard against double-spawn before anything else
+      const chat = getChat(ev.chat_id);
+      if (!chat || chat.locked) continue;
+      const nextStart = nextOccurrence(ev.start_at, ev.recur);
+      if (!nextStart) continue;
+      const remindMinutes = ev.remind_at ? Math.round((ev.start_at - ev.remind_at) / 60_000) : 0;
+      const msg = createMessage({ chatId: ev.chat_id, senderId: ev.creator_id, type: 'event', body: '' });
+      createEvent({
+        messageId: msg.id,
+        chatId: ev.chat_id,
+        creatorId: ev.creator_id,
+        title: ev.title,
+        description: ev.description,
+        location: ev.location,
+        startAt: nextStart,
+        remindMinutes,
+        recur: ev.recur,
+      });
+      for (const memberId of getMemberIds(ev.chat_id)) {
+        sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+      }
+      spawnedEvents++;
+    } catch (e) {
+      console.error('[maintenance] Serientermin fehlgeschlagen:', e.message);
+    }
+  }
+  // 0.34.0: live-location shares whose timer ran out → tell the chat + purge.
+  for (const row of dueExpiredLiveLocations()) {
+    broadcastToChat(row.chat_id, 'location-update', {
+      chatId: row.chat_id,
+      userId: row.user_id,
+      active: false,
+    });
+  }
+  purgeExpiredLiveLocations();
+  // 0.34.0: drop expired / decided login-approval rows.
+  purgeApprovals();
   // 0.30.0: drop stale focus auto-reply throttle rows (older than the cool-down).
   purgeAutoReplies();
   purgeExpiredStatuses();
@@ -150,6 +246,8 @@ export function runMaintenance() {
     sentBroadcasts,
     firedReminders,
     firedEvents,
+    firedCalls,
+    spawnedEvents,
   };
 }
 

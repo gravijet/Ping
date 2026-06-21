@@ -668,6 +668,33 @@ function wireSocket() {
 
   socket.on('focus-updated', (p) => { if (p.focus) focus.apply(p.focus); });
 
+  // ── „Alles" (0.34.0) realtime ──────────────────────────────────────────
+  // A thread reply arrived — refresh an open thread panel + the root's count.
+  socket.on('thread-reply', (p) => {
+    if (p.rootId) import('./threads.js').then((t) => t.onThreadReply(p.rootId));
+  });
+  // Live-location position moved — update the matching card in place.
+  socket.on('location-update', (p) => import('./livelocation.js').then((m) => m.onLocationUpdate(p)));
+  // Collaborative notes changed elsewhere — refresh an open notes panel.
+  socket.on('note-updated', (p) => import('./notes.js').then((m) => m.onNoteEvent(p.chatId)));
+  socket.on('note-deleted', (p) => import('./notes.js').then((m) => m.onNoteEvent(p.chatId)));
+  // Scheduled call created / cancelled / about to start.
+  socket.on('scheduled-call', (p) => { if (p.call) activity.record({ kind: 'event', chatId: p.call.chatId, key: `call:${p.call.id}`, title: p.call.title || 'Geplanter Anruf', text: 'Anruf geplant' }); });
+  socket.on('scheduled-call-cancel', () => {});
+  socket.on('scheduled-call-reminder', (p) => {
+    const c = p.call; if (!c) return;
+    const when = new Date(c.startAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    toast(`📞 ${c.title || 'Anruf'} · um ${when}`, 'info');
+  });
+  // Peer toggled E2EE on a DM — refresh our cached session so render decrypts.
+  socket.on('e2ee', (p) => { if (p.chatId) import('./e2ee.js').then((m) => m.onE2ee(p.chatId)); });
+  // A new device wants to sign in and needs this (trusted) device to approve.
+  socket.on('login-request', (p) => {
+    toast(`🔐 Neue Anmeldung (Code ${p.code || ''}) — in Sicherheit freigeben.`, 'info');
+    activity.record({ kind: 'security', key: `login:${p.id}`, title: 'Anmelde-Freigabe',
+      text: p.device || 'Ein neues Gerät möchte sich anmelden' });
+  });
+
   socket.on('force-logout', () => { toast('Du wurdest abgemeldet.', 'err'); doLogout(true); });
   socket.onStatus((connected) => store.emit('connection', connected));
 

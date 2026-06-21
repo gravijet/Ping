@@ -253,6 +253,18 @@ class Message {
         return '📎 ${attachment?.name ?? 'Datei'}';
       case 'poll':
         return '📊 ${poll?.question ?? 'Umfrage'}';
+      case 'event':
+        return '📅 Termin';
+      case 'tasklist':
+        return '✅ Aufgabenliste';
+      case 'sticker':
+        return '🎉 Sticker';
+      case 'board':
+        return '📋 Board';
+      case 'game':
+        return '🎮 Spiel';
+      case 'livelocation':
+        return '📍 Live-Standort';
       default:
         return body;
     }

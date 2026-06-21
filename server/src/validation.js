@@ -156,13 +156,18 @@ export const attachmentSchema = z
 // Sending a message: plain text, or a typed attachment with an optional caption.
 export const messageSendSchema = z
   .object({
-    body: z.string().max(4000, 'Die Nachricht ist zu lang.').optional(),
+    body: z.string().max(8000, 'Die Nachricht ist zu lang.').optional(),
     type: z.enum(mediaTypes).optional(),
     attachment: attachmentSchema.optional(),
     replyTo: z.string().min(1).optional(),
+    // 0.34.0: view-once media + E2EE ciphertext flag. enc relaxes the
+    // text-needs-body rule (the body is opaque ciphertext).
+    viewOnce: z.boolean().optional(),
+    enc: z.boolean().optional(),
   })
   .refine(
     (d) => {
+      if (d.enc) return !!d.body; // ciphertext lives in body
       const t = d.type || 'text';
       return t === 'text' ? !!d.body && d.body.trim().length > 0 : !!d.attachment;
     },
@@ -645,6 +650,8 @@ export const eventCreateSchema = z.object({
     .max(7 * 24 * 60, 'Erinnerung höchstens 7 Tage vorher.')
     .optional()
     .default(0),
+  // 0.34.0: recurrence. '' = one-off; otherwise repeat daily/weekly/monthly.
+  recur: z.enum(['', 'daily', 'weekly', 'monthly']).optional().default(''),
 });
 
 // RSVP to an event: going / maybe / declined, or null to withdraw.
@@ -836,6 +843,156 @@ export const focusSchema = z
     autoReply: z.string().trim().max(500, 'Die Auto-Antwort ist zu lang.').optional(),
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
+
+// ---- „Alles" (0.34.0) ------------------------------------------------------
+
+const lat = z.number().min(-90).max(90);
+const lng = z.number().min(-180).max(180);
+
+// A threaded reply: plain text under a root message.
+export const threadReplySchema = z.object({
+  body: z.string().trim().min(1, 'Leere Nachricht.').max(8000, 'Die Nachricht ist zu lang.'),
+});
+
+// Start a live-location share: position + a duration (minutes) it stays live.
+export const liveLocationStartSchema = z.object({
+  lat,
+  lng,
+  accuracy: z.number().min(0).max(100000).optional(),
+  heading: z.number().min(0).max(360).optional(),
+  durationMinutes: z.number().int().min(1).max(480).optional().default(60),
+});
+// A position update for an active share.
+export const liveLocationUpdateSchema = z.object({
+  lat,
+  lng,
+  accuracy: z.number().min(0).max(100000).optional(),
+  heading: z.number().min(0).max(360).optional(),
+});
+
+// Schedule a call: a title, audio/video, a future start, optional pre-reminder.
+export const scheduledCallSchema = z.object({
+  title: z.string().trim().max(140, 'Der Titel ist zu lang.').optional().default(''),
+  video: z.boolean().optional().default(false),
+  startAt: z
+    .number()
+    .int('Ungültige Startzeit.')
+    .refine((t) => t > Date.now() - 60_000, 'Der Anruf liegt in der Vergangenheit.')
+    .refine((t) => t < Date.now() + 365 * 86400_000, 'Zu weit in der Zukunft.'),
+  remindMinutes: z.number().int().min(0).max(7 * 24 * 60).optional().default(10),
+});
+
+// A kanban board: a title plus 1-8 initial columns.
+export const boardCreateSchema = z.object({
+  title: z.string().trim().min(1, 'Bitte gib dem Board einen Titel.').max(140, 'Der Titel ist zu lang.'),
+  columns: z
+    .array(z.string().trim().min(1).max(60))
+    .min(1, 'Mindestens eine Spalte.')
+    .max(8, 'Höchstens 8 Spalten.')
+    .optional(),
+});
+export const boardColumnSchema = z.object({
+  title: z.string().trim().min(1, 'Leere Spalte geht nicht.').max(60, 'Die Spalte ist zu lang.'),
+});
+export const boardCardSchema = z.object({
+  columnId: z.string().trim().min(1).max(64),
+  text: z.string().trim().min(1, 'Leere Karte geht nicht.').max(500, 'Die Karte ist zu lang.'),
+});
+export const boardCardMoveSchema = z.object({
+  columnId: z.string().trim().min(1).max(64),
+  sort: z.number().int().min(0).max(100000).optional(),
+});
+export const boardCardEditSchema = z.object({
+  text: z.string().trim().min(1, 'Leere Karte geht nicht.').max(500, 'Die Karte ist zu lang.'),
+});
+
+// Start a mini-game; make a move (cell index or column).
+export const gameCreateSchema = z.object({
+  kind: z.enum(['tictactoe', 'connect4']),
+});
+export const gameMoveSchema = z.object({
+  cell: z.number().int().min(0).max(41),
+});
+
+// Send a sticker by id (the bytes already live as an upload behind the sticker).
+export const stickerSendSchema = z.object({
+  stickerId: z.string().trim().min(1).max(64),
+  replyTo: z.string().trim().max(64).nullable().optional(),
+});
+
+// Collaborative group notes.
+export const noteCreateSchema = z.object({
+  title: z.string().trim().min(1, 'Bitte gib einen Titel ein.').max(140, 'Der Titel ist zu lang.'),
+  body: z.string().trim().max(20000, 'Die Notiz ist zu lang.').optional().default(''),
+});
+export const noteUpdateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(140).optional(),
+    body: z.string().trim().max(20000).optional(),
+  })
+  .refine((d) => Object.keys(d).length > 0, { message: 'Nichts zu ändern.' });
+
+// Per-chat appearance (wallpaper preset/upload + accent hex).
+export const chatAppearanceSchema = z
+  .object({
+    wallpaper: z.string().trim().max(512).nullable().optional(),
+    accent: z.string().trim().regex(/^#?[0-9a-fA-F]{6}$/, 'Ungültige Farbe.').nullable().optional(),
+  })
+  .refine((d) => 'wallpaper' in d || 'accent' in d, { message: 'Nichts zu ändern.' });
+
+// Per-chat default disappearing timer (seconds; 0 = off, else ≥ 60).
+export const defaultTtlSchema = z.object({
+  seconds: z.number().int().min(0).max(365 * 86400).refine((s) => s === 0 || s >= 60, 'Mindestens 1 Minute.'),
+});
+
+// Webhooks / bots.
+export const webhookCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Bitte gib einen Namen ein.').max(80, 'Der Name ist zu lang.'),
+  direction: z.enum(['in', 'out']).optional().default('in'),
+  url: z.string().trim().url('Ungültige URL.').max(512).optional(),
+});
+// Body posted to an incoming webhook to fan a message into its chat.
+export const webhookPostSchema = z.object({
+  text: z.string().trim().min(1, 'Leere Nachricht.').max(4000, 'Zu lang.'),
+  name: z.string().trim().max(80).optional(),
+});
+
+// Opt-in E2EE: publish a public identity key; flip a DM's encryption on/off.
+export const e2eeIdentitySchema = z.object({
+  publicKey: z.string().trim().min(16, 'Ungültiger Schlüssel.').max(2048),
+});
+export const e2eeToggleSchema = z.object({
+  enabled: z.boolean(),
+});
+
+// Inline translation: source text + a target language code.
+export const translateSchema = z.object({
+  text: z.string().trim().min(1, 'Nichts zu übersetzen.').max(8000, 'Zu lang.'),
+  target: z.string().trim().min(2).max(8),
+  source: z.string().trim().min(2).max(8).optional(),
+});
+
+// "Now playing" rich status.
+export const nowPlayingSchema = z.object({
+  title: z.string().trim().min(1, 'Titel fehlt.').max(200),
+  artist: z.string().trim().max(200).optional().default(''),
+  url: z.string().trim().url('Ungültige URL.').max(512).optional(),
+  cover: coverSchema.optional(),
+});
+
+// Sticker pack management.
+export const stickerPackCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Bitte gib einen Namen ein.').max(60, 'Der Name ist zu lang.'),
+});
+export const stickerAddSchema = z.object({
+  uploadId: z.string().trim().min(1).max(64),
+  emoji: z.string().trim().max(16).optional().default(''),
+});
+
+// Approve/deny a pending login from a trusted device.
+export const approvalDecisionSchema = z.object({
+  approve: z.boolean(),
+});
 
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {

@@ -186,6 +186,13 @@ const msgs = [
   { id: 'm4', chatId: 'c1', senderId: 'me', body: 'Schau dir https://example.com/artikel an.', type: 'text', editedAt: Date.now() - 1000, editCount: 1, createdAt: Date.now() - 2000, status: 'read' },
   { id: 'm5', chatId: 'c1', senderId: 'u2', type: 'event', event: { id: 'e1', title: 'Team-Lunch', location: 'Kantine', startAt: Date.now() + 3600_000, counts: { going: 1, maybe: 0, declined: 0 }, myStatus: 'going', attendees: [{ userId: 'u2', status: 'going', displayName: 'Anna' }] }, createdAt: Date.now() - 1500 },
   { id: 'm6', chatId: 'c1', senderId: 'me', type: 'tasklist', tasklist: { id: 't1', title: 'Einkauf', total: 2, completed: 1, items: [{ id: 'i1', text: 'Milch', done: true, doneByName: 'Anna' }, { id: 'i2', text: 'Brot', done: false }] }, createdAt: Date.now() - 1000, status: 'read' },
+  // 0.34.0 "Alles" structured-message types.
+  { id: 'm7', chatId: 'c1', senderId: 'u2', type: 'sticker', attachment: { kind: 'sticker', url: '/api/uploads/s1', emoji: '🎉' }, createdAt: Date.now() - 900 },
+  { id: 'm8', chatId: 'c1', senderId: 'me', type: 'board', board: { id: 'b1', title: 'Sprint', creatorId: 'me', columns: [{ id: 'c1', title: 'To-do', cards: [{ id: 'k1', text: 'Design' }] }, { id: 'c2', title: 'Fertig', cards: [] }], cardCount: 1 }, createdAt: Date.now() - 800, status: 'read' },
+  { id: 'm9', chatId: 'c1', senderId: 'u2', type: 'game', game: { kind: 'tictactoe', cells: [null, 0, null, null, 1, null, null, null, null], players: ['u2', 'me'], turn: 'me', winner: null }, createdAt: Date.now() - 700 },
+  { id: 'm10', chatId: 'c1', senderId: 'u2', type: 'livelocation', liveLocation: { active: true, lat: 48.2, lng: 16.37, updatedAt: Date.now() - 30000, expiresAt: Date.now() + 3600_000 }, createdAt: Date.now() - 600 },
+  { id: 'm11', chatId: 'c1', senderId: 'u2', type: 'image', viewOnce: true, viewed: false, createdAt: Date.now() - 500 },
+  { id: 'm12', chatId: 'c1', senderId: 'u2', type: 'voice', attachment: { kind: 'voice', url: '/api/uploads/v1', durationMs: 4200 }, transcript: { status: 'done', text: 'Kurze Sprachnotiz', lang: 'de' }, createdAt: Date.now() - 400 },
 ];
 
 function jsonRes(data) {
@@ -200,6 +207,22 @@ async function fetchShim(url) {
     { id: 'e1', chatId: 'c1', messageId: 'm5', title: 'Team-Lunch', location: 'Kantine', startAt: Date.now() + 3600_000, counts: { going: 1, maybe: 0, declined: 0 }, myStatus: 'going', chatTitle: 'Anna', attendees: [{ userId: 'u2', status: 'going', displayName: 'Anna' }] },
   ] });
   if (/\/messages\/[^/]+\/edits$/.test(path)) return jsonRes({ versions: [{ body: 'alte Fassung' }, { body: 'neue Fassung', editedAt: Date.now(), current: true }] });
+  // 0.34.0 "Alles" endpoints.
+  if (/\/messages\/[^/]+\/thread$/.test(path)) return jsonRes({ root: msgs[0], messages: [{ id: 'tr1', chatId: 'c1', senderId: 'u2', type: 'text', body: 'Antwort', createdAt: Date.now() }] });
+  if (path === '/stickers/packs') return jsonRes({ packs: [{ id: 'p1', name: 'Mein Paket', stickers: [{ id: 's1', url: '/api/uploads/s1', emoji: '🎉' }] }] });
+  if (path.startsWith('/gifs/search')) return jsonRes({ available: true, results: [{ id: 'g1', url: 'https://media.example/g.gif', preview: 'https://media.example/p.gif', desc: 'lol' }] });
+  if (/\/chats\/[^/]+\/notes$/.test(path)) return jsonRes({ notes: [{ id: 'n1', title: 'Notiz', body: 'Inhalt', updatedAt: Date.now() }] });
+  if (/\/chats\/[^/]+\/media/.test(path)) return jsonRes({ kind: 'image', messages: [msgs[1]] });
+  if (/\/chats\/[^/]+\/appearance$/.test(path)) return jsonRes({ appearance: { wallpaper: null, accent: null } });
+  if (/\/chats\/[^/]+\/catchup/.test(path)) return jsonRes({ summary: { count: 3, senders: 2, keywords: ['lunch', 'team'], snippets: ['Hallo'], text: '3 neue Nachrichten' } });
+  if (/\/chats\/[^/]+\/smart-replies$/.test(path)) return jsonRes({ suggestions: ['👍', 'Klingt gut!', 'Bin dabei'] });
+  if (/\/chats\/[^/]+\/webhooks$/.test(path)) return jsonRes({ webhooks: [{ id: 'w1', name: 'CI', direction: 'in', lastUsedAt: null }] });
+  if (/\/chats\/[^/]+\/lock$/.test(path)) return jsonRes({ lock: { locked: false, hidden: false } });
+  if (/\/chats\/[^/]+\/e2ee$/.test(path)) return jsonRes({ session: { enabled: false }, peer: null });
+  if (path === '/me/default-ttl') return jsonRes({ seconds: 0 });
+  if (path === '/me/login-approvals') return jsonRes({ approvals: [] });
+  if (path === '/me/scheduled-calls') return jsonRes({ calls: [] });
+  if (path === '/translate/available') return jsonRes({ available: false });
   if (path.startsWith('/chats/c1/messages')) return jsonRes({ messages: msgs });
   if (path.startsWith('/chats/c2/messages')) return jsonRes({ messages: [] });
   if (/^\/chats\/[^/]+$/.test(path)) return jsonRes({ chat: chatDirect });
@@ -360,6 +383,36 @@ await step('tasks: render checklist card + create modal', async () => {
   if (!card || !card.querySelector('.task-check')) throw new Error('task card missing checkboxes');
   if (!card.querySelector('.task-bar i')) throw new Error('task card missing progress bar');
   tk.newTaskListModal('c1'); await tick();
+});
+await step('0.34.0 structured cards: sticker/board/game/livelocation render', async () => {
+  if (!(await imp('stickers.js')).renderSticker(msgs[6])) throw new Error('sticker card missing');
+  const board = (await imp('boards.js')).renderBoard(msgs[7]);
+  if (!board || !board.querySelector('.board-col')) throw new Error('board card missing columns');
+  const game = (await imp('games.js')).renderGame(msgs[8]);
+  if (!game || !game.querySelector('.ttt-cell')) throw new Error('game card missing cells');
+  const ll = (await imp('livelocation.js')).renderLiveLocation(msgs[9]);
+  if (!ll || !ll.querySelector('.ll-head')) throw new Error('live-location card missing');
+});
+await step('0.34.0 create modals: board/game/scheduled-call', async () => {
+  (await imp('boards.js')).newBoardModal('c1'); await tick();
+  (await imp('games.js')).newGameModal('c1'); await tick();
+  (await imp('scheduledcalls.js')).scheduleCallModal('c1'); await tick();
+});
+await step('0.34.0 pickers/panels: stickers, GIFs, notes, mediahub, chat-optik, catchup, webhooks, chatlock, e2ee', async () => {
+  await (await imp('stickers.js')).openStickerPicker('c1'); await tick();
+  (await imp('gifsearch.js')).openGifPicker('c1'); await tick();
+  (await imp('notes.js')).openNotes('c1'); await tick();
+  (await imp('mediahub.js')).openMediaHub('c1'); await tick();
+  (await imp('chatthemes.js')).chatAppearanceModal('c1'); await tick();
+  await (await imp('catchup.js')).openCatchUp('c1'); await tick();
+  (await imp('webhooks.js')).openWebhooks('c2'); await tick();
+  await (await imp('chatlock.js')).chatLockModal('c1'); await tick();
+  await (await imp('e2ee.js')).e2eePanel('c1'); await tick();
+});
+await step('0.34.0 thread panel + smart replies', async () => {
+  (await imp('threads.js')).openThread(chatDirect, msgs[0]); await tick();
+  const host = new El('div');
+  await (await imp('smartreplies.js')).loadSmartReplies('c1', host, () => {}); await tick();
 });
 await step('emoji picker', async () => { const anchor = new El('button'); document.body.appendChild(anchor); (await imp('emoji.js')).openEmojiPicker(anchor, () => {}); });
 await step('chat list filters', async () => {

@@ -84,7 +84,7 @@ db.exec(`
     chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
     type       TEXT NOT NULL DEFAULT 'text'
-      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist')),
+      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist','sticker','board','game','livelocation')),
     body       TEXT NOT NULL DEFAULT '',
     attachment TEXT,
     reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
@@ -92,8 +92,21 @@ db.exec(`
     edited_at  INTEGER,
     deleted_at INTEGER,
     -- Disappearing messages: when set, the row is purged once this passes.
-    expires_at INTEGER
+    expires_at INTEGER,
+    -- ---- „Alles" (0.34.0) -----------------------------------------------
+    -- Threads: a reply that belongs to a thread carries the root message id
+    -- here; thread_count on the root is the running number of thread replies.
+    thread_root  TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    thread_count INTEGER NOT NULL DEFAULT 0,
+    -- View-once media: viewed_at is stamped on first open, after which the
+    -- payload is stripped and the row scheduled for removal.
+    view_once    INTEGER NOT NULL DEFAULT 0,
+    viewed_at    INTEGER,
+    -- Opt-in E2EE: 1 = body/attachment hold ciphertext the server can't read.
+    enc          INTEGER NOT NULL DEFAULT 0
   );
+  -- NOTE: the idx_messages_thread index is created in ensureColumns() (not here),
+  -- because on an existing database thread_root only appears after the ALTER.
   CREATE INDEX IF NOT EXISTS idx_messages_chat
     ON messages(chat_id, created_at);
   -- The admin dashboard counts messages/users in time windows (created_at only,
@@ -654,6 +667,181 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_tasklist_items_list
     ON tasklist_items(tasklist_id, sort);
+
+  -- ---- „Alles" (0.34.0) — Mega-Release side-tables -------------------------
+
+  -- Sticker packs + stickers. A sticker message (type='sticker') references a
+  -- sticker id; the bytes live under uploads/ like any other attachment.
+  CREATE TABLE IF NOT EXISTS sticker_packs (
+    id         TEXT PRIMARY KEY,
+    owner_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    name       TEXT NOT NULL,
+    cover      TEXT,                 -- upload id of the pack cover sticker
+    builtin    INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS stickers (
+    id         TEXT PRIMARY KEY,
+    pack_id    TEXT NOT NULL REFERENCES sticker_packs(id) ON DELETE CASCADE,
+    upload_id  TEXT NOT NULL,        -- bytes in uploads/
+    emoji      TEXT NOT NULL DEFAULT '',
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_stickers_pack ON stickers(pack_id, sort);
+
+  -- Kanban boards (type='board'). Columns + cards live here and ride along in
+  -- messageView.board, exactly like polls/tasklists.
+  CREATE TABLE IF NOT EXISTS boards (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS board_columns (
+    id         TEXT PRIMARY KEY,
+    board_id   TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS board_cards (
+    id         TEXT PRIMARY KEY,
+    board_id   TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    column_id  TEXT NOT NULL REFERENCES board_columns(id) ON DELETE CASCADE,
+    text       TEXT NOT NULL,
+    sort       INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_board_columns_board ON board_columns(board_id, sort);
+  CREATE INDEX IF NOT EXISTS idx_board_cards_col ON board_cards(column_id, sort);
+
+  -- In-chat mini-games (type='game'). state is a small JSON blob the game
+  -- module interprets (board, turn, winner …).
+  CREATE TABLE IF NOT EXISTS games (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,        -- 'tictactoe' | 'connect4' | …
+    state      TEXT NOT NULL,        -- JSON game state
+    turn       TEXT REFERENCES users(id) ON DELETE SET NULL,
+    winner     TEXT,                 -- user id, 'draw', or NULL while in play
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  -- Live location: one active share per (user, chat); the row is updated in
+  -- place as the position moves and purged once expires_at passes.
+  CREATE TABLE IF NOT EXISTS live_locations (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    lat        REAL NOT NULL,
+    lng        REAL NOT NULL,
+    accuracy   REAL,
+    heading    REAL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_live_locations_chat ON live_locations(chat_id);
+
+  -- Collaborative group notes / wiki pages (one or more per chat).
+  CREATE TABLE IF NOT EXISTS chat_notes (
+    id         TEXT PRIMARY KEY,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    body       TEXT NOT NULL DEFAULT '',
+    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_notes_chat ON chat_notes(chat_id, updated_at);
+
+  -- Per-user, per-chat appearance: wallpaper + accent. Device-agnostic (synced).
+  CREATE TABLE IF NOT EXISTS chat_appearance (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    wallpaper  TEXT,                 -- preset id or upload id
+    accent     TEXT,                 -- hex colour
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+  );
+
+  -- Scheduled calls. A pre-call reminder fires once via the maintenance sweep,
+  -- exactly like event reminders (remind_at / reminded_at).
+  CREATE TABLE IF NOT EXISTS scheduled_calls (
+    id          TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    video       INTEGER NOT NULL DEFAULT 0,
+    start_at    INTEGER NOT NULL,
+    remind_at   INTEGER,
+    reminded_at INTEGER,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scheduled_calls_remind
+    ON scheduled_calls(remind_at) WHERE remind_at IS NOT NULL AND reminded_at IS NULL;
+
+  -- Voice-note transcripts (on-prem Whisper). One row per voice message; status
+  -- is 'pending' until the worker fills text in.
+  CREATE TABLE IF NOT EXISTS voice_transcripts (
+    message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    text       TEXT NOT NULL DEFAULT '',
+    lang       TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  -- Webhooks / bots. Incoming hooks post into a chat via a secret token;
+  -- outgoing hooks (url set) mirror chat messages out. token is URL-safe.
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id          TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    owner_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    name        TEXT NOT NULL,
+    token       TEXT NOT NULL UNIQUE,
+    direction   TEXT NOT NULL DEFAULT 'in',  -- 'in' | 'out'
+    url         TEXT,                         -- target for outgoing hooks
+    created_at  INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked_at  INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_webhooks_chat ON webhooks(chat_id);
+
+  -- Opt-in E2EE: each user publishes a long-term public identity key; sessions
+  -- record the agreed-on per-DM verification (safety number) state. Private
+  -- keys never reach the server.
+  CREATE TABLE IF NOT EXISTS e2ee_identities (
+    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    public_key TEXT NOT NULL,        -- base64url SPKI / raw X25519 pubkey
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS e2ee_sessions (
+    chat_id    TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    enabled_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  -- Login approvals: a new device's pending login waits here until an existing
+  -- device approves it (then a token is issued and the row consumed).
+  CREATE TABLE IF NOT EXISTS login_approvals (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code       TEXT NOT NULL,
+    device     TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    status     TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_login_approvals_user ON login_approvals(user_id, status);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -856,6 +1044,47 @@ function ensureColumns() {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at) WHERE expires_at IS NOT NULL'
   );
+
+  // ---- „Alles" (0.34.0): new columns on pre-existing tables ----------------
+  // Threads, view-once and E2EE add columns to messages. migrateMessageTypes034
+  // (below) rebuilds the table copying these, so they must exist *before* it
+  // runs — hence here in ensureColumns(), which runs first.
+  if (!msgCols.includes('thread_root')) {
+    db.exec('ALTER TABLE messages ADD COLUMN thread_root TEXT REFERENCES messages(id) ON DELETE SET NULL');
+  }
+  if (!msgCols.includes('thread_count')) {
+    db.exec('ALTER TABLE messages ADD COLUMN thread_count INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!msgCols.includes('view_once')) {
+    db.exec('ALTER TABLE messages ADD COLUMN view_once INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!msgCols.includes('viewed_at')) {
+    db.exec('ALTER TABLE messages ADD COLUMN viewed_at INTEGER');
+  }
+  if (!msgCols.includes('enc')) {
+    db.exec('ALTER TABLE messages ADD COLUMN enc INTEGER NOT NULL DEFAULT 0');
+  }
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_root, created_at) WHERE thread_root IS NOT NULL'
+  );
+  // 0.34.0: account-level default disappearing timer (seconds; 0 = off). Applied
+  // to every *new* chat the user starts (per-chat expire_seconds already exists).
+  if (!userCols.includes('default_ttl')) {
+    db.exec('ALTER TABLE users ADD COLUMN default_ttl INTEGER NOT NULL DEFAULT 0');
+  }
+  // Per-member chat lock + hide (personal; not shown until unlocked).
+  const cmCols034 = db.prepare('PRAGMA table_info(chat_members)').all().map((c) => c.name);
+  if (!cmCols034.includes('locked')) {
+    db.exec('ALTER TABLE chat_members ADD COLUMN locked INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!cmCols034.includes('hidden')) {
+    db.exec('ALTER TABLE chat_members ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0');
+  }
+  // Recurring events: RRULE-lite ('', 'daily', 'weekly', 'monthly').
+  const eventCols = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+  if (!eventCols.includes('recur')) {
+    db.exec("ALTER TABLE events ADD COLUMN recur TEXT NOT NULL DEFAULT ''");
+  }
 }
 ensureColumns();
 
@@ -995,6 +1224,67 @@ function migrateMessageTypesPlans() {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 migrateMessageTypesPlans();
+
+// 0.34.0 "Alles": allow the 'sticker', 'board', 'game' and 'livelocation'
+// message types, and carry the new thread/view-once/enc columns through the
+// rebuild. FTS-aware exactly like migrateMessageTypesPlans(): dropping the old
+// `messages` table removes the messages_fts triggers, so we drop the orphaned
+// index and let setupFts() (next) rebuild it + backfill. The thread/view-once/
+// enc columns are added by ensureColumns() above, so they exist here to copy.
+function migrateMessageTypes034() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'")
+    .get();
+  if (!row || /'sticker'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist','sticker','board','game','livelocation')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER,
+        expires_at INTEGER,
+        thread_root  TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        thread_count INTEGER NOT NULL DEFAULT 0,
+        view_once    INTEGER NOT NULL DEFAULT 0,
+        viewed_at    INTEGER,
+        enc          INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+         edited_at, deleted_at, expires_at, thread_root, thread_count,
+         view_once, viewed_at, enc)
+        SELECT id, chat_id, sender_id, type, body, attachment, reply_to,
+               created_at, edited_at, deleted_at, expires_at, thread_root,
+               thread_count, view_once, viewed_at, enc
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_expires
+        ON messages(expires_at) WHERE expires_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_messages_thread
+        ON messages(thread_root, created_at) WHERE thread_root IS NOT NULL;
+      DROP TABLE IF EXISTS messages_fts;
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateMessageTypes034();
 
 // ---- Full-text search (FTS5) ----------------------------------------------
 //

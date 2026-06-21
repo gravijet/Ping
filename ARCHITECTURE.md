@@ -295,6 +295,50 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## "Alles" mega-release (0.34.0)
+The biggest single release: **25 features across all four pillars** plus minimal,
+strictly-private AI, **each behind its own remote flag** (so the whole thing
+dark-ships). Nothing invents a new architecture pattern — it applies the existing
+ones (poll/event structured-message recipe, maintenance-sweep, push pipeline,
+hub mesh) broadly.
+
+- **Four new structured message types** — `sticker`, `board`, `game`,
+  `livelocation` — follow the poll pattern (side table → `messageView` →
+  realtime/offline/FTS for free). `migrateMessageTypes034()` widens the
+  `messages.type` CHECK and adds the columns `thread_root` / `thread_count` /
+  `view_once` / `viewed_at` / `enc`, dropping the orphaned `messages_fts` so
+  `setupFts()` rebuilds it (the standing FTS-migration gotcha; verified on a
+  `VACUUM INTO` prod snapshot). Side tables added for stickers/boards/games/live
+  locations/notes/appearance/scheduled-calls/transcripts/webhooks/E2EE/login
+  approvals; new columns `users.default_ttl`, `chat_members.locked/hidden`,
+  `events.recur`.
+- **Threads** — `messages.thread_root` keeps replies out of `m.history`; the root
+  carries `thread_count`. `threadReplies()` + `thread-reply` socket.
+- **Group calls** — `hub.js` grows a `callRooms` mesh (join/leave/offer/answer/ice
+  + roster broadcast, cleaned up on socket close).
+- **Scheduled calls / recurring events / live-location expiry** hang off the
+  **maintenance sweep** (`dueScheduledCalls`, `dueRecurringEvents` → spawn next
+  occurrence, `dueExpiredLiveLocations` → purge). **Login approvals** are purged
+  there too.
+- **View-once** — `messageView` withholds the attachment from non-senders;
+  `POST …/view` hands the bytes out exactly once (`openViewOnce`) then flips
+  `viewed_at` so it's gone for everyone.
+- **Opt-in E2EE (DMs)** — `e2eeRepo.js` stores only public identity keys + per-chat
+  session state + ciphertext; the server is blind. The web client does WebCrypto
+  ECDH(P-256)→AES-GCM, encrypt-on-send (`enc:true`) / decrypt-on-render, and a
+  safety number from both public keys. All three preview helpers + push never see
+  plaintext.
+- **Private AI** — `transcribe.js` (whisper.cpp via `WHISPER_BIN`, transcript joins
+  `messageView` + FTS), `translate.js` (LibreTranslate via `LIBRETRANSLATE_URL`),
+  catch-up (`summariseMessages`, extractive) and smart replies (`smartReplies`,
+  rule-based). All opt-in/local and graceful when unconfigured — no cloud LLM.
+- **Web** — 16 new modules wired into `chat.js` (render cards + view-once +
+  transcript + thread chip + smart-reply chips + E2EE), the attach menu, the info
+  panel "Mehr" section, the security centre and the calls pane. Windows inherits it
+  all via the WebView2 wrapper. Android gets every server feature over OTA and the
+  four new types render as labelled placeholders (web/desktop-first, as with
+  events/tasks in 0.33.0).
+
 ## Plans & tasks (0.33.0)
 Two new **structured message types**, both following the poll pattern: a normal
 `messages` row (`type='event'` / `'tasklist'`) whose payload lives in a side table

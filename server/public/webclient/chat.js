@@ -29,6 +29,11 @@ import { firstUrl, attachLinkPreview } from './linkpreview.js';
 import * as quickreplies from './quickreplies.js';
 import { renderEvent } from './events.js';
 import { renderTaskList } from './tasks.js';
+import { renderSticker } from './stickers.js';
+import { renderBoard } from './boards.js';
+import { renderGame } from './games.js';
+import { renderLiveLocation } from './livelocation.js';
+import { threadChip, openThread } from './threads.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -115,6 +120,11 @@ export async function openChat(slot, chatId, { onBack, focusMessageId } = {}) {
   cur.thread = thread; cur.head = head; cur.composerWrap = composerWrap; cur.jump = jump;
   cur.pinBar = pinBar; cur.pins = []; cur.pinIdx = 0;
   renderComposer();
+
+  // 0.34.0: apply this user's saved per-chat appearance (wallpaper + accent).
+  if (flag('chatThemes')) import('./chatthemes.js').then((m) => m.applyChatAppearance(chatId)).catch(() => {});
+  // 0.34.0: warm the E2EE session so encrypted bubbles decrypt on first paint.
+  if (flag('e2ee') && chat.type === 'direct') import('./e2ee.js').then((m) => m.loadSession(chatId)).catch(() => {});
 
   cur.unsubs.push(store.on('messages:' + chatId, () => renderThread()));
   cur.unsubs.push(store.on('typing:' + chatId, () => updateHeadSub()));
@@ -364,6 +374,19 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderEvent(m));
   } else if (m.type === 'tasklist') {
     bubble.appendChild(renderTaskList(m));
+  } else if (m.type === 'sticker') {
+    bubble.appendChild(renderSticker(m));
+    bubble.classList.add('sticker-bubble');
+  } else if (m.type === 'board') {
+    bubble.appendChild(renderBoard(m));
+  } else if (m.type === 'game') {
+    bubble.appendChild(renderGame(m));
+  } else if (m.type === 'livelocation') {
+    bubble.appendChild(renderLiveLocation(m));
+  } else if (m.viewOnce) {
+    bubble.appendChild(renderViewOnce(m, mine));
+  } else if (m.enc) {
+    bubble.appendChild(renderEncrypted(m, chat));
   } else {
     if (m.attachment) bubble.appendChild(renderAttachment(m.attachment, { onImageClick: () => openChatMedia(m) }));
     if (m.body) {
@@ -371,6 +394,14 @@ function renderMessage(m, chat, first) {
       // Unfurl the first link into a rich preview card (lazy, no attachment).
       if (!m.attachment) attachLinkPreview(bubble, firstUrl(m.body));
     }
+    // 0.34.0: voice notes carry an on-prem transcript once ready — show it.
+    if (m.type === 'voice' && m.transcript) bubble.appendChild(renderTranscript(m.transcript));
+  }
+
+  // 0.34.0: a "💬 N Antworten" chip under any message that has thread replies.
+  if (!m.deleted && flag('threads')) {
+    const chip = threadChip(m, chat);
+    if (chip) bubble.appendChild(chip);
   }
 
   if (!m.deleted) {
@@ -410,6 +441,49 @@ function renderMessage(m, chat, first) {
     });
   }
   return wrap;
+}
+
+// 0.34.0 view-once: the bytes are withheld by the server until opened. The
+// sender sees a static "Einmal ansehen" marker (and whether it's been seen); a
+// recipient taps to fetch the bytes exactly once, then it's gone for everyone.
+function renderViewOnce(m, mine) {
+  if (mine) {
+    return el('div', { class: 'viewonce mine' }, [
+      icon('eye'), el('span', { text: m.viewed ? 'Angesehen' : 'Einmal ansehen · gesendet' }),
+    ]);
+  }
+  if (m.viewed) {
+    return el('div', { class: 'viewonce spent' }, [icon('eye'), el('span', { text: 'Bereits angesehen' })]);
+  }
+  const box = el('button', { class: 'viewonce open', onClick: () => openViewOnce(m, box) },
+    [icon('eye'), el('span', { text: 'Einmal ansehen' })]);
+  return box;
+}
+async function openViewOnce(m, box) {
+  try {
+    const { attachment } = await api.post(`/chats/${cur.chatId}/messages/${m.id}/view`, {});
+    if (box) {
+      box.replaceWith(renderAttachment(attachment, { onImageClick: () => {} }));
+    }
+  } catch (e) { toast(e.message || 'Inhalt nicht mehr verfügbar.', 'err'); }
+}
+
+// 0.34.0 E2EE: an encrypted body is opaque ciphertext. Try to decrypt it on the
+// device (when a session is active); otherwise show a neutral lock marker.
+function renderEncrypted(m, chat) {
+  const span = el('span', { class: 'enc-body', text: '🔒 Verschlüsselte Nachricht' });
+  import('./e2ee.js').then((e) => e.decrypt(cur.chatId, m)).then((txt) => {
+    if (txt) span.textContent = txt;
+  }).catch(() => {});
+  return span;
+}
+
+// 0.34.0: an on-prem (Whisper) transcript line under a voice note.
+function renderTranscript(t) {
+  if (!t || (t.status !== 'done' && !t.text)) {
+    return el('div', { class: 'transcript pending', text: '🎤 Transkription läuft …' });
+  }
+  return el('div', { class: 'transcript' }, [el('span', { class: 'tr-ic', text: '🎤' }), el('span', { text: t.text })]);
 }
 
 function renderReactions(m) {
@@ -494,9 +568,14 @@ function msgMenu(e, m, mine) {
   const pinned = m.pinned || (cur.pins || []).some((p) => p.id === m.id);
   openMenu(e, [
     { label: 'Antworten', icon: 'reply', onClick: () => setReply(m) },
+    flag('threads') && !m.threadRoot && m.type === 'text'
+      ? { label: 'Im Thread antworten', icon: 'chat', onClick: () => openThread(chat, m) } : null,
     canReplyPrivately ? { label: 'Privat antworten', icon: 'user',
       onClick: () => import('./contacts.js').then((c) => c.startDirect(m.senderId)) } : null,
     { label: 'Weiterleiten', icon: 'forward', onClick: () => forwardMessage(m) },
+    flag('translation') && m.body && !m.enc
+      ? { label: 'Übersetzen', icon: 'compass', onClick: () => import('./translate.js').then((t) =>
+          t.translateMessage(m, document.getElementById('msg-' + m.id))) } : null,
     { label: 'Auswählen', icon: 'check', onClick: () => enterSelect(m) },
     chat?.type !== 'system' ? { label: pinned ? 'Loslösen' : 'Anpinnen', icon: 'pin',
       onClick: () => togglePin(m) } : null,
@@ -683,6 +762,19 @@ function renderComposer() {
         { meId: store.state.me?.id, anchor: cur.composerWrap })
     : null;
 
+  // 0.34.0: heuristic smart-reply chips when the last message is inbound text.
+  if (flag('smartReplies') && !cur.editing) {
+    const hist = store.getHistory(cur.chatId);
+    const last = hist[hist.length - 1];
+    if (last && last.senderId !== store.state.me?.id && last.type === 'text' && !last.enc) {
+      const row = el('div', { class: 'smart-replies' });
+      wrap.insertBefore(row, composer);
+      import('./smartreplies.js').then((m) => m.loadSmartReplies(cur.chatId, row, (txt) => {
+        ta.value = txt; ta.dispatchEvent(new Event('input')); ta.focus(); row.remove();
+      })).catch(() => {});
+    }
+  }
+
   async function submit() {
     closeEmoji();
     const text = ta.value.trim();
@@ -700,7 +792,17 @@ function renderComposer() {
     drafts.clear(chatId);          // the draft has been committed
     renderComposer();
     try {
-      const r = await api.post(`/chats/${chatId}/messages`, { body: text, ...(replyTo ? { replyTo } : {}) });
+      // 0.34.0 E2EE: when the DM's session is active, encrypt on-device and post
+      // opaque ciphertext (enc:true). Falls back to plaintext if encryption fails.
+      let body = text, enc = false;
+      if (flag('e2ee')) {
+        const e2 = await import('./e2ee.js');
+        if (e2.isActive(chatId)) {
+          const ct = await e2.encryptFor(chatId, text);
+          if (ct) { body = ct; enc = true; }
+        }
+      }
+      const r = await api.post(`/chats/${chatId}/messages`, { body, ...(enc ? { enc: true } : {}), ...(replyTo ? { replyTo } : {}) });
       store.addMessage(chatId, r.message);
       recordSent(chatId);          // device-local insights tally
     } catch (e) {
@@ -795,13 +897,20 @@ function quickReplyMenu(e, ta) {
 function attachMenu(e) {
   openMenu(e, [
     { label: 'Foto / Video', icon: 'image', onClick: () => attach('image/*,video/*') },
+    flag('viewOnce') ? { label: 'Einmal ansehen', icon: 'eye', onClick: () => attach('image/*,video/*', { viewOnce: true }) } : null,
     { label: 'Datei', icon: 'file', onClick: () => attach('') },
+    flag('stickers') ? { label: 'Sticker', icon: 'emoji', onClick: () => import('./stickers.js').then((m) => m.openStickerPicker(cur.chatId)) } : null,
+    flag('gifSearch') ? { label: 'GIF', icon: 'image', onClick: () => import('./gifsearch.js').then((m) => m.openGifPicker(cur.chatId)) } : null,
     { label: 'Kontakt', icon: 'user', onClick: () => shareContact() },
     { label: 'Standort', icon: 'pin', onClick: () => sendLocation() },
+    flag('liveLocation') ? { label: 'Live-Standort', icon: 'compass', onClick: () => import('./livelocation.js').then((m) => m.startLiveLocation(cur.chatId)) } : null,
     { label: 'Zeichnen', icon: 'paint', onClick: () => import('./draw.js').then((m) => m.drawModal(cur.chatId)) },
     { label: 'Umfrage', icon: 'poll', onClick: () => import('./groups.js').then((m) => m.newPollModal(cur.chatId)) },
     flag('events') ? { label: 'Termin', icon: 'calendar', onClick: () => import('./events.js').then((m) => m.newEventModal(cur.chatId)) } : null,
     flag('taskLists') ? { label: 'Aufgabenliste', icon: 'tasks', onClick: () => import('./tasks.js').then((m) => m.newTaskListModal(cur.chatId)) } : null,
+    flag('boards') ? { label: 'Board', icon: 'tasks', onClick: () => import('./boards.js').then((m) => m.newBoardModal(cur.chatId)) } : null,
+    flag('miniGames') ? { label: 'Spiel', icon: 'poll', onClick: () => import('./games.js').then((m) => m.newGameModal(cur.chatId)) } : null,
+    flag('scheduledCalls') ? { label: 'Anruf planen', icon: 'phone', onClick: () => import('./scheduledcalls.js').then((m) => m.scheduleCallModal(cur.chatId)) } : null,
     { label: 'Geplante Nachricht', icon: 'schedule', onClick: () => scheduleModal() },
   ].filter(Boolean));
 }
@@ -852,16 +961,16 @@ function sendLocation() {
     toast(err.code === err.PERMISSION_DENIED ? 'Standort-Zugriff verweigert.' : 'Standort nicht verfügbar.', 'err');
   }, { enableHighAccuracy: true, timeout: 10000 });
 }
-async function attach(accept) {
+async function attach(accept, opts = {}) {
   const file = await pickFile(accept);
   if (!file) return;
-  await uploadAndSend(file);
+  await uploadAndSend(file, opts);
 }
-async function uploadAndSend(file) {
+async function uploadAndSend(file, { viewOnce = false } = {}) {
   const chatId = cur.chatId;
   try {
     toast('Lädt hoch …');
-    const msg = await sendAttachment(chatId, file, { replyTo: cur.replyTo?.id || null });
+    const msg = await sendAttachment(chatId, file, { replyTo: cur.replyTo?.id || null, viewOnce });
     cur.replyTo = null; renderComposer();
     store.addMessage(chatId, msg);
   } catch (e) { toast(e.message || 'Upload fehlgeschlagen', 'err'); }
