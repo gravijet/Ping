@@ -89,6 +89,244 @@ class PollData {
       };
 }
 
+// ── „Alles" (0.34.0) structured-message payloads ───────────────────────────
+
+/// One attendee of an event (RSVP roster row).
+class EventAttendee {
+  final String userId;
+  final String status; // going | maybe | declined
+  final String displayName;
+  const EventAttendee(
+      {required this.userId, required this.status, required this.displayName});
+  factory EventAttendee.fromJson(Map<String, dynamic> j) => EventAttendee(
+        userId: (j['userId'] ?? '') as String,
+        status: (j['status'] ?? '') as String,
+        displayName: (j['displayName'] ?? '') as String,
+      );
+  Map<String, dynamic> toJson() =>
+      {'userId': userId, 'status': status, 'displayName': displayName};
+}
+
+/// Event ("Termin") payload on a message of type 'event'.
+class EventData {
+  final String id;
+  final String title;
+  final String description;
+  final String location;
+  final int startAt;
+  final String? myStatus; // going | maybe | declined | null
+  final Map<String, int> counts; // going/maybe/declined → n
+  final List<EventAttendee> attendees;
+
+  const EventData({
+    required this.id,
+    required this.title,
+    required this.startAt,
+    this.description = '',
+    this.location = '',
+    this.myStatus,
+    this.counts = const {},
+    this.attendees = const [],
+  });
+
+  factory EventData.fromJson(Map<String, dynamic> j) => EventData(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? 'Termin') as String,
+        description: (j['description'] ?? '') as String,
+        location: (j['location'] ?? '') as String,
+        startAt: (j['startAt'] as num?)?.toInt() ?? 0,
+        myStatus: j['myStatus'] as String?,
+        counts: (j['counts'] as Map?)?.map(
+                (k, v) => MapEntry(k as String, (v as num).toInt())) ??
+            const {},
+        attendees: ((j['attendees'] as List?) ?? const [])
+            .map((e) => EventAttendee.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'description': description,
+        'location': location,
+        'startAt': startAt,
+        if (myStatus != null) 'myStatus': myStatus,
+        'counts': counts,
+        'attendees': attendees.map((a) => a.toJson()).toList(),
+      };
+}
+
+/// One checklist item of a task list.
+class TaskItem {
+  final String id;
+  final String text;
+  final bool done;
+  final String doneByName;
+  const TaskItem(
+      {required this.id,
+      required this.text,
+      required this.done,
+      this.doneByName = ''});
+  factory TaskItem.fromJson(Map<String, dynamic> j) => TaskItem(
+        id: (j['id'] ?? '') as String,
+        text: (j['text'] ?? '') as String,
+        done: (j['done'] ?? false) as bool,
+        doneByName: (j['doneByName'] ?? '') as String,
+      );
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'text': text, 'done': done, 'doneByName': doneByName};
+}
+
+/// Task-list ("Aufgaben") payload on a message of type 'tasklist'.
+class TaskListData {
+  final String id;
+  final String title;
+  final List<TaskItem> items;
+  final int total;
+  final int completed;
+  const TaskListData({
+    required this.id,
+    required this.title,
+    required this.items,
+    required this.total,
+    required this.completed,
+  });
+  factory TaskListData.fromJson(Map<String, dynamic> j) => TaskListData(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? 'Aufgaben') as String,
+        items: ((j['items'] as List?) ?? const [])
+            .map((e) => TaskItem.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        completed: (j['completed'] as num?)?.toInt() ?? 0,
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'items': items.map((i) => i.toJson()).toList(),
+        'total': total,
+        'completed': completed,
+      };
+}
+
+/// One kanban card.
+class BoardCard {
+  final String id;
+  final String text;
+  const BoardCard({required this.id, required this.text});
+  factory BoardCard.fromJson(Map<String, dynamic> j) =>
+      BoardCard(id: (j['id'] ?? '') as String, text: (j['text'] ?? '') as String);
+  Map<String, dynamic> toJson() => {'id': id, 'text': text};
+}
+
+/// One kanban column with its cards.
+class BoardColumn {
+  final String id;
+  final String title;
+  final List<BoardCard> cards;
+  const BoardColumn(
+      {required this.id, required this.title, this.cards = const []});
+  factory BoardColumn.fromJson(Map<String, dynamic> j) => BoardColumn(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? '') as String,
+        cards: ((j['cards'] as List?) ?? const [])
+            .map((e) => BoardCard.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'title': title, 'cards': cards.map((c) => c.toJson()).toList()};
+}
+
+/// Kanban-board payload on a message of type 'board'.
+class BoardData {
+  final String id;
+  final String title;
+  final List<BoardColumn> columns;
+  const BoardData(
+      {required this.id, required this.title, this.columns = const []});
+  factory BoardData.fromJson(Map<String, dynamic> j) => BoardData(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? 'Board') as String,
+        columns: ((j['columns'] as List?) ?? const [])
+            .map((e) => BoardColumn.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'columns': columns.map((c) => c.toJson()).toList(),
+      };
+}
+
+/// Mini-game payload on a message of type 'game'.
+class GameData {
+  final String kind; // tictactoe | connect4
+  final List<int?> cells;
+  final List<String> players;
+  final String? turn;
+  final String? winner; // a userId, 'draw', or null
+  const GameData({
+    required this.kind,
+    required this.cells,
+    required this.players,
+    this.turn,
+    this.winner,
+  });
+  factory GameData.fromJson(Map<String, dynamic> j) => GameData(
+        kind: (j['kind'] ?? 'tictactoe') as String,
+        cells: ((j['cells'] as List?) ?? const [])
+            .map((e) => e == null ? null : (e as num).toInt())
+            .toList(),
+        players: ((j['players'] as List?) ?? const []).cast<String>(),
+        turn: j['turn'] as String?,
+        winner: j['winner'] as String?,
+      );
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'cells': cells,
+        'players': players,
+        if (turn != null) 'turn': turn,
+        if (winner != null) 'winner': winner,
+      };
+}
+
+/// Live-location payload on a message of type 'livelocation'.
+class LiveLocationData {
+  final bool active;
+  final double? lat;
+  final double? lng;
+  final int? updatedAt;
+  final int? expiresAt;
+  const LiveLocationData(
+      {required this.active, this.lat, this.lng, this.updatedAt, this.expiresAt});
+  factory LiveLocationData.fromJson(Map<String, dynamic> j) => LiveLocationData(
+        active: (j['active'] ?? false) as bool,
+        lat: (j['lat'] as num?)?.toDouble(),
+        lng: (j['lng'] as num?)?.toDouble(),
+        updatedAt: (j['updatedAt'] as num?)?.toInt(),
+        expiresAt: (j['expiresAt'] as num?)?.toInt(),
+      );
+  Map<String, dynamic> toJson() => {
+        'active': active,
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        if (updatedAt != null) 'updatedAt': updatedAt,
+        if (expiresAt != null) 'expiresAt': expiresAt,
+      };
+}
+
+/// On-prem voice transcript payload (rides along on a 'voice' message).
+class TranscriptData {
+  final String status; // queued | running | done | failed
+  final String text;
+  const TranscriptData({required this.status, this.text = ''});
+  factory TranscriptData.fromJson(Map<String, dynamic> j) => TranscriptData(
+        status: (j['status'] ?? '') as String,
+        text: (j['text'] ?? '') as String,
+      );
+  Map<String, dynamic> toJson() => {'status': status, 'text': text};
+}
+
 /// A media attachment carried by a message (or a status). The [url] is always a
 /// server-relative path like `/api/uploads/<id>`; the app prefixes the base URL.
 class Attachment {
@@ -162,6 +400,28 @@ class Message {
 
   /// Poll payload for messages of type 'poll' (question, options, votes).
   final PollData? poll;
+
+  // ── „Alles" (0.34.0) structured payloads (each null unless the type matches).
+  final EventData? event;
+  final TaskListData? tasklist;
+  final BoardData? board;
+  final GameData? game;
+  final LiveLocationData? liveLocation;
+
+  /// On-prem transcript that rides along on a 'voice' message (may be pending).
+  final TranscriptData? transcript;
+
+  /// How many replies hang off this message in its thread (0 = none).
+  final int threadCount;
+
+  /// View-once media: [viewOnce] marks it; [viewed] is true once it's been
+  /// opened (after which the bytes are withheld for everyone).
+  final bool viewOnce;
+  final bool viewed;
+
+  /// End-to-end encrypted body (opaque ciphertext). The app shows a neutral
+  /// marker — on-device decryption is web/desktop-first.
+  final bool enc;
   MessageStatus? status; // only meaningful for messages I sent
 
   /// Emoji reactions on this message: emoji → count, plus the set of emojis the
@@ -193,6 +453,16 @@ class Message {
     this.deleted = false,
     this.expiresAt,
     this.poll,
+    this.event,
+    this.tasklist,
+    this.board,
+    this.game,
+    this.liveLocation,
+    this.transcript,
+    this.threadCount = 0,
+    this.viewOnce = false,
+    this.viewed = false,
+    this.enc = false,
     this.status,
     this.quoted,
     this.reactions = const {},
@@ -279,6 +549,14 @@ class Message {
     Map<String, int>? reactions,
     Set<String>? myReactions,
     PollData? poll,
+    EventData? event,
+    TaskListData? tasklist,
+    BoardData? board,
+    GameData? game,
+    LiveLocationData? liveLocation,
+    TranscriptData? transcript,
+    int? threadCount,
+    bool? viewed,
     bool? pinned,
     bool? starred,
   }) =>
@@ -296,6 +574,16 @@ class Message {
         deleted: deleted ?? this.deleted,
         expiresAt: expiresAt,
         poll: poll ?? this.poll,
+        event: event ?? this.event,
+        tasklist: tasklist ?? this.tasklist,
+        board: board ?? this.board,
+        game: game ?? this.game,
+        liveLocation: liveLocation ?? this.liveLocation,
+        transcript: transcript ?? this.transcript,
+        threadCount: threadCount ?? this.threadCount,
+        viewOnce: viewOnce,
+        viewed: viewed ?? this.viewed,
+        enc: enc,
         status: status ?? this.status,
         quoted: quoted,
         reactions: reactions ?? this.reactions,
@@ -318,6 +606,16 @@ class Message {
         if (editCount > 0) 'editCount': editCount,
         if (expiresAt != null) 'expiresAt': expiresAt,
         if (poll != null) 'poll': poll!.toJson(),
+        if (event != null) 'event': event!.toJson(),
+        if (tasklist != null) 'tasklist': tasklist!.toJson(),
+        if (board != null) 'board': board!.toJson(),
+        if (game != null) 'game': game!.toJson(),
+        if (liveLocation != null) 'liveLocation': liveLocation!.toJson(),
+        if (transcript != null) 'transcript': transcript!.toJson(),
+        if (threadCount > 0) 'threadCount': threadCount,
+        if (viewOnce) 'viewOnce': true,
+        if (viewed) 'viewed': true,
+        if (enc) 'enc': true,
         'deleted': deleted,
         if (status != null && status != MessageStatus.sending &&
             status != MessageStatus.failed)
@@ -353,6 +651,29 @@ class Message {
         poll: json['poll'] != null
             ? PollData.fromJson(json['poll'] as Map<String, dynamic>)
             : null,
+        event: json['event'] != null
+            ? EventData.fromJson(json['event'] as Map<String, dynamic>)
+            : null,
+        tasklist: json['tasklist'] != null
+            ? TaskListData.fromJson(json['tasklist'] as Map<String, dynamic>)
+            : null,
+        board: json['board'] != null
+            ? BoardData.fromJson(json['board'] as Map<String, dynamic>)
+            : null,
+        game: json['game'] != null
+            ? GameData.fromJson(json['game'] as Map<String, dynamic>)
+            : null,
+        liveLocation: json['liveLocation'] != null
+            ? LiveLocationData.fromJson(
+                json['liveLocation'] as Map<String, dynamic>)
+            : null,
+        transcript: json['transcript'] != null
+            ? TranscriptData.fromJson(json['transcript'] as Map<String, dynamic>)
+            : null,
+        threadCount: (json['threadCount'] as num?)?.toInt() ?? 0,
+        viewOnce: (json['viewOnce'] ?? false) as bool,
+        viewed: (json['viewed'] ?? false) as bool,
+        enc: (json['enc'] ?? false) as bool,
         deleted: (json['deleted'] ?? false) as bool,
         status: json['status'] != null
             ? statusFromString(json['status'] as String)

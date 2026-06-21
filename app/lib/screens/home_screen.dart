@@ -21,6 +21,7 @@ import 'app_navigation.dart';
 import 'archived_chats_screen.dart';
 import 'calls_tab.dart';
 import 'chat_screen.dart';
+import 'group_call_screen.dart';
 import 'new_chat_screen.dart';
 import 'reminders_screen.dart';
 import 'saved_messages_screen.dart';
@@ -64,6 +65,8 @@ class _HomeScreenState extends State<HomeScreen>
     state.onOpenTarget = _handleNotificationTarget;
     // Surface admin announcements while the app is open.
     state.onAnnouncement = _showAnnouncement;
+    // 0.34.0: a group call is live in one of your chats — offer to join it.
+    state.onGroupCallInvite = _showGroupCallInvite;
     // Consume any notification that was tapped before the UI was ready (e.g. a
     // cold launch from the system tray).
     final pending = state.takePendingTarget();
@@ -85,9 +88,33 @@ class _HomeScreenState extends State<HomeScreen>
     if (_state.onOpenTarget == _handleNotificationTarget) {
       _state.onOpenTarget = null;
     }
+    if (_state.onGroupCallInvite == _showGroupCallInvite) {
+      _state.onGroupCallInvite = null;
+    }
     _searchDebounce?.cancel();
     _tabs.dispose();
     super.dispose();
+  }
+
+  /// A group call is live in [chatId] — show a banner offering to join it.
+  void _showGroupCallInvite(String chatId, String callId) {
+    if (!mounted || _state.groupCall.isActive) return;
+    final chat = _state.chats.where((c) => c.id == chatId).firstOrNull;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 12),
+      content: Text('Gruppenanruf in ${chat?.title ?? 'einer Gruppe'}'),
+      action: SnackBarAction(
+        label: 'Beitreten',
+        onPressed: () async {
+          try {
+            await _state.startOrJoinGroupCall(chatId, callId: callId);
+            if (!mounted) return;
+            Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+          } catch (_) {/* permission denied — ignore */}
+        },
+      ),
+    ));
   }
 
   /// Debounced server-side search through the whole message history. Results

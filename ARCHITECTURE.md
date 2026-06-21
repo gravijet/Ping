@@ -335,9 +335,16 @@ hub mesh) broadly.
 - **Web** — 16 new modules wired into `chat.js` (render cards + view-once +
   transcript + thread chip + smart-reply chips + E2EE), the attach menu, the info
   panel "Mehr" section, the security centre and the calls pane. Windows inherits it
-  all via the WebView2 wrapper. Android gets every server feature over OTA and the
-  four new types render as labelled placeholders (web/desktop-first, as with
-  events/tasks in 0.33.0).
+  all via the WebView2 wrapper.
+- **Android (0.34.1)** — the Flutter app renders + drives every structured type
+  natively: `message_bubble.dart` gains content widgets (sticker/board/game/
+  livelocation/event/tasklist/view-once/transcript/thread-chip), `app_state.dart`
+  the interaction + create calls, `chat_screen.dart` the composers + handlers.
+  **Screenshot notice** uses the Android-14 `ScreenCaptureCallback`
+  (`MainActivity.kt` → `ping/native` → `launcher_service` → active chat).
+  **Group calls** are a mesh `GroupCallController` (one `RTCPeerConnection`/peer
+  over the `group-call-*` relay) + a tile-grid `GroupCallScreen`, behind the
+  `groupCalls` flag.
 
 ## Plans & tasks (0.33.0)
 Two new **structured message types**, both following the poll pattern: a normal

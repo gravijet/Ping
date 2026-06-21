@@ -23,6 +23,7 @@ import 'api_client.dart';
 import 'app_lock_service.dart';
 import 'audio_player_service.dart';
 import 'call_service.dart';
+import 'group_call_service.dart';
 import 'chat_cache_store.dart';
 import 'crash_service.dart';
 import 'device_info_service.dart';
@@ -186,6 +187,19 @@ class AppState extends ChangeNotifier {
     sendSignal: (type, payload) => _socket.send(type, payload),
     fetchIce: fetchIceServers,
   )..onLogged = _recordCall;
+
+  /// Mesh group-call controller (0.34.0). Lazily built; only used when the
+  /// `groupCalls` flag is on and a group call is started/joined.
+  GroupCallController? _groupCall;
+  GroupCallController get groupCall => _groupCall ??= GroupCallController(
+        sendSignal: (type, payload) => _socket.send(type, payload),
+        fetchIce: fetchIceServers,
+        selfId: me?.id ?? '',
+      );
+
+  /// Fired when a group call becomes active in a chat we're not yet in, so the
+  /// UI can offer to join. Carries (chatId, callId).
+  void Function(String chatId, String callId)? onGroupCallInvite;
 
   /// ICE servers (STUN/TURN) for a call, from `/api/ice`.
   Future<List<Map<String, dynamic>>> fetchIceServers() async {
@@ -625,6 +639,14 @@ class AppState extends ChangeNotifier {
     launcher.onLaunchRoute = (route) {
       final t = NotificationTarget.decode(route);
       if (t != null) dispatchNotificationTarget(t);
+    };
+    // 0.34.0: a screenshot taken while a chat is open posts a privacy notice to
+    // that chat (best-effort; the server drops a system message). Gated by the
+    // remote `screenshotAlerts` flag.
+    launcher.onScreenshot = () {
+      final chatId = _activeChatId;
+      if (chatId == null || !feature('screenshotAlerts', fallback: true)) return;
+      _api.post('/chats/$chatId/screenshot-notice').catchError((_) => null);
     };
     launcher.wire();
 
@@ -2525,6 +2547,147 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── „Alles" (0.34.0) structured-message creation ────────────────────────
+
+  /// Create an event ("Termin") in [chatId].
+  Future<void> createEvent(String chatId,
+      {required String title,
+      required int startAt,
+      String location = '',
+      String description = '',
+      int remindMinutes = 30}) async {
+    final res = await _api.post('/chats/$chatId/events', {
+      'title': title,
+      'startAt': startAt,
+      'location': location,
+      'description': description,
+      'remindMinutes': remindMinutes,
+    });
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Create a collaborative task list in [chatId].
+  Future<void> createTaskList(
+      String chatId, String title, List<String> items) async {
+    final res = await _api
+        .post('/chats/$chatId/tasklists', {'title': title, 'items': items});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Create a kanban board in [chatId].
+  Future<void> createBoard(
+      String chatId, String title, List<String> columns) async {
+    final res = await _api.post('/chats/$chatId/boards',
+        columns.isEmpty ? {'title': title} : {'title': title, 'columns': columns});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Start an in-chat mini-game ('tictactoe' | 'connect4').
+  Future<void> createGame(String chatId, String kind) async {
+    final res = await _api.post('/chats/$chatId/games', {'kind': kind});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Start or join a mesh group call in [chatId]. A fresh [callId] opens a new
+  /// call; passing an existing one joins it. Builds the participant-name lookup
+  /// from the chat's members. Returns the call id.
+  Future<String> startOrJoinGroupCall(String chatId,
+      {String? callId, bool video = false}) async {
+    final id = callId ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final chat = chats.firstWhere((c) => c.id == chatId,
+        orElse: () => throw ApiException('Chat nicht gefunden.', 404));
+    final names = {for (final m in chat.members) m.id: m.displayName};
+    await groupCall.join(chatId, id, video: video, names: names);
+    return id;
+  }
+
+  /// Schedule a call in [chatId] with an optional pre-call reminder.
+  Future<void> scheduleCall(String chatId,
+      {String title = '',
+      required int startAt,
+      bool video = false,
+      int remindMinutes = 10}) async {
+    await _api.post('/chats/$chatId/scheduled-calls', {
+      'title': title,
+      'startAt': startAt,
+      'video': video,
+      'remindMinutes': remindMinutes,
+    });
+  }
+
+  // ── „Alles" (0.34.0) structured-message interactions ────────────────────
+
+  /// Make a move in an in-chat mini-game (cell index / connect-4 column).
+  Future<void> gameMove(String chatId, String messageId, int cell) async {
+    final res = await _api
+        .post('/chats/$chatId/messages/$messageId/game/move', {'cell': cell});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// RSVP to an event ('going'/'maybe'/'declined' or null to withdraw).
+  Future<void> rsvpEvent(String chatId, String messageId, String? status) async {
+    final res = await _api
+        .post('/chats/$chatId/messages/$messageId/rsvp', {'status': status});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Tick / untick a task-list item.
+  Future<void> toggleTask(
+      String chatId, String messageId, String itemId, bool done) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/tasks/$itemId/toggle',
+        {'done': done});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Add a card to a board column.
+  Future<void> addBoardCard(
+      String chatId, String messageId, String columnId, String text) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/board/cards',
+        {'columnId': columnId, 'text': text});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Open a view-once photo/video — the server hands out the bytes exactly once.
+  /// Returns the attachment to show, or throws if it's already been seen.
+  Future<Attachment> openViewOnce(String chatId, String messageId) async {
+    final res = await _api.post('/chats/$chatId/messages/$messageId/view');
+    return Attachment.fromJson(res['attachment'] as Map<String, dynamic>);
+  }
+
+  /// Load the replies that hang off a message's thread.
+  Future<List<Message>> loadThread(String chatId, String messageId) async {
+    final res = await _api.get('/chats/$chatId/messages/$messageId/thread');
+    return ((res['messages'] as List?) ?? const [])
+        .map((e) => Message.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Post a reply into a message's thread (returns the new reply).
+  Future<Message> postThreadReply(
+      String chatId, String messageId, String body) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/thread', {'body': body});
+    return Message.fromJson(res['message'] as Map<String, dynamic>);
+  }
+
   /// "Für mich löschen": hide a message on this account only. Works on
   /// anyone's messages; the rest of the chat is untouched for everyone else.
   Future<void> hideMessageForMe(String chatId, String messageId) async {
@@ -3155,6 +3318,40 @@ class AppState extends ChangeNotifier {
         break;
       case 'call-end':
         callController.onRemoteEnd(payload);
+        break;
+
+      // ---- Group-call (mesh) signaling (0.34.0) ----
+      case 'group-call-roster':
+        {
+          final callId = payload['callId']?.toString();
+          final chatId = payload['chatId']?.toString();
+          final ids = ((payload['participants'] as List?) ?? const [])
+              .map((e) => e.toString())
+              .toList();
+          if (_groupCall?.isActive == true &&
+              _groupCall!.callId == callId) {
+            _groupCall!.onRoster(ids);
+          } else if (chatId != null &&
+              callId != null &&
+              ids.isNotEmpty &&
+              !ids.contains(me?.id) &&
+              feature('groupCalls', fallback: false)) {
+            // A group call is live in this chat and we're not in it yet.
+            onGroupCallInvite?.call(chatId, callId);
+          }
+        }
+        break;
+      case 'group-call-offer':
+        _groupCall?.onOffer(payload['fromId']?.toString() ?? '',
+            payload['sdp'] as String?, payload['sdpType'] as String?);
+        break;
+      case 'group-call-answer':
+        _groupCall?.onAnswer(payload['fromId']?.toString() ?? '',
+            payload['sdp'] as String?, payload['sdpType'] as String?);
+        break;
+      case 'group-call-ice':
+        _groupCall?.onIce(payload['fromId']?.toString() ?? '',
+            (payload['candidate'] as Map?)?.cast<String, dynamic>());
         break;
     }
   }

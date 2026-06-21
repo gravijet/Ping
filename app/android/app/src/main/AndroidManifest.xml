@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Detect when the user screenshots a chat (Android 14+), so we can post a
+         privacy notice. No image/storage access — just the capture event. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <!-- Install an in-app update: the downloaded APK opens the system installer. -->

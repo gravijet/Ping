@@ -25,6 +25,7 @@ import '../widgets/message_actions.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/verified_badge.dart';
 import 'chat_info_screen.dart';
+import 'group_call_screen.dart';
 import 'image_viewer_screen.dart';
 import 'sticker_draw_screen.dart';
 import 'video_player_screen.dart';
@@ -505,6 +506,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             onPressed: () => _startCall(chat.otherUser!, video: false),
           ),
         ],
+        // 0.34.0: group (mesh) call — start/join from a group chat.
+        if (chat.isGroup &&
+            !chat.locked &&
+            state.feature('groupCalls', fallback: false))
+          IconButton(
+            icon: const Icon(Icons.groups_rounded),
+            tooltip: 'Gruppenanruf',
+            onPressed: _startGroupCall,
+          ),
         IconButton(
           icon: const Icon(Icons.search_rounded),
           tooltip: 'In Chat suchen',
@@ -525,6 +535,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await context.read<AppState>().callController.startCall(user, video: video);
     } catch (_) {
       _showError('Anruf konnte nicht gestartet werden. '
+          'Prüfe die Kamera-/Mikrofon-Berechtigung.');
+    }
+  }
+
+  /// Start (or join the open) mesh group call for this group chat (0.34.0).
+  Future<void> _startGroupCall({String? callId}) async {
+    final state = context.read<AppState>();
+    final navigator = Navigator.of(context);
+    try {
+      await state.startOrJoinGroupCall(widget.chatId, callId: callId);
+      if (!mounted) return;
+      navigator.push(MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+    } catch (_) {
+      _showError('Gruppenanruf konnte nicht gestartet werden. '
           'Prüfe die Kamera-/Mikrofon-Berechtigung.');
     }
   }
@@ -772,6 +796,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onVotePoll: interactive && m.poll != null
           ? (option) => _votePoll(m, option)
           : null,
+      onGameMove: interactive && m.game != null
+          ? (cell) => _gameMove(m, cell)
+          : null,
+      onRsvp: interactive && m.event != null
+          ? (status) => _rsvpEvent(m, status)
+          : null,
+      onToggleTask: interactive && m.tasklist != null
+          ? (itemId, done) => _toggleTask(m, itemId, done)
+          : null,
+      onAddBoardCard: interactive && m.board != null
+          ? (columnId) => _addBoardCard(m, columnId)
+          : null,
+      onOpenViewOnce: interactive && m.viewOnce && !m.viewed && !isMine
+          ? () => _openViewOnce(m)
+          : null,
+      onTapLiveLocation: interactive && m.type == 'livelocation'
+          ? () => _openLiveLocation(m)
+          : null,
+      onOpenThread: interactive && m.threadCount > 0
+          ? () => _openThread(m)
+          : null,
       fetchLinkPreview:
           interactive && state.feature('linkPreviews', fallback: true)
               ? state.linkPreviews.fetch
@@ -877,6 +922,221 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _votePoll(Message m, int option) async {
     try {
       await context.read<AppState>().votePoll(widget.chatId, m.id, option);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  // ── „Alles" (0.34.0) structured-message interactions ────────────────────
+
+  Future<void> _gameMove(Message m, int cell) async {
+    try {
+      await context.read<AppState>().gameMove(widget.chatId, m.id, cell);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _rsvpEvent(Message m, String? status) async {
+    try {
+      await context.read<AppState>().rsvpEvent(widget.chatId, m.id, status);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _toggleTask(Message m, String itemId, bool done) async {
+    try {
+      await context.read<AppState>().toggleTask(widget.chatId, m.id, itemId, done);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _addBoardCard(Message m, String columnId) async {
+    final state = context.read<AppState>();
+    final text = await _promptText('Neue Karte', 'Kartentext');
+    if (text == null || text.trim().isEmpty) return;
+    try {
+      await state.addBoardCard(widget.chatId, m.id, columnId, text.trim());
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openViewOnce(Message m) async {
+    final state = context.read<AppState>();
+    try {
+      final att = await state.openViewOnce(widget.chatId, m.id);
+      if (!mounted) return;
+      if (att.kind == 'video') {
+        _openVideo(att);
+      } else {
+        _openImage(att);
+      }
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openLiveLocation(Message m) async {
+    final ll = m.liveLocation;
+    if (ll?.lat == null || ll?.lng == null) {
+      _showError('Standort ist nicht mehr verfügbar.');
+      return;
+    }
+    final uri = Uri.parse('https://maps.google.com/?q=${ll!.lat},${ll.lng}');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      _showError('Karte konnte nicht geöffnet werden.');
+    }
+  }
+
+  void _openThread(Message m) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _ThreadSheet(chatId: widget.chatId, root: m),
+    );
+  }
+
+  /// A tiny single-field text prompt used by board cards / threads.
+  Future<String?> _promptText(String title, String hint) async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: InputDecoration(hintText: hint),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Abbrechen')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(ctrl.text),
+              child: const Text('OK')),
+        ],
+      ),
+    );
+  }
+
+  // ── „Alles" (0.34.0) structured-message composers ───────────────────────
+
+  /// Ask for a future date+time (defaults to the next full hour).
+  Future<DateTime?> _pickDateTime() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now.subtract(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _openEventComposer() async {
+    final state = context.read<AppState>();
+    final title = await _promptText('Termin', 'Worum geht es?');
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    final when = await _pickDateTime();
+    if (when == null) return;
+    try {
+      await state.createEvent(widget.chatId,
+          title: title.trim(), startAt: when.millisecondsSinceEpoch);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openTaskComposer() async {
+    final state = context.read<AppState>();
+    final title = await _promptText('Aufgabenliste', 'Titel');
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    final raw = await _promptText('Aufgaben', 'Punkte mit Komma trennen');
+    final items = (raw ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (items.isEmpty) return;
+    try {
+      await state.createTaskList(widget.chatId, title.trim(), items);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openBoardComposer() async {
+    final state = context.read<AppState>();
+    final title = await _promptText('Board', 'Board-Titel');
+    if (title == null || title.trim().isEmpty) return;
+    try {
+      await state.createBoard(widget.chatId, title.trim(),
+          const ['Zu erledigen', 'In Arbeit', 'Erledigt']);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openGameComposer() async {
+    final kind = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Text('⭕', style: TextStyle(fontSize: 22)),
+              title: const Text('Tic-Tac-Toe'),
+              onTap: () => Navigator.pop(ctx, 'tictactoe'),
+            ),
+            ListTile(
+              leading: const Text('🔴', style: TextStyle(fontSize: 22)),
+              title: const Text('Vier gewinnt'),
+              onTap: () => Navigator.pop(ctx, 'connect4'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (kind == null || !mounted) return;
+    try {
+      await context.read<AppState>().createGame(widget.chatId, kind);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openScheduleCall() async {
+    final state = context.read<AppState>();
+    final title = await _promptText('Anruf planen', 'Titel (optional)');
+    if (!mounted) return;
+    final when = await _pickDateTime();
+    if (when == null) return;
+    try {
+      await state.scheduleCall(widget.chatId,
+          title: (title ?? '').trim(), startAt: when.millisecondsSinceEpoch);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Anruf geplant.')));
+      }
     } on ApiException catch (e) {
       _showError(e.message);
     }
@@ -1232,6 +1492,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _openAttachmentSheet() {
     _stopTyping();
+    final state = context.read<AppState>();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -1306,6 +1567,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _openPollComposer();
                 },
               ),
+              if (state.feature('events', fallback: true))
+                _AttachOption(
+                  icon: Icons.event_rounded,
+                  color: const Color(0xFF66BB6A),
+                  label: 'Termin',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openEventComposer();
+                  },
+                ),
+              if (state.feature('taskLists', fallback: true))
+                _AttachOption(
+                  icon: Icons.checklist_rounded,
+                  color: const Color(0xFF26C6DA),
+                  label: 'Aufgaben',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openTaskComposer();
+                  },
+                ),
+              if (state.feature('boards', fallback: true))
+                _AttachOption(
+                  icon: Icons.view_kanban_rounded,
+                  color: const Color(0xFF8D6E63),
+                  label: 'Board',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openBoardComposer();
+                  },
+                ),
+              if (state.feature('miniGames', fallback: true))
+                _AttachOption(
+                  icon: Icons.sports_esports_rounded,
+                  color: const Color(0xFFAB47BC),
+                  label: 'Spiel',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openGameComposer();
+                  },
+                ),
+              if (state.feature('scheduledCalls', fallback: true))
+                _AttachOption(
+                  icon: Icons.schedule_rounded,
+                  color: const Color(0xFF29B6F6),
+                  label: 'Anruf planen',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openScheduleCall();
+                  },
+                ),
               _AttachOption(
                 icon: Icons.bolt_rounded,
                 color: const Color(0xFFFFB300),
@@ -2980,6 +3291,169 @@ class _ScrollDownButton extends StatelessWidget {
           padding: const EdgeInsets.all(9),
           child: Icon(Icons.keyboard_arrow_down_rounded,
               color: scheme.primary, size: 28),
+        ),
+      ),
+    );
+  }
+}
+
+/// A bottom sheet showing a message's thread (0.34.0): the root, its replies,
+/// and a composer to add one.
+class _ThreadSheet extends StatefulWidget {
+  final String chatId;
+  final Message root;
+  const _ThreadSheet({required this.chatId, required this.root});
+
+  @override
+  State<_ThreadSheet> createState() => _ThreadSheetState();
+}
+
+class _ThreadSheetState extends State<_ThreadSheet> {
+  final _ctrl = TextEditingController();
+  List<Message> _replies = const [];
+  bool _loading = true;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r =
+          await context.read<AppState>().loadThread(widget.chatId, widget.root.id);
+      if (mounted) setState(() { _replies = r; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _send() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final reply = await context
+          .read<AppState>()
+          .postThreadReply(widget.chatId, widget.root.id, text);
+      _ctrl.clear();
+      if (mounted) setState(() { _replies = [..._replies, reply]; });
+    } catch (_) {
+      // best-effort; leave the text so the user can retry
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final insets = MediaQuery.of(context).viewInsets;
+    return Padding(
+      padding: EdgeInsets.only(bottom: insets.bottom),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.92,
+        builder: (ctx, scrollCtrl) => Column(
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 38,
+              height: 4,
+              decoration: BoxDecoration(
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                Icon(Icons.forum_outlined, color: scheme.primary, size: 20),
+                const SizedBox(width: 8),
+                const Text('Thread',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+              ]),
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(widget.root.preview,
+                  maxLines: 3, overflow: TextOverflow.ellipsis),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _replies.isEmpty
+                      ? Center(
+                          child: Text('Noch keine Antworten.',
+                              style: TextStyle(color: scheme.onSurfaceVariant)))
+                      : ListView.builder(
+                          controller: scrollCtrl,
+                          padding: const EdgeInsets.all(14),
+                          itemCount: _replies.length,
+                          itemBuilder: (_, i) {
+                            final r = _replies[i];
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 5),
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: scheme.surfaceContainerHighest
+                                      .withValues(alpha: 0.4),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(r.preview),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ctrl,
+                      minLines: 1,
+                      maxLines: 4,
+                      decoration: InputDecoration(
+                        hintText: 'Antworten …',
+                        filled: true,
+                        fillColor:
+                            scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton.filled(
+                    onPressed: _sending ? null : _send,
+                    icon: const Icon(Icons.send_rounded, size: 20),
+                  ),
+                ]),
+              ),
+            ),
+          ],
         ),
       ),
     );

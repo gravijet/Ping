@@ -18,6 +18,10 @@ class LauncherService {
   /// app is already running, with an encoded route (`chat:<id>` / `route:<n>`).
   void Function(String route)? onLaunchRoute;
 
+  /// Called when the native side detects the user took a screenshot while the
+  /// app was visible (Android 14+). The handler reports it to the active chat.
+  void Function()? onScreenshot;
+
   bool _wired = false;
 
   /// Start listening for inbound deep-link routes from the native side. Safe to
@@ -28,6 +32,8 @@ class LauncherService {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'launchRoute' && call.arguments is String) {
         onLaunchRoute?.call(call.arguments as String);
+      } else if (call.method == 'screenshot') {
+        onScreenshot?.call();
       }
       return null;
     });

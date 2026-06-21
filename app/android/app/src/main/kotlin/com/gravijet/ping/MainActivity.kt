@@ -120,6 +120,50 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // --- Screenshot detection (0.34.0) -----------------------------------------
+    // Android 14+ exposes a permission-light callback that fires when the user
+    // screenshots while our activity is visible — no storage access, just the
+    // event. We forward it to Dart, which posts a privacy notice to the open
+    // chat. Older Android has no comparable API, so this is a best-effort 14+
+    // feature. Registered only while the activity is resumed. The callback is
+    // held as Any? so the API-34 type never appears at class scope (keeps the
+    // NewApi lint happy); the actual API calls live behind @TargetApi(34).
+    private var screenCaptureCb: Any? = null
+
+    @android.annotation.TargetApi(34)
+    private fun registerScreenCapture() {
+        val cb = (screenCaptureCb as? android.app.Activity.ScreenCaptureCallback)
+            ?: android.app.Activity.ScreenCaptureCallback {
+                runOnUiThread { channel?.invokeMethod("screenshot", null) }
+            }.also { screenCaptureCb = it }
+        registerScreenCaptureCallback(mainExecutor, cb)
+    }
+
+    @android.annotation.TargetApi(34)
+    private fun unregisterScreenCapture() {
+        (screenCaptureCb as? android.app.Activity.ScreenCaptureCallback)?.let {
+            unregisterScreenCaptureCallback(it)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            try {
+                registerScreenCapture()
+            } catch (_: Throwable) { /* unsupported / no permission — ignore */ }
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            try {
+                unregisterScreenCapture()
+            } catch (_: Throwable) { /* never registered — ignore */ }
+        }
+    }
+
     /** Pull a "ping.chatId"/"ping.route" extra off [intent] into [pendingRoute]. */
     private fun captureRoute(intent: Intent?) {
         if (intent == null) return

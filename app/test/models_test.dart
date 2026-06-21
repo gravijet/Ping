@@ -260,6 +260,115 @@ void main() {
     });
   });
 
+  group('Alles (0.34.0) structured payloads', () {
+    test('game message parses board state + previews', () {
+      final m = Message.fromJson({
+        'id': 'g1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'game',
+        'body': '', 'createdAt': 1,
+        'game': {
+          'kind': 'tictactoe',
+          'cells': [0, null, 1, null, null, null, null, null, null],
+          'players': ['u1', 'u2'],
+          'turn': 'u2',
+          'winner': null,
+        },
+      });
+      expect(m.game, isNotNull);
+      expect(m.game!.kind, 'tictactoe');
+      expect(m.game!.cells.length, 9);
+      expect(m.game!.cells[0], 0);
+      expect(m.game!.cells[1], isNull);
+      expect(m.game!.turn, 'u2');
+      expect(m.preview, '🎮 Spiel');
+      final back = Message.fromJson(m.toJson());
+      expect(back.game!.players, ['u1', 'u2']);
+    });
+
+    test('board message parses columns + cards', () {
+      final m = Message.fromJson({
+        'id': 'b1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'board',
+        'body': '', 'createdAt': 1,
+        'board': {
+          'id': 'bd1', 'title': 'Sprint',
+          'columns': [
+            {'id': 'c1', 'title': 'To-do', 'cards': [{'id': 'k1', 'text': 'X'}]},
+            {'id': 'c2', 'title': 'Done', 'cards': []},
+          ],
+        },
+      });
+      expect(m.board!.title, 'Sprint');
+      expect(m.board!.columns.length, 2);
+      expect(m.board!.columns.first.cards.single.text, 'X');
+      expect(Message.fromJson(m.toJson()).board!.columns.length, 2);
+    });
+
+    test('event message parses RSVP tallies + my status', () {
+      final m = Message.fromJson({
+        'id': 'e1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'event',
+        'body': '', 'createdAt': 1,
+        'event': {
+          'id': 'ev1', 'title': 'Lunch', 'startAt': 99999,
+          'location': 'Kantine', 'myStatus': 'going',
+          'counts': {'going': 2, 'maybe': 1, 'declined': 0},
+          'attendees': [{'userId': 'u2', 'status': 'going', 'displayName': 'Anna'}],
+        },
+      });
+      expect(m.event!.title, 'Lunch');
+      expect(m.event!.counts['going'], 2);
+      expect(m.event!.myStatus, 'going');
+      expect(m.event!.attendees.single.displayName, 'Anna');
+      expect(m.preview, '📅 Termin');
+    });
+
+    test('task list parses progress + items round-trip', () {
+      final m = Message.fromJson({
+        'id': 't1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'tasklist',
+        'body': '', 'createdAt': 1,
+        'tasklist': {
+          'id': 'tl1', 'title': 'Einkauf', 'total': 2, 'completed': 1,
+          'items': [
+            {'id': 'i1', 'text': 'Milch', 'done': true, 'doneByName': 'Anna'},
+            {'id': 'i2', 'text': 'Brot', 'done': false},
+          ],
+        },
+      });
+      expect(m.tasklist!.completed, 1);
+      expect(m.tasklist!.items.first.done, true);
+      expect(Message.fromJson(m.toJson()).tasklist!.items.length, 2);
+    });
+
+    test('view-once + thread + transcript + enc flags round-trip', () {
+      final m = Message.fromJson({
+        'id': 'v1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'image',
+        'body': '', 'createdAt': 1,
+        'viewOnce': true, 'viewed': false, 'threadCount': 3,
+        'transcript': {'status': 'done', 'text': 'Hallo'},
+      });
+      expect(m.viewOnce, true);
+      expect(m.viewed, false);
+      expect(m.threadCount, 3);
+      expect(m.transcript!.text, 'Hallo');
+      final enc = Message.fromJson({
+        'id': 'x', 'chatId': 'c1', 'senderId': 'u1', 'type': 'text',
+        'body': 'iv:ct', 'createdAt': 1, 'enc': true,
+      });
+      expect(enc.enc, true);
+      expect(Message.fromJson(m.toJson()).threadCount, 3);
+    });
+
+    test('live-location parses active position', () {
+      final m = Message.fromJson({
+        'id': 'l1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'livelocation',
+        'body': '', 'createdAt': 1,
+        'liveLocation': {'active': true, 'lat': 48.2, 'lng': 16.37,
+          'updatedAt': 5, 'expiresAt': 9999999999999},
+      });
+      expect(m.liveLocation!.active, true);
+      expect(m.liveLocation!.lat, closeTo(48.2, 0.001));
+      expect(m.preview, '📍 Live-Standort');
+    });
+  });
+
   group('Disappearing messages', () {
     test('expiresAt round-trips and isExpired flips', () {
       final future = DateTime.now().millisecondsSinceEpoch + 60000;

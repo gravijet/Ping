@@ -148,4 +148,66 @@ void main() {
     await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
     expect(find.text('Gruppe erstellt'), findsOneWidget);
   });
+
+  // ── „Alles" (0.34.0) structured-message rendering ────────────────────────
+
+  testWidgets('event bubble renders title + RSVP buttons', (tester) async {
+    final msg = Message(
+      id: 'e1', chatId: 'c1', senderId: 'u1', type: 'event', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      event: const EventData(
+        id: 'ev1', title: 'Team-Lunch', startAt: 1000, location: 'Kantine',
+        myStatus: 'going', counts: {'going': 2},
+      ),
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
+    expect(find.text('Team-Lunch'), findsOneWidget);
+    expect(find.text('✅'), findsOneWidget); // RSVP "going" button
+  });
+
+  testWidgets('task list bubble renders items + progress', (tester) async {
+    final msg = Message(
+      id: 't1', chatId: 'c1', senderId: 'u1', type: 'tasklist', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      tasklist: const TaskListData(
+        id: 'tl1', title: 'Einkauf', total: 2, completed: 1,
+        items: [
+          TaskItem(id: 'i1', text: 'Milch', done: true),
+          TaskItem(id: 'i2', text: 'Brot', done: false),
+        ],
+      ),
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
+    expect(find.text('Einkauf'), findsOneWidget);
+    expect(find.text('Milch'), findsOneWidget);
+    expect(find.text('Brot'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('game bubble renders a tic-tac-toe grid', (tester) async {
+    final msg = Message(
+      id: 'g1', chatId: 'c1', senderId: 'u1', type: 'game', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      game: const GameData(
+        kind: 'tictactoe',
+        cells: [0, null, 1, null, null, null, null, null, null],
+        players: ['u1', 'u2'], turn: 'u2',
+      ),
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
+    expect(find.text('Tic-Tac-Toe'), findsOneWidget);
+    expect(find.text('🔵'), findsWidgets);
+  });
+
+  testWidgets('view-once bubble shows tap-to-view for the recipient',
+      (tester) async {
+    final msg = Message(
+      id: 'v1', chatId: 'c1', senderId: 'u1', type: 'image', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      viewOnce: true,
+    );
+    await tester.pumpWidget(_wrap(
+        MessageBubble(message: msg, isMine: false, onOpenViewOnce: () {})));
+    expect(find.text('Einmal ansehen'), findsOneWidget);
+  });
 }
