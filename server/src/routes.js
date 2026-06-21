@@ -70,6 +70,11 @@ import {
   reactionSchema,
   pollCreateSchema,
   pollVoteSchema,
+  eventCreateSchema,
+  rsvpSchema,
+  taskListCreateSchema,
+  taskItemAddSchema,
+  taskItemToggleSchema,
   expireTimerSchema,
   draftSchema,
   folderSchema,
@@ -320,6 +325,18 @@ import {
   countQuickReplies,
   quickReplyView,
 } from './quickRepliesRepo.js';
+import {
+  createEvent,
+  setEventRsvp,
+  eventView,
+  upcomingEventsForUser,
+} from './eventsRepo.js';
+import {
+  createTaskList,
+  addTaskItem,
+  setTaskItemDone,
+  taskListView,
+} from './tasksRepo.js';
 import { recordAudit, listAudit } from './auditRepo.js';
 import {
   createApiKey,
@@ -418,6 +435,10 @@ function messagePreview(msg) {
       return '📎 Datei';
     case 'poll':
       return '📊 Umfrage';
+    case 'event':
+      return '📅 Termin';
+    case 'tasklist':
+      return '✅ Aufgabenliste';
     default:
       return 'Neue Nachricht';
   }
@@ -1801,6 +1822,165 @@ router.post(
   })
 );
 
+// ---- 0.33.0 "Pläne & Aufgaben": events (Termine) --------------------------
+
+// Create an event in a chat. Like a poll, it's a normal message (type='event')
+// whose title/time/RSVP payload rides along in messageView.event, so the live
+// message + message-updated plumbing carries it for free. An optional pre-start
+// reminder is fired once by the maintenance sweep.
+router.post(
+  '/chats/:id/events',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const data = parse(eventCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'event',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createEvent({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title: data.title,
+      description: data.description,
+      location: data.location,
+      startAt: data.startAt,
+      remindMinutes: data.remindMinutes,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// RSVP to an event (going / maybe / declined, or null to withdraw). Everyone in
+// the chat sees the new tallies live via message-updated.
+router.post(
+  '/chats/:id/messages/:msgId/rsvp',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'event') {
+      return res.status(404).json({ error: 'Diesen Termin gibt es nicht.' });
+    }
+    const { status } = parse(rsvpSchema, req.body);
+    if (!setEventRsvp(msg.id, req.user.id, status)) {
+      return res.status(400).json({ error: 'Ungültige Antwort.' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Cross-chat agenda: every upcoming event in chats the user belongs to, sorted
+// by start time, each enriched with its chat title for the "Termine" pane.
+router.get(
+  '/me/events',
+  requireAuth,
+  h(async (req, res) => {
+    const uid = req.user.id;
+    const events = upcomingEventsForUser(uid);
+    const titleCache = new Map();
+    const titleOf = (cid) => {
+      if (titleCache.has(cid)) return titleCache.get(cid);
+      const c = getChat(cid);
+      const t = c ? chatView(c, uid).title || '' : '';
+      titleCache.set(cid, t);
+      return t;
+    };
+    res.json({ events: events.map((e) => ({ ...e, chatTitle: titleOf(e.chatId) })) });
+  })
+);
+
+// ---- 0.33.0 "Pläne & Aufgaben": task lists (Aufgaben) ---------------------
+
+// Create a collaborative task list (type='tasklist'). Items ride along in
+// messageView.tasklist; anyone in the chat can tick or append items afterwards.
+router.post(
+  '/chats/:id/tasklists',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { title, items } = parse(taskListCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'tasklist',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createTaskList({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title,
+      items,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Append an item to a task list.
+router.post(
+  '/chats/:id/messages/:msgId/tasks',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'tasklist') {
+      return res.status(404).json({ error: 'Diese Aufgabenliste gibt es nicht.' });
+    }
+    const { text } = parse(taskItemAddSchema, req.body);
+    if (!addTaskItem(msg.id, text)) {
+      return res.status(409).json({ error: 'Diese Liste ist schon voll.' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Tick (or untick) a task list item, recording who completed it.
+router.post(
+  '/chats/:id/messages/:msgId/tasks/:itemId/toggle',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'tasklist') {
+      return res.status(404).json({ error: 'Diese Aufgabenliste gibt es nicht.' });
+    }
+    const { done } = parse(taskItemToggleSchema, req.body);
+    if (!setTaskItemDone(msg.id, req.params.itemId, req.user.id, done)) {
+      return res.status(404).json({ error: 'Diese Aufgabe gibt es nicht.' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
 // "Für mich löschen": hide a message on this account only. Unlike DELETE (für
 // alle) this works on anyone's messages and leaves the chat untouched for
 // everyone else.
@@ -1928,6 +2108,8 @@ function reminderPreviewOf(msg) {
     case 'gif': return 'GIF';
     case 'file': return '📎 Datei';
     case 'poll': return '📊 Umfrage';
+    case 'event': return '📅 Termin';
+    case 'tasklist': return '✅ Aufgabenliste';
     default: return 'Nachricht';
   }
 }

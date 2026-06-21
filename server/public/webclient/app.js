@@ -227,6 +227,8 @@ function buildNavRail(me) {
     navItem('status', 'status', 'Status'),
     navItem('calls', 'phone', 'Anrufe'),
     navItem('saved', 'star', 'Gespeichert'),
+    // Pläne & Aufgaben (0.33.0): the cross-chat "Termine" agenda.
+    flag('events') ? navItem('agenda', 'calendar', 'Termine') : null,
     // Channels / Communities (0.31.0): the public-channel directory.
     flag('communities') ? navItem('discover', 'compass', 'Entdecken') : null,
   ].filter(Boolean));
@@ -329,6 +331,11 @@ function renderSection() {
   if (currentSection === 'discover') {
     return import('./channels.js').then((m) =>
       m.renderDiscoverPane(sideHead, sideBody, openChatInShell));
+  }
+  if (currentSection === 'agenda') {
+    sideBody.append(loading());
+    return import('./events.js').then((m) =>
+      m.renderAgendaPane(sideHead, sideBody, openChatInShell));
   }
 }
 
@@ -447,6 +454,7 @@ export function openCommandPalette() {
     { title: 'Einstellungen', icon: 'settings', hint: 'Strg ,', keywords: 'settings profil konto', run: () => openSettings() },
     flag('activityCenter') ? { title: 'Aktivität', icon: 'bell', keywords: 'activity benachrichtigungen feed reaktionen erwähnungen', run: () => activity.openActivityPanel(openChatInShell) } : null,
     flag('reminders') ? { title: 'Erinnerungen', icon: 'clock', keywords: 'erinnerung erinnere reminder nudge fällig', run: () => reminders.openReminders(openChatInShell) } : null,
+    flag('events') ? { title: 'Termine', icon: 'calendar', keywords: 'termine events kalender agenda rsvp zusage', run: () => setSection('agenda') } : null,
     { title: 'Tastenkürzel', icon: 'bolt', hint: '?', keywords: 'shortcuts keyboard tastatur hilfe', run: () => openShortcuts() },
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
@@ -602,6 +610,18 @@ function wireSocket() {
     if (!p.message) return;
     maybeReactionActivity(p.message); // compare BEFORE we overwrite the cached copy
     store.replaceMessage(p.message.chatId, p.message);
+    if (p.message.type === 'event') store.emit('events');
+  });
+
+  // Pläne & Aufgaben (0.33.0): a due event reminder fired server-side — nudge the
+  // user, log it to the activity feed and refresh the agenda.
+  socket.on('event-reminder', (p) => {
+    const ev = p.event; if (!ev) return;
+    const when = new Date(ev.startAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    toast(`📅 ${ev.title} · um ${when}`, 'info');
+    activity.record({ kind: 'event', chatId: ev.chatId, key: `event:${ev.id}`,
+      title: ev.title, text: `Termin um ${when}` });
+    store.emit('events');
   });
   socket.on('typing', (p) => store.setTyping(p.chatId, p.userId, p.typing));
 
@@ -664,6 +684,9 @@ function applyIncomingMessage(msg) {
   const isActive = store.state.activeId === msg.chatId;
 
   store.addMessage(msg.chatId, msg);
+
+  // Keep the "Termine" agenda fresh when an event lands in any chat.
+  if (msg.type === 'event') store.emit('events');
 
   const chat = store.getChat(msg.chatId);
   if (chat) {

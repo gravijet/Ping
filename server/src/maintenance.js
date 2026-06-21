@@ -15,6 +15,11 @@ import {
   deleteScheduledBroadcast,
 } from './scheduledBroadcastRepo.js';
 import { purgeAutoReplies } from './focusRepo.js';
+import {
+  dueEventReminders,
+  markEventReminded,
+  eventView,
+} from './eventsRepo.js';
 import { trimSecurityEvents } from './securityRepo.js';
 import { dispatchBroadcast } from './broadcast.js';
 import { deliverMessage } from './deliver.js';
@@ -100,6 +105,39 @@ export function runMaintenance() {
   }
   // Drop reminders that fired long enough ago that the user has seen them.
   purgeFiredReminders();
+  // 0.33.0 "Pläne & Aufgaben": event ("Termin") reminders that have come due →
+  // nudge everyone who said "going"/"maybe" (plus the creator) over their live
+  // sockets and via push. Stamp reminded_at first so a push failure can't replay
+  // the same reminder on the next sweep.
+  let firedEvents = 0;
+  for (const row of dueEventReminders()) {
+    try {
+      markEventReminded(row.id);
+      const event = eventView(row.message_id, row.creator_id);
+      if (!event) continue;
+      const targets = new Set([row.creator_id]);
+      for (const a of event.attendees || []) targets.add(a.userId);
+      const chat = getChat(row.chat_id);
+      const where = chat?.name ? ` · ${chat.name}` : '';
+      const when = new Date(event.startAt).toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      for (const userId of targets) {
+        sendToUser(userId, 'event-reminder', {
+          event: { ...event, chatId: row.chat_id, messageId: row.message_id },
+        });
+      }
+      sendPushToUsers([...targets], {
+        title: `📅 ${event.title}`,
+        body: `Beginnt um ${when}${where}`,
+        data: { type: 'event', chatId: row.chat_id, messageId: row.message_id },
+      }).catch(() => {});
+      firedEvents++;
+    } catch (e) {
+      console.error('[maintenance] Termin-Erinnerung fehlgeschlagen:', e.message);
+    }
+  }
   // 0.30.0: drop stale focus auto-reply throttle rows (older than the cool-down).
   purgeAutoReplies();
   purgeExpiredStatuses();
@@ -111,6 +149,7 @@ export function runMaintenance() {
     deliveredScheduled: delivered,
     sentBroadcasts,
     firedReminders,
+    firedEvents,
   };
 }
 

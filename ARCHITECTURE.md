@@ -295,6 +295,36 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Plans & tasks (0.33.0)
+Two new **structured message types**, both following the poll pattern: a normal
+`messages` row (`type='event'` / `'tasklist'`) whose payload lives in a side table
+and rides along in `messageView`, so the live `message` / `message-updated`
+broadcast, the offline cache and FTS all carry them for free. Kill-switchable via
+`events` / `taskLists`.
+
+- **Events ("Termine").** `eventsRepo.js` + `events` / `event_rsvps`. `POST
+  /chats/:id/events` (member-gated, channel-lock-aware) creates the backing
+  message; `POST /chats/:id/messages/:msgId/rsvp` toggles going/maybe/declined (or
+  `null` to withdraw). `messageView.event` is viewer-specific (tallies + attendee
+  roster + own status). `GET /me/events` is the cross-chat **agenda** (upcoming,
+  sorted, each enriched with its chat title). An optional reminder is set as
+  `remind_at = start − N min` (the create path refuses a past reminder); the
+  **maintenance sweep** picks up due rows, stamps `reminded_at` *first* (once-only),
+  then fans out `event-reminder` sockets + `sendPushToUsers` to RSVP'd members +
+  the creator. Web `events.js`: create modal, in-chat RSVP card and the **"Termine"**
+  nav-rail agenda pane.
+- **Task lists ("Aufgaben").** `tasksRepo.js` + `tasklists` / `tasklist_items`
+  (50-item cap). `POST /chats/:id/tasklists` creates; `POST
+  /chats/:id/messages/:msgId/tasks` appends; `…/tasks/:itemId/toggle` ticks an item
+  and records who/when. `messageView.tasklist` carries items + completed/total.
+  Web `tasks.js`: create modal + live checklist card with a progress bar.
+- **Migration.** Both types required widening the `messages.type` `CHECK`.
+  `migrateMessageTypesPlans` does the in-place 12-step FK-off table swap (all rows +
+  indexes preserved) **and** drops the orphaned `messages_fts` so `setupFts()`
+  rebuilds its triggers and backfills — the older `migrateMessageTypes` predated
+  FTS and would otherwise have left search silently un-indexed. Verified against a
+  production-DB copy.
+
 ## Conversation context (0.28.0)
 Two additive features that add context to messages — both kill-switchable via the
 remote flags `linkPreviews` / `editHistory`.

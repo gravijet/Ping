@@ -32,6 +32,10 @@ function previewOf(msg) {
       return '📎 Datei';
     case 'poll':
       return '📊 Umfrage';
+    case 'event':
+      return '📅 Termin';
+    case 'tasklist':
+      return '✅ Aufgabenliste';
     default:
       return msg.body || 'Nachricht';
   }

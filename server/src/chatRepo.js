@@ -1,5 +1,7 @@
 import { db, now, tx, ftsAvailable } from './db.js';
 import { uid, pickAvatarColor, getUserById, publicUser } from './repo.js';
+import { eventView } from './eventsRepo.js';
+import { taskListView } from './tasksRepo.js';
 
 const s = {
   insertChat: db.prepare(`
@@ -717,6 +719,8 @@ const TYPE_ALIASES = {
   video: 'video', gif: 'gif', audio: 'audio', voice: 'voice', sprachnachricht: 'voice',
   sprache: 'voice', file: 'file', datei: 'file', dokument: 'file', location: 'location',
   ort: 'location', standort: 'location', poll: 'poll', umfrage: 'poll',
+  event: 'event', termin: 'event', tasklist: 'tasklist', aufgabe: 'tasklist',
+  aufgaben: 'tasklist', liste: 'tasklist', checkliste: 'tasklist',
 };
 
 // Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
@@ -1038,6 +1042,9 @@ export function messageView(msg, viewerId) {
     myReactions: msg.deleted_at ? [] : myReactions(msg.id, viewerId),
     // Poll payload (question/options/votes) for 'poll' messages.
     poll: msg.type === 'poll' && !msg.deleted_at ? pollView(msg.id, viewerId) : null,
+    // 0.33.0 "Pläne & Aufgaben": event (RSVP) and task-list payloads.
+    event: msg.type === 'event' && !msg.deleted_at ? eventView(msg.id, viewerId) : null,
+    tasklist: msg.type === 'tasklist' && !msg.deleted_at ? taskListView(msg.id) : null,
     // 0.27.0: chat-wide pin state + this viewer's personal bookmark.
     pinned: msg.deleted_at ? false : isMessagePinned(msg.id),
     starred: msg.deleted_at ? false : isMessageStarred(viewerId, msg.id),

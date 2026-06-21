@@ -184,6 +184,8 @@ const msgs = [
   { id: 'm2', chatId: 'c1', senderId: 'me', body: 'Foto:', type: 'image', attachment: { url: '/api/uploads/x', kind: 'image', name: 'a.jpg', width: 800, height: 600 }, createdAt: Date.now() - 4000, status: 'read' },
   { id: 'm3', chatId: 'c1', senderId: 'u2', type: 'poll', poll: { question: 'Wann?', options: [{ text: 'Mo', votes: [] }, { text: 'Di', votes: [] }] }, createdAt: Date.now() - 3000 },
   { id: 'm4', chatId: 'c1', senderId: 'me', body: 'Schau dir https://example.com/artikel an.', type: 'text', editedAt: Date.now() - 1000, editCount: 1, createdAt: Date.now() - 2000, status: 'read' },
+  { id: 'm5', chatId: 'c1', senderId: 'u2', type: 'event', event: { id: 'e1', title: 'Team-Lunch', location: 'Kantine', startAt: Date.now() + 3600_000, counts: { going: 1, maybe: 0, declined: 0 }, myStatus: 'going', attendees: [{ userId: 'u2', status: 'going', displayName: 'Anna' }] }, createdAt: Date.now() - 1500 },
+  { id: 'm6', chatId: 'c1', senderId: 'me', type: 'tasklist', tasklist: { id: 't1', title: 'Einkauf', total: 2, completed: 1, items: [{ id: 'i1', text: 'Milch', done: true, doneByName: 'Anna' }, { id: 'i2', text: 'Brot', done: false }] }, createdAt: Date.now() - 1000, status: 'read' },
 ];
 
 function jsonRes(data) {
@@ -194,6 +196,9 @@ async function fetchShim(url) {
   if (path === '/me') return jsonRes({ user: me });
   if (path === '/chats') return jsonRes({ chats: [chatDirect, chatGroup] });
   if (path === '/config') return jsonRes({});
+  if (path === '/me/events') return jsonRes({ events: [
+    { id: 'e1', chatId: 'c1', messageId: 'm5', title: 'Team-Lunch', location: 'Kantine', startAt: Date.now() + 3600_000, counts: { going: 1, maybe: 0, declined: 0 }, myStatus: 'going', chatTitle: 'Anna', attendees: [{ userId: 'u2', status: 'going', displayName: 'Anna' }] },
+  ] });
   if (/\/messages\/[^/]+\/edits$/.test(path)) return jsonRes({ versions: [{ body: 'alte Fassung' }, { body: 'neue Fassung', editedAt: Date.now(), current: true }] });
   if (path.startsWith('/chats/c1/messages')) return jsonRes({ messages: msgs });
   if (path.startsWith('/chats/c2/messages')) return jsonRes({ messages: [] });
@@ -339,6 +344,23 @@ await step('security centre: render tab, drive 2FA wizard + recovery codes', asy
 await step('status pane', async () => { const head = new El('div'), body = new El('div'); (await imp('status.js')).renderStatusPane(head, body); });
 await step('calls pane', async () => { const head = new El('div'), body = new El('div'); (await imp('calls-view.js')).renderCallsPane(head, body, () => {}); });
 await step('saved pane', async () => { const head = new El('div'), body = new El('div'); (await imp('saved.js')).renderSavedPane(head, body, () => {}); });
+await step('events: render card, agenda pane + create modal', async () => {
+  const ev = await imp('events.js');
+  const card = ev.renderEvent(msgs[4]);
+  if (!card || !card.querySelector('.rsvp-btn')) throw new Error('event card missing RSVP buttons');
+  const head = new El('div'), body = new El('div');
+  await ev.renderAgendaPane(head, body, () => {});
+  await tick();
+  if (!body.querySelector('.agenda-row')) throw new Error('agenda pane rendered no rows');
+  ev.newEventModal('c1'); await tick();
+});
+await step('tasks: render checklist card + create modal', async () => {
+  const tk = await imp('tasks.js');
+  const card = tk.renderTaskList(msgs[5]);
+  if (!card || !card.querySelector('.task-check')) throw new Error('task card missing checkboxes');
+  if (!card.querySelector('.task-bar i')) throw new Error('task card missing progress bar');
+  tk.newTaskListModal('c1'); await tick();
+});
 await step('emoji picker', async () => { const anchor = new El('button'); document.body.appendChild(anchor); (await imp('emoji.js')).openEmojiPicker(anchor, () => {}); });
 await step('chat list filters', async () => {
   for (const f of ['unread', 'fav', 'groups', 'all']) { mods['store.js'].state.chatFilter = f; mods['store.js'].emit('chats'); await tick(); }

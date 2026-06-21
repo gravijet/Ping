@@ -72,6 +72,9 @@ const PATHS = {
   hash: 'M9 4 7 20M17 4l-2 16M5 9h15M4 15h15',
   // Identität & Schutz (0.32.0): a key for two-factor/recovery codes.
   key: 'M15 7a4 4 0 1 1-3.9 5H8v3H5v3H2v-4l6.1-6.1A4 4 0 0 1 15 7Zm1.5 1.5h.01',
+  // Pläne & Aufgaben (0.33.0): a calendar for "Termine", a checklist for tasks.
+  calendar: 'M7 3v3M17 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
+  tasks: 'M4 6l1.5 1.5L8 4M4 12l1.5 1.5L8 10M4 18l1.5 1.5L8 16M11 5h9M11 11h9M11 17h9',
 };
 
 export function icon(name, cls = '') {

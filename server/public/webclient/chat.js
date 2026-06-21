@@ -27,6 +27,8 @@ import { tokenizeMentions, attachAutocomplete, pickerOpen } from './mentions.js'
 import { recordSent } from './insights.js';
 import { firstUrl, attachLinkPreview } from './linkpreview.js';
 import * as quickreplies from './quickreplies.js';
+import { renderEvent } from './events.js';
+import { renderTaskList } from './tasks.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // Shown inline on the hover action bar so the most common reactions are one tap
@@ -358,6 +360,10 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(el('span', { class: 'deleted', text: '🚫 Diese Nachricht wurde gelöscht' }));
   } else if (m.type === 'poll') {
     bubble.appendChild(renderPoll(m));
+  } else if (m.type === 'event') {
+    bubble.appendChild(renderEvent(m));
+  } else if (m.type === 'tasklist') {
+    bubble.appendChild(renderTaskList(m));
   } else {
     if (m.attachment) bubble.appendChild(renderAttachment(m.attachment, { onImageClick: () => openChatMedia(m) }));
     if (m.body) {
@@ -794,8 +800,10 @@ function attachMenu(e) {
     { label: 'Standort', icon: 'pin', onClick: () => sendLocation() },
     { label: 'Zeichnen', icon: 'paint', onClick: () => import('./draw.js').then((m) => m.drawModal(cur.chatId)) },
     { label: 'Umfrage', icon: 'poll', onClick: () => import('./groups.js').then((m) => m.newPollModal(cur.chatId)) },
+    flag('events') ? { label: 'Termin', icon: 'calendar', onClick: () => import('./events.js').then((m) => m.newEventModal(cur.chatId)) } : null,
+    flag('taskLists') ? { label: 'Aufgabenliste', icon: 'tasks', onClick: () => import('./tasks.js').then((m) => m.newTaskListModal(cur.chatId)) } : null,
     { label: 'Geplante Nachricht', icon: 'schedule', onClick: () => scheduleModal() },
-  ]);
+  ].filter(Boolean));
 }
 
 // Share one of your contacts (from an existing direct chat) as a message with

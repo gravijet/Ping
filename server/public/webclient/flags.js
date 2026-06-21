@@ -44,6 +44,8 @@ export const DEFAULTS = {
   usernames: true,       // public @usernames + people directory + /u/<name> links
   twoFactor: true,       // TOTP two-factor auth + recovery codes
   privacyControls: true, // who-can-DM / who-can-add-to-groups + security centre
+  events: true,          // events ("Termine") with RSVP, reminders + agenda pane
+  taskLists: true,       // collaborative task lists / checklists in chats
 };
 
 function localOverrides() {

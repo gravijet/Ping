@@ -84,7 +84,7 @@ db.exec(`
     chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
     type       TEXT NOT NULL DEFAULT 'text'
-      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll')),
+      CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist')),
     body       TEXT NOT NULL DEFAULT '',
     attachment TEXT,
     reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
@@ -596,6 +596,64 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_security_events_user
     ON security_events(user_id, created_at);
+
+  -- ---- Pläne & Aufgaben (0.33.0) -------------------------------------------
+  --
+  -- Events ("Termine"). Like polls, an event is a normal message (type='event')
+  -- whose structured payload lives here and rides along in messageView.event, so
+  -- all the existing realtime plumbing just works. start_at is epoch-ms; an
+  -- optional reminder fires at remind_at (set when remind_minutes > 0) once and is
+  -- stamped reminded_at so the maintenance sweep can never re-fire it.
+  CREATE TABLE IF NOT EXISTS events (
+    id            TEXT PRIMARY KEY,
+    message_id    TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id       TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title         TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    location      TEXT NOT NULL DEFAULT '',
+    start_at      INTEGER NOT NULL,
+    remind_at     INTEGER,            -- when the pre-start nudge should fire (or NULL)
+    reminded_at   INTEGER,            -- stamped once the nudge went out
+    created_at    INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_events_chat ON events(chat_id, start_at);
+  CREATE INDEX IF NOT EXISTS idx_events_remind
+    ON events(remind_at) WHERE remind_at IS NOT NULL AND reminded_at IS NULL;
+
+  -- One RSVP row per (event, user). status is 'going' | 'maybe' | 'declined'.
+  CREATE TABLE IF NOT EXISTS event_rsvps (
+    event_id   TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status     TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (event_id, user_id)
+  );
+
+  -- Task lists ("Aufgaben"). A collaborative checklist backed by a message
+  -- (type='tasklist'); the items live in tasklist_items and ride along in
+  -- messageView.tasklist. Anyone in the chat can tick items or add new ones.
+  CREATE TABLE IF NOT EXISTS tasklists (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS tasklist_items (
+    id          TEXT PRIMARY KEY,
+    tasklist_id TEXT NOT NULL REFERENCES tasklists(id) ON DELETE CASCADE,
+    text        TEXT NOT NULL,
+    done        INTEGER NOT NULL DEFAULT 0,
+    done_by     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    done_at     INTEGER,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_tasklist_items_list
+    ON tasklist_items(tasklist_id, sort);
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -883,6 +941,60 @@ function migrateStatusType() {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 migrateStatusType();
+
+// 0.33.0 "Pläne & Aufgaben": allow the 'event' and 'tasklist' message types.
+// Same in-place rebuild as migrateMessageTypes(), but FTS-aware: the rebuild
+// drops the old `messages` table (and with it the messages_fts triggers), so we
+// drop the now-orphaned FTS index too and let setupFts() (which runs right after)
+// recreate it + its triggers and backfill from the new table. Without this the
+// full-text index would silently stop updating after the migration.
+function migrateMessageTypesPlans() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'")
+    .get();
+  if (!row || /'event'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER,
+        expires_at INTEGER
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+         edited_at, deleted_at, expires_at)
+        SELECT id, chat_id, sender_id, type, body, attachment, reply_to,
+               created_at, edited_at, deleted_at, expires_at
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_expires
+        ON messages(expires_at) WHERE expires_at IS NOT NULL;
+      -- The FTS triggers lived on the old table and are gone; drop the orphaned
+      -- index so setupFts() rebuilds it (triggers + backfill) from scratch.
+      DROP TABLE IF EXISTS messages_fts;
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateMessageTypesPlans();
 
 // ---- Full-text search (FTS5) ----------------------------------------------
 //

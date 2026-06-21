@@ -39,6 +39,10 @@ export const DEFAULT_CONFIG = {
     usernames: true,
     twoFactor: true,
     privacyControls: true,
+    // Pläne & Aufgaben (0.33.0): events with RSVP + reminders, and shared
+    // collaborative task lists / checklists.
+    events: true,
+    taskLists: true,
   },
   values: {
     maxStatusSeconds: 30,

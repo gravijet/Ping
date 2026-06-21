@@ -17,6 +17,14 @@ Online-Status, Lesebestätigungen).
 
 ## Features
 
+- **Termine & Aufgaben** (seit 0.33.0) – plane **Termine** direkt im Chat (Titel,
+  Datum, Ort, Beschreibung) und lass alle mit **Zusage / Vielleicht / Absage**
+  antworten – mit Live-Zählung, Teilnehmerliste und einer chat­übergreifenden
+  **„Termine"-Übersicht**. Eine optionale Erinnerung wird **automatisch
+  serverseitig** vor dem Start verschickt. Teile außerdem **Aufgabenlisten
+  (Checklisten)**: jede:r hakt Punkte ab oder fügt welche hinzu, der
+  **Fortschrittsbalken** aktualisiert sich in Echtzeit. Schaltbar über `events`
+  und `taskLists`.
 - **Benutzernamen & Zwei-Faktor** (seit 0.32.0) – sichere dir einen eindeutigen
   **`@Benutzernamen`** und lass dich darüber finden und anschreiben (mit
   Personensuche und `?u=@name`-Profil-Links) – ganz ohne deine Telefonnummer.

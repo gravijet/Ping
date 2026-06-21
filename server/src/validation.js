@@ -620,6 +620,63 @@ export const pollVoteSchema = z.object({
   option: z.number().int().min(0).max(11),
 });
 
+// ---- Pläne & Aufgaben (0.33.0) --------------------------------------------
+
+// An event ("Termin"): a title, a start time (epoch-ms, must be in the future),
+// optional description/location and an optional pre-start reminder in minutes.
+export const eventCreateSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib dem Termin einen Titel.')
+    .max(140, 'Der Titel ist zu lang.'),
+  description: z.string().trim().max(2000, 'Die Beschreibung ist zu lang.').optional().default(''),
+  location: z.string().trim().max(200, 'Der Ort ist zu lang.').optional().default(''),
+  startAt: z
+    .number()
+    .int('Ungültige Startzeit.')
+    .refine((t) => t > Date.now() - 60_000, 'Der Termin liegt in der Vergangenheit.')
+    .refine((t) => t < Date.now() + 5 * 365 * 86400_000, 'Der Termin liegt zu weit in der Zukunft.'),
+  // 0 = no reminder; otherwise nudge this many minutes before the start.
+  remindMinutes: z
+    .number()
+    .int()
+    .min(0)
+    .max(7 * 24 * 60, 'Erinnerung höchstens 7 Tage vorher.')
+    .optional()
+    .default(0),
+});
+
+// RSVP to an event: going / maybe / declined, or null to withdraw.
+export const rsvpSchema = z.object({
+  status: z.enum(['going', 'maybe', 'declined']).nullable(),
+});
+
+// A task list ("Aufgabe"): a title plus 1-50 checklist items.
+export const taskListCreateSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib der Liste einen Titel.')
+    .max(140, 'Der Titel ist zu lang.'),
+  items: z
+    .array(
+      z.string().trim().min(1, 'Leere Aufgaben gehen nicht.').max(200, 'Eine Aufgabe ist zu lang.')
+    )
+    .min(1, 'Eine Liste braucht mindestens eine Aufgabe.')
+    .max(50, 'Höchstens 50 Aufgaben pro Liste.'),
+});
+
+// Append a single item to an existing task list.
+export const taskItemAddSchema = z.object({
+  text: z.string().trim().min(1, 'Leere Aufgaben gehen nicht.').max(200, 'Eine Aufgabe ist zu lang.'),
+});
+
+// Toggle an item's done state.
+export const taskItemToggleSchema = z.object({
+  done: z.boolean(),
+});
+
 // Disappearing-messages timer: off (0) or 1 minute … 1 year.
 export const expireTimerSchema = z.object({
   seconds: z

@@ -625,6 +625,128 @@ a { color: var(--accent-ink); }
 .poll-opt.voted .row { font-weight: 700; }
 .poll .hint { margin-top: 4px; }
 
+/* ---- Pläne & Aufgaben (0.33.0): event + task cards ----------------------- */
+@keyframes card-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Events ("Termine") — a rich RSVP card. */
+.event-card { min-width: 256px; animation: card-reveal .2s ease both; }
+:root[data-motion="reduce"] .event-card { animation: none; }
+.event-head { display: flex; gap: 12px; align-items: flex-start; }
+.event-cal {
+  flex: 0 0 auto; width: 46px; border-radius: 12px; overflow: hidden;
+  text-align: center; border: 1px solid var(--line-strong); background: var(--surface);
+}
+.event-cal .m { display: block; font-size: 10px; font-weight: 800; letter-spacing: .06em;
+  text-transform: uppercase; padding: 3px 0; background: var(--accent); color: #fff; }
+.event-cal .d { display: block; font-size: 19px; font-weight: 800; padding: 4px 0 5px; }
+.msg.out .event-cal { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.12); }
+.msg.out .event-cal .m { background: rgba(255,255,255,.92); color: var(--accent-press); }
+.event-meta { min-width: 0; flex: 1; }
+.event-title { font-weight: 800; font-size: 15px; line-height: 1.25; }
+.event-when, .event-loc {
+  display: flex; align-items: center; gap: 5px; font-size: 12.5px;
+  color: var(--muted); margin-top: 3px;
+}
+.msg.out .event-when, .msg.out .event-loc, .msg.out .event-desc { color: rgba(255,255,255,.85); }
+.event-when .icon, .event-loc .icon { width: 14px; height: 14px; flex: 0 0 auto; }
+.event-rel {
+  margin-left: auto; font-weight: 700; color: var(--accent-ink);
+  background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; font-size: 11.5px;
+}
+.msg.out .event-rel { color: #fff; background: rgba(255,255,255,.2); }
+.event-desc { font-size: 13px; margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+.event-rsvp { display: flex; gap: 6px; margin-top: 11px; }
+.rsvp-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 7px 4px; border-radius: 11px; border: 1px solid var(--line-strong);
+  background: var(--surface); color: var(--text); cursor: pointer;
+  transition: transform .12s, background .15s, border-color .15s;
+}
+.rsvp-btn:hover { background: var(--surface-2); }
+.rsvp-btn:active { transform: scale(.95); }
+.rsvp-emoji { font-size: 16px; line-height: 1; }
+.rsvp-label { font-size: 10.5px; font-weight: 700; }
+.rsvp-count { font-size: 11px; color: var(--muted); }
+.rsvp-btn.on.going { border-color: var(--ok, #2bbf6a); background: color-mix(in srgb, var(--ok, #2bbf6a) 18%, transparent); }
+.rsvp-btn.on.maybe { border-color: var(--warn, #e6a23c); background: color-mix(in srgb, var(--warn, #e6a23c) 18%, transparent); }
+.rsvp-btn.on.declined { border-color: var(--danger, #f0506b); background: color-mix(in srgb, var(--danger, #f0506b) 18%, transparent); }
+.rsvp-btn.on .rsvp-count { color: var(--text); }
+.msg.out .rsvp-btn { border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.1); color: #fff; }
+.msg.out .rsvp-btn .rsvp-count { color: rgba(255,255,255,.8); }
+.msg.out .rsvp-btn.on { background: rgba(255,255,255,.26); border-color: #fff; }
+.event-attendees { font-size: 12px; color: var(--muted); margin-top: 9px; }
+.msg.out .event-attendees { color: rgba(255,255,255,.8); }
+.event-card.past { opacity: .72; }
+
+/* Task lists ("Aufgaben") — a collaborative checklist card. */
+.task-card { min-width: 240px; animation: card-reveal .2s ease both; }
+:root[data-motion="reduce"] .task-card { animation: none; }
+.task-head { display: flex; align-items: center; gap: 7px; }
+.task-head .icon { width: 16px; height: 16px; color: var(--accent); flex: 0 0 auto; }
+.msg.out .task-head .icon { color: #fff; }
+.task-title { font-weight: 800; font-size: 14.5px; flex: 1; min-width: 0; }
+.task-progress-label { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.msg.out .task-progress-label { color: rgba(255,255,255,.82); }
+.task-bar { height: 6px; border-radius: 3px; background: rgba(127,127,127,.22); overflow: hidden; margin: 8px 0 4px; }
+.task-bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .35s ease; }
+.task-bar i.done { background: var(--ok, #2bbf6a); }
+.msg.out .task-bar i { background: #fff; }
+.task-items { display: flex; flex-direction: column; }
+.task-item {
+  display: flex; align-items: center; gap: 9px; padding: 5px 2px; cursor: pointer;
+  border-radius: 8px; transition: background .12s;
+}
+.task-item:hover { background: var(--surface); }
+.task-check { width: 17px; height: 17px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+.msg.out .task-check { accent-color: #fff; }
+.task-text { font-size: 13.5px; flex: 1; min-width: 0; word-break: break-word; transition: opacity .15s; }
+.task-item.done .task-text { text-decoration: line-through; opacity: .55; }
+.task-by { font-size: 10.5px; color: var(--muted); flex: 0 0 auto; }
+.msg.out .task-by { color: rgba(255,255,255,.7); }
+.task-add { margin-top: 6px; }
+.task-add-input {
+  width: 100%; border: 0; border-top: 1px dashed var(--line-strong); background: transparent;
+  color: var(--text); font: inherit; font-size: 13px; padding: 7px 2px 2px; outline: none;
+}
+.task-add-input::placeholder { color: var(--muted); }
+.msg.out .task-add-input { color: #fff; border-top-color: rgba(255,255,255,.28); }
+.msg.out .task-add-input::placeholder { color: rgba(255,255,255,.7); }
+/* Create-modal item rows. */
+.task-edit-items { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.task-edit-row { display: flex; align-items: center; gap: 8px; }
+.task-edit-row .input { flex: 1; }
+.task-edit-row .icon.muted { color: var(--muted); flex: 0 0 auto; }
+
+/* "Termine" agenda pane. */
+.agenda-day {
+  font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); padding: 14px 18px 6px;
+}
+.agenda-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 10px 18px; background: none; border: 0; color: var(--text); cursor: pointer;
+  transition: background .12s;
+}
+.agenda-row:hover { background: var(--surface); }
+.agenda-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; background: var(--line-strong); }
+.agenda-dot.going { background: var(--ok, #2bbf6a); }
+.agenda-dot.maybe { background: var(--warn, #e6a23c); }
+.agenda-dot.declined { background: var(--danger, #f0506b); }
+.agenda-row .meta { flex: 1; min-width: 0; }
+.agenda-side { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; }
+.agenda-rel { font-size: 11.5px; color: var(--muted); font-weight: 700; }
+.agenda-going { font-size: 11px; color: var(--muted); }
+.agenda-you {
+  font-size: 10.5px; font-weight: 700; color: var(--accent-ink);
+  background: var(--accent-soft); border-radius: 999px; padding: 1px 7px;
+}
+.agenda-skel {
+  height: 52px; margin: 8px 16px; border-radius: 12px;
+  background: linear-gradient(100deg, var(--surface) 30%, var(--surface-2) 50%, var(--surface) 70%);
+  background-size: 220% 100%; animation: sk-shimmer 1.4s ease-in-out infinite;
+}
+:root[data-motion="reduce"] .agenda-skel { animation: none; }
+
 /* jump to bottom */
 .jump-btn {
   position: absolute; right: 24px; bottom: 96px; width: 46px; height: 46px;
