@@ -1,20 +1,25 @@
 /* telemetry.js — privacy-first diagnostics. Ping promises "kein Tracking", and
    this module is built to keep that promise:
 
-     • Everything is LOCAL by default. A small ring buffer of events and crash
-       reports lives in memory (crashes also in localStorage so they survive a
-       reload) purely to power the in-app debug panel.
-     • Nothing leaves the device unless the user explicitly turns on
-       "Diagnose & Absturzberichte senden" (prefs.diagnostics, default off).
-     • When opted in we send an ANONYMOUS payload — a random per-device id, never
-       the user id, phone or message content — to /api/telemetry and
-       /api/client-error, batched and via sendBeacon on page hide.
+     • Behaviour EVENTS stay LOCAL by default. A small ring buffer lives in
+       memory purely to power the in-app debug panel; nothing is sent unless the
+       user turns on "Diagnose senden" (prefs.diagnostics, default off).
+     • CRASH REPORTS (Fehlerberichte) auto-send to the dev bug inbox when the
+       'errorReporting' flag is on (default) — so the developer (and a fresh
+       Claude session) sees and fixes real crashes. A crash payload carries only
+       a stack trace + page path + app version; never the user id, phone or
+       message content. The anonymous per-device id is sent ONLY if it already
+       exists (an opted-in device) — auto crash reports never mint a new id.
 
    track(name, props) records an event; recordError(err) captures a crash. The
    global window 'error' / 'unhandledrejection' handlers are wired in install(). */
 
 import * as prefs from './prefs.js';
 import { flag } from './flags.js';
+
+// App version for crash reports — captured lazily in install() so this module
+// (imported at boot) doesn't statically pull in the settings UI graph.
+let appVersion = null;
 
 const EVENTS_MAX = 200;   // in-memory ring buffer (debug panel)
 const ERRORS_MAX = 50;    // crash reports (also persisted)
@@ -46,8 +51,20 @@ function anonId() {
   return id;
 }
 
+// The stored anonymous id *without* creating one. Auto crash reports use this so
+// a device that never opted into analytics keeps having no persistent id at all.
+function existingAid() {
+  try { return localStorage.getItem(AID_KEY) || null; } catch { return null; }
+}
+
 function optedIn() {
   return flag('diagnostics') && prefs.get('diagnostics') === true;
+}
+
+// Whether crash reports should auto-send. On by default; a remote/local
+// 'errorReporting' flag is the kill-switch for a noisy build.
+function errorReportingOn() {
+  return flag('errorReporting');
 }
 
 /** Record a lightweight named event. Always local; only queued for sending
@@ -74,7 +91,9 @@ export function recordError(err, context = 'app') {
   errors.push(rec);
   if (errors.length > ERRORS_MAX) errors.splice(0, errors.length - ERRORS_MAX);
   persistErrors();
-  if (optedIn()) sendError(rec);
+  // Auto-send crashes to the dev bug inbox (default on), or whenever the user
+  // has opted into full diagnostics.
+  if (errorReportingOn() || optedIn()) sendError(rec);
 }
 
 export function getEvents() { return events.slice(); }
@@ -135,7 +154,9 @@ export function flush() {
 }
 
 function sendError(rec) {
-  post('/client-error', { aid: anonId(), app: 'web', ...rec });
+  // Send the opted-in device's id if it exists, but never mint one for an
+  // auto-only report. appVersion pins the report to a build.
+  post('/client-error', { aid: optedIn() ? anonId() : existingAid(), app: 'web', appVersion, ...rec });
 }
 
 /** Send a single anonymous, *bucketed* device snapshot (battery/network/RAM
@@ -155,6 +176,11 @@ export async function sendDeviceSnapshot() {
 /** Wire the global error handlers + flush-on-hide. Call once at boot. */
 export function install() {
   if (installed) return; installed = true;
+
+  // Learn our build number for crash reports without statically importing the
+  // settings UI graph at boot. Best-effort; reports before this resolves just
+  // carry a null version.
+  import('./settings.js').then((m) => { appVersion = m.WEB_CLIENT_VERSION || null; }).catch(() => {});
 
   window.addEventListener('error', (e) => {
     recordError(e.error || { message: e.message, stack: `${e.filename}:${e.lineno}:${e.colno}` }, 'window');

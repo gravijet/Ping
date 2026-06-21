@@ -6,7 +6,9 @@ import 'package:flutter/foundation.dart';
 import 'doc_store.dart';
 
 /// A single captured error: enough to debug it later, nothing that identifies a
-/// person. Crash reports stay **on the device** — they are never sent anywhere.
+/// person. Reports are always kept **on the device**; a redacted copy is also
+/// forwarded to the developer bug inbox when error reporting is enabled (see
+/// [CrashService.sender]).
 @immutable
 class CrashReport {
   final DateTime time;
@@ -51,17 +53,26 @@ class CrashReport {
       );
 }
 
-/// Privacy-first, **fully on-device** crash & error capture for the Android app.
+/// Forwards a redacted crash payload to the server bug inbox
+/// (POST /api/client-error). Returns a future that completes when the report has
+/// been sent (or quietly dropped). Wired in `main.dart`.
+typedef CrashSender = Future<void> Function(Map<String, dynamic> payload);
+
+/// Privacy-first crash & error capture for the Android app.
 ///
-/// The web client already has its own opt-in telemetry; this is the native
-/// equivalent — but deliberately simpler and stricter: it keeps a small ring
-/// buffer of the most recent errors in the app's documents directory and shows
-/// them under *Einstellungen → Diagnose*. Nothing is ever transmitted, and
-/// obvious personal data (phone numbers, tokens) is redacted before storage.
+/// It keeps a small ring buffer of the most recent errors in the app's
+/// documents directory and shows them under *Einstellungen → Diagnose*. Obvious
+/// personal data (phone numbers, tokens) is redacted before anything leaves the
+/// `record` call. A redacted copy of each new report is also forwarded to the
+/// developer bug inbox via [sender] when one is wired and the 'errorReporting'
+/// flag is on — so real crashes reach the developer (and a fresh Claude session)
+/// instead of dying on the device. The forward is best-effort and de-duplicated
+/// per session; the on-device log is the source of truth.
 ///
 /// Wiring (see `main.dart`): [install] hooks Flutter's framework errors and the
 /// platform dispatcher's uncaught errors; [guard] runs the app inside a guarded
-/// zone so asynchronous errors are captured too.
+/// zone so asynchronous errors are captured too; [sender] is attached once the
+/// app's API client exists.
 class CrashService {
   CrashService._();
   static final CrashService instance = CrashService._();
@@ -75,6 +86,14 @@ class CrashService {
   bool _loaded = false;
   bool _installed = false;
   Timer? _saveDebounce;
+
+  /// Optional sink that forwards a redacted copy of each new report to the dev
+  /// bug inbox. Wired in `main.dart` and gated there by the 'errorReporting'
+  /// flag; while null (tests, pre-bootstrap) capture stays purely on-device.
+  CrashSender? sender;
+  // Headlines already forwarded this session, so a tight error loop sends each
+  // distinct crash once (the server de-dups the rest by fingerprint anyway).
+  final Set<String> _sent = {};
 
   /// The captured reports, newest first. Safe to read from the UI.
   List<CrashReport> get reports => List.unmodifiable(_reports);
@@ -133,8 +152,33 @@ class CrashService {
         _reports.removeRange(_maxReports, _reports.length);
       }
       _scheduleSave();
+      _trySend(report);
     } catch (_) {
       /* never let the crash reporter crash */
+    }
+  }
+
+  /// Best-effort forward of one report to [sender]. Never throws; sends each
+  /// distinct error at most once per session. The fields mirror the server's
+  /// clientErrorSchema (context ≤ 40, message ≤ 500, stack ≤ 4000 chars).
+  void _trySend(CrashReport r) {
+    final send = sender;
+    if (send == null) return;
+    final key = '${r.context ?? ''}|${r.headline}';
+    if (!_sent.add(key)) return;
+    if (_sent.length > 200) _sent.clear();
+    try {
+      final ctx = r.context;
+      send({
+        'app': 'android',
+        'appVersion': r.version,
+        if (ctx != null && ctx.isNotEmpty)
+          'context': ctx.length > 40 ? ctx.substring(0, 40) : ctx,
+        'message': r.error.length > 480 ? r.error.substring(0, 480) : r.error,
+        'stack': r.stack.length > 3900 ? r.stack.substring(0, 3900) : r.stack,
+      }).catchError((_) {});
+    } catch (_) {
+      /* a reporting failure must never cascade into another crash */
     }
   }
 

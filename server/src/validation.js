@@ -560,6 +560,7 @@ export const telemetrySchema = z.object({
 export const clientErrorSchema = z.object({
   aid: z.string().trim().max(64).optional(),
   app: appField,
+  appVersion: z.string().trim().max(40).optional(),
   context: z.string().trim().max(40).optional(),
   message: z.string().trim().max(500).optional(),
   stack: z.string().max(4000).optional(),

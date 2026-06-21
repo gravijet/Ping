@@ -72,3 +72,58 @@ test('admin diagnostics requires admin auth', async () => {
   const r = await api('/api/admin/diagnostics');
   assert.ok(r.status === 401 || r.status === 403, 'expected 401/403, got ' + r.status);
 });
+
+// ---- Fehlerberichte: de-dup, triage status, resolve route ----------------
+
+const findErr = (json, msg) => json.recentErrors.find((e) => e.message === msg);
+const postCrash = (over = {}) =>
+  api('/api/client-error', {
+    method: 'POST',
+    body: { app: 'web', appVersion: '9.9.9', context: 'window', message: 'DedupBoom',
+      stack: 'at render (chat.js:10:1)', ...over },
+  });
+
+test('duplicate crashes collapse into one row (count++, version stored)', async () => {
+  await postCrash();                                   // first occurrence
+  await postCrash({ stack: 'at render (chat.js:42:9)' }); // same crash, shifted line → same fp
+
+  const r = await api('/api/admin/diagnostics', { admin: ADMIN });
+  const e = findErr(r.json, 'DedupBoom');
+  assert.ok(e, 'DedupBoom report should exist');
+  assert.equal(e.count, 2, 'same crash should de-duplicate to count 2');
+  assert.equal(e.status, 'open');
+  assert.equal(e.appVersion, '9.9.9');
+  assert.ok(typeof r.json.openErrors === 'number' && r.json.openErrors >= 1);
+});
+
+test('a distinct crash is a separate report', async () => {
+  await postCrash({ message: 'OtherBoom', stack: 'at zap (app.js:5:5)' });
+  const r = await api('/api/admin/diagnostics', { admin: ADMIN });
+  assert.ok(findErr(r.json, 'OtherBoom'));
+  assert.ok(findErr(r.json, 'DedupBoom'));
+});
+
+test('admin resolve route closes a report and it leaves the open inbox', async () => {
+  let r = await api('/api/admin/diagnostics', { admin: ADMIN });
+  const id = findErr(r.json, 'DedupBoom').id;
+  const openBefore = r.json.openErrors;
+
+  const res = await api('/api/admin/errors/resolve', { method: 'POST', admin: ADMIN, body: { id } });
+  assert.equal(res.status, 200);
+  assert.ok(res.json.resolved >= 1);
+
+  r = await api('/api/admin/diagnostics', { admin: ADMIN });
+  assert.equal(findErr(r.json, 'DedupBoom').status, 'resolved');
+  assert.ok(r.json.openErrors <= openBefore - 1, 'open count should drop after resolve');
+});
+
+test('a recurrence re-opens a resolved report', async () => {
+  await postCrash(); // same fp as the now-resolved DedupBoom
+  const r = await api('/api/admin/diagnostics', { admin: ADMIN });
+  assert.equal(findErr(r.json, 'DedupBoom').status, 'open', 'recurrence should reopen');
+});
+
+test('resolve route requires admin auth', async () => {
+  const r = await api('/api/admin/errors/resolve', { method: 'POST', body: { id: 1 } });
+  assert.ok(r.status === 401 || r.status === 403, 'expected 401/403, got ' + r.status);
+});

@@ -134,7 +134,7 @@ import {
   approvalDecisionSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
-import { recordEvents, recordError, telemetrySummary } from './telemetryRepo.js';
+import { recordEvents, recordError, telemetrySummary, resolveErrors } from './telemetryRepo.js';
 import { recordDeviceSnapshot, deviceFleet } from './deviceStatsRepo.js';
 import {
   createScheduled,
@@ -4739,6 +4739,24 @@ router.get(
   h(async (req, res) => {
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
     res.json({ ...telemetrySummary({ days }), fleet: deviceFleet({ days }) });
+  })
+);
+
+// Mark crash reports (Fehlerberichte) resolved once fixed — by row id or
+// fingerprint. Used by the admin console and the session-start triage script
+// (server/scripts/error-reports.mjs) so a fixed report leaves the open inbox.
+router.post(
+  '/admin/errors/resolve',
+  requireAdmin,
+  h(async (req, res) => {
+    const refs = Array.isArray(req.body?.refs)
+      ? req.body.refs
+      : req.body?.id != null
+        ? [req.body.id]
+        : [];
+    const resolved = resolveErrors(refs);
+    audit(req, 'errors.resolve', refs.slice(0, 20).join(','), String(resolved));
+    res.json({ resolved });
   })
 );
 

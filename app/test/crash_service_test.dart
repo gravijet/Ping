@@ -96,4 +96,49 @@ void main() {
     expect(crash.isEmpty, isTrue);
     expect(crash.count, 0);
   });
+
+  group('sender (auto error reporting)', () {
+    tearDown(() => crash.sender = null);
+
+    test('forwards a redacted, schema-shaped payload per distinct crash', () async {
+      final sent = <Map<String, dynamic>>[];
+      crash.sender = (p) async => sent.add(p);
+
+      crash.record(StateError('boom for +43 664 1234567'), StackTrace.empty,
+          context: 'TestZone');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(sent, hasLength(1));
+      expect(sent.first['app'], 'android');
+      expect(sent.first['appVersion'], '0.26.0+31');
+      expect(sent.first['context'], 'TestZone');
+      // PII redaction happens before the payload is built.
+      expect(sent.first['message'], isNot(contains('1234567')));
+      // Fields stay within the server's clientErrorSchema limits.
+      expect((sent.first['message'] as String).length, lessThanOrEqualTo(500));
+      expect((sent.first['context'] as String).length, lessThanOrEqualTo(40));
+    });
+
+    test('de-duplicates the same crash within a session', () async {
+      var calls = 0;
+      crash.sender = (p) async => calls++;
+      crash.record(Exception('dup'), StackTrace.empty, context: 'C');
+      crash.record(Exception('dup'), StackTrace.empty, context: 'C');
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 1);
+    });
+
+    test('no sender → capture stays purely on-device', () async {
+      crash.sender = null;
+      crash.record(Exception('local-only'), StackTrace.empty);
+      expect(crash.count, 1); // recorded, nothing thrown
+    });
+
+    test('a throwing sender never breaks recording', () async {
+      crash.sender = (p) async => throw Exception('network down');
+      crash.record(Exception('still-captured'), StackTrace.empty);
+      await Future<void>.delayed(Duration.zero);
+      expect(crash.reports.first.headline, contains('still-captured'));
+    });
+  });
 }

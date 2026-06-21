@@ -1085,6 +1085,44 @@ function ensureColumns() {
   if (!eventCols.includes('recur')) {
     db.exec("ALTER TABLE events ADD COLUMN recur TEXT NOT NULL DEFAULT ''");
   }
+
+  // ---- Fehlerberichte (error reports): triage state on client_errors -------
+  // The crash table started life as a flat append-only ring. To turn it into a
+  // developer-facing bug inbox (auto-collected reports that a fresh Claude
+  // session triages and fixes) we add: a server-computed `fingerprint` so the
+  // same crash collapses into one row, a `count`/`last_seen` for "seen N× until
+  // T", an `app_version` for "which build", and a `status`/`resolved_at` so a
+  // fixed report drops out of the inbox (and re-opens if it recurs).
+  const ceCols = db.prepare('PRAGMA table_info(client_errors)').all().map((c) => c.name);
+  if (!ceCols.includes('fingerprint')) {
+    db.exec('ALTER TABLE client_errors ADD COLUMN fingerprint TEXT');
+  }
+  if (!ceCols.includes('count')) {
+    db.exec('ALTER TABLE client_errors ADD COLUMN count INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!ceCols.includes('last_seen')) {
+    db.exec('ALTER TABLE client_errors ADD COLUMN last_seen INTEGER');
+    // Legacy rows predate the column: seed it from created_at so they sort sanely.
+    db.exec('UPDATE client_errors SET last_seen = created_at WHERE last_seen IS NULL');
+  }
+  if (!ceCols.includes('status')) {
+    db.exec("ALTER TABLE client_errors ADD COLUMN status TEXT NOT NULL DEFAULT 'open'");
+  }
+  if (!ceCols.includes('app_version')) {
+    db.exec('ALTER TABLE client_errors ADD COLUMN app_version TEXT');
+  }
+  if (!ceCols.includes('resolved_at')) {
+    db.exec('ALTER TABLE client_errors ADD COLUMN resolved_at INTEGER');
+  }
+  // One row per distinct crash. Pre-existing rows have NULL fingerprint; SQLite
+  // treats NULLs as distinct so the unique index tolerates them, and the upsert
+  // in telemetryRepo only ever conflicts on a real (non-NULL) fingerprint.
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_client_errors_fp ON client_errors(fingerprint)'
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_client_errors_status ON client_errors(status, last_seen)'
+  );
 }
 ensureColumns();
 

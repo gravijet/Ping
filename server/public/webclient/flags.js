@@ -72,6 +72,7 @@ export const DEFAULTS = {
   translation: true,      // inline message translation
   catchUp: true,          // "Hol mich ab" unread summary (heuristic)
   smartReplies: true,     // heuristic suggested quick replies
+  errorReporting: true,   // auto-send crash reports (Fehlerberichte) to the dev inbox
 };
 
 function localOverrides() {

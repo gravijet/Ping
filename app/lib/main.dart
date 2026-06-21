@@ -79,6 +79,16 @@ void main() {
     ErrorWidget.builder = (details) => const _FatalErrorScreen();
 
     final state = AppState();
+    // Forward redacted crash reports (Fehlerberichte) to the developer bug inbox
+    // when the 'errorReporting' flag is on. On-device capture above is unchanged;
+    // this just hands the developer (and a fresh Claude session) the real
+    // crashes to fix. Best-effort — a reporting failure never disturbs the app.
+    CrashService.instance.sender = (payload) async {
+      if (!state.feature('errorReporting', fallback: true)) return;
+      try {
+        await state.api.post('/client-error', payload);
+      } catch (_) {/* offline / server down — the on-device copy still exists */}
+    };
     // Kick off bootstrap; the UI shows a splash until it resolves. Guarded so a
     // bootstrap exception can't leave the app stranded on the splash forever.
     state.init().catchError((Object e) => state.failBootstrap(e));

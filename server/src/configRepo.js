@@ -74,6 +74,10 @@ export const DEFAULT_CONFIG = {
     translation: true,        // inline message translation (needs LIBRETRANSLATE_URL)
     catchUp: true,            // "Hol mich ab" unread summary (heuristic, on-device)
     smartReplies: true,       // heuristic suggested quick replies
+    // Diagnose: auto-send crash reports (Fehlerberichte) to the dev bug inbox.
+    // Crashes only carry a stack trace + anonymous device id, never message
+    // content — kill-switch here if a noisy build needs muting.
+    errorReporting: true,
   },
   values: {
     maxStatusSeconds: 30,
