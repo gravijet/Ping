@@ -286,7 +286,7 @@ void main() {
       ),
     );
     await tester.pumpWidget(_wrap(MessageBubble(
-        message: msg, isMine: false, onVoteAvail: (_, __) {})));
+        message: msg, isMine: false, onVoteAvail: (_, _) {})));
     expect(find.text('Spieleabend'), findsOneWidget);
     expect(find.text('Favorit'), findsOneWidget);
     expect(find.text('✅'), findsWidgets); // yes-vote chips
