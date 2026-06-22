@@ -2,13 +2,16 @@
 # Publish the latest Flutter release build(s) to the server's public download dir,
 # so https://example.invalid/ serves the newest APK. Build first:
 #   cd app
-#   flutter build apk --split-per-abi --release   # smaller per-ABI APKs (optional)
-#   flutter build apk --release                   # universal APK (required)
+#   flutter build apk --release   # universal APK + per-ABI splits, one build
 #   ../server/scripts/publish-apk.sh
 #
-# Publishing the splits lets the in-app updater download only the slice for the
-# user's CPU (~40% smaller). Skip the split build and only the universal APK is
-# published — everything still works, just with the larger download.
+# A single `flutter build apk --release` now emits the universal APK *and* the
+# per-ABI splits (app-<abi>-release.apk), all on the same base version code,
+# thanks to AGP's `splits { abi { … } }` block in android/app/build.gradle.kts.
+# We deliberately no longer use `--split-per-abi`: that inflates each split's
+# version code (base+1000·abi), which makes Android reject the universal as a
+# downgrade on reinstall ("App nicht installiert"). Publishing the splits lets
+# the in-app updater download only the slice for the user's CPU (~40% smaller).
 #
 # Every APK is verified against the version we are publishing using `aapt`: a
 # split whose embedded versionName doesn't match the universal build is skipped

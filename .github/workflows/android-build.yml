@@ -87,11 +87,13 @@ jobs:
         working-directory: app
         run: flutter pub get
 
-      - name: Build per-ABI split APKs
-        working-directory: app
-        run: flutter build apk --split-per-abi --release
-
-      - name: Build universal APK
+      # ONE build produces the universal APK *and* the per-ABI splits, all on the
+      # same base version code. We deliberately do NOT pass `--split-per-abi`:
+      # that path stamps each split with an inflated version code (base+1000·abi),
+      # which makes Android reject the universal as a downgrade on reinstall. The
+      # splits come from AGP's native `splits { abi { … } }` block in build.gradle.kts
+      # instead, which keeps every variant on the base version code.
+      - name: Build universal + per-ABI APKs
         working-directory: app
         run: flutter build apk --release
 

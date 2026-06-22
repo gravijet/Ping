@@ -64,6 +64,25 @@ android {
             }
         }
     }
+
+    // --- Per-ABI splits WITHOUT version-code inflation -----------------------
+    // Ping is sideloaded (website download + in-app OTA), never shipped through
+    // Google Play, so we deliberately AVOID Flutter's own `--split-per-abi`: that
+    // path stamps each split with an inflated version code (base + 1000·abiIndex
+    // → 1042 / 2042 / 4042), which makes Android reject the universal APK as a
+    // *downgrade* once a split is installed → the infamous "App nicht installiert"
+    // on reinstall. AGP's native ABI splits instead keep every split on the same
+    // base version code as the universal, so any APK installs cleanly over any
+    // other. Build with a plain `flutter build apk --release` (NOT
+    // `--split-per-abi`); this produces app-<abi>-release.apk + the universal.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
+    }
 }
 
 dependencies {

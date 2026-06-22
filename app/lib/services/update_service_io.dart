@@ -76,11 +76,11 @@ class UpdateService {
         final v = abi.isNotEmpty ? variants[abi] : null;
         if (v is Map && v['url'] != null) {
           final rel = v['url'].toString();
-          // A per-ABI split carries its own (ABI-offset) version code. Comparing
-          // *that* against the installed build number is what keeps same-version
-          // hotfixes working for split-installed users — the universal build's
-          // code would never look newer to them. Falls back to the universal
-          // code when the server doesn't advertise a per-variant one.
+          // Every variant now shares the universal build's version code (we build
+          // splits via AGP, not Flutter's `--split-per-abi`, so there's no ABI
+          // offset any more), but we still read the split's advertised code and
+          // fall back to the universal one — robust if an older, inflated build is
+          // ever in the mix.
           final vCode = v['versionCode'] is int
               ? v['versionCode'] as int
               : int.tryParse('${v['versionCode'] ?? ''}');
@@ -101,9 +101,10 @@ class UpdateService {
   }
 
   /// Whether [info] is newer than what's installed. An update is offered when
-  /// *either* the integer version code or the marketing version is higher — the
-  /// version-name check keeps working even if a per-ABI split carries an
-  /// inflated version code, so split-installed users still get updates.
+  /// *either* the integer version code or the marketing version is higher. The
+  /// version-name check is a backstop that keeps working even for users still on
+  /// an old inflated per-ABI version code (pre-0.36.1 splits), who would otherwise
+  /// see the new, lower, flattened code as "not newer".
   Future<bool> isNewer(UpdateInfo info) async {
     if (!supported) return false;
     final code = info.versionCode;
