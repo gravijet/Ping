@@ -1,5 +1,15 @@
 import 'package:flutter/material.dart';
 
+/// Parse a `#rrggbb` (or `rrggbb`) colour string into an opaque [Color],
+/// tolerating empty / malformed values so bad server data can never crash a
+/// build. Falls back to [fallback] (a muted grey by default).
+Color _hexColor(String? value, {Color fallback = const Color(0xFF888888)}) {
+  final hex = (value ?? '').replaceFirst('#', '').trim();
+  if (hex.length != 6) return fallback;
+  final n = int.tryParse(hex, radix: 16);
+  return n == null ? fallback : Color(0xFF000000 | n);
+}
+
 /// A tappable link chip on a profile (e.g. a website or social handle).
 class ProfileLink {
   final String label;
@@ -93,18 +103,11 @@ class PingUser {
   /// Whether this account carries any trust badge at all.
   bool get hasBadge => official || verified || premium;
 
-  Color get color {
-    final hex = avatarColor.replaceFirst('#', '');
-    return Color(int.parse('FF$hex', radix: 16));
-  }
+  Color get color => _hexColor(avatarColor);
 
   /// The colour used to theme this user's profile — their chosen accent, or the
   /// auto-assigned avatar colour as a fallback.
-  Color get accent {
-    final hex = (accentColor ?? avatarColor).replaceFirst('#', '');
-    if (hex.length != 6) return color;
-    return Color(int.parse('FF$hex', radix: 16));
-  }
+  Color get accent => _hexColor(accentColor ?? avatarColor, fallback: color);
 
   /// Whether a (still-valid) temporary mood/status is set.
   bool get hasMood =>

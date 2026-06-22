@@ -52,7 +52,7 @@ export const DEFAULT_CONFIG = {
     voiceTranscription: true, // on-prem Whisper transcription of voice notes (needs WHISPER_BIN)
     // B. Medien & Ausdruck
     stickers: true,           // sticker packs (sticker message type)
-    gifSearch: true,          // server-proxied GIF search (needs TENOR_KEY)
+    gifSearch: true,          // server-proxied GIF search (needs GIPHY_KEY; TENOR_KEY legacy, dead after 2026-06-30)
     photoEditor: true,        // crop/markup/draw on images before sending (client-only)
     viewOnce: true,           // view-once photos/videos
     chatThemes: true,         // per-chat wallpaper + accent, synced

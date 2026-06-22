@@ -26,6 +26,21 @@ void main() {
       expect(u.online, false);
     });
 
+    test('malformed avatar colour falls back instead of crashing', () {
+      // Bad server data must never throw out of a colour getter (it would crash
+      // the whole list/avatar build).
+      for (final bad in ['', 'nothex', '#xyz', '#12', 'zzzzzz', '#1234567']) {
+        final u = PingUser.fromJson({
+          'id': '1',
+          'phone': '+49170',
+          'displayName': 'X',
+          'avatarColor': bad,
+        });
+        expect(u.color, const Color(0xFF888888), reason: 'avatarColor=$bad');
+        expect(u.accent, const Color(0xFF888888), reason: 'accent for $bad');
+      }
+    });
+
     test('falls back to the phone number when no name is set', () {
       final u = PingUser.fromJson({'id': '2', 'phone': '+491700000000'});
       expect(u.displayName, '+491700000000');

@@ -419,4 +419,10 @@ test('translation + GIF search degrade gracefully when unconfigured', async () =
   assert.equal(tr.json.available, false);
   const gif = await api('/api/gifs/search?q=cat', { token: a.token });
   assert.equal(gif.json.available, false);
+  assert.deepEqual(gif.json.results, []);
+  // An empty query short-circuits without hitting any provider (no key needed).
+  const empty = await api('/api/gifs/search?q=%20%20', { token: a.token });
+  assert.equal(empty.status, 200);
+  assert.equal(empty.json.available, true);
+  assert.deepEqual(empty.json.results, []);
 });

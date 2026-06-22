@@ -26,7 +26,11 @@ async function ensureIdentity() {
   if (!subtle()) return null;
   let priv = localStorage.getItem(LS_PRIV);
   let pub = localStorage.getItem(LS_PUB);
-  if (priv && pub) return { priv: JSON.parse(priv), pub };
+  if (priv && pub) {
+    // A corrupted stored key must not wedge E2EE forever — fall through and
+    // regenerate when the JWK can't be parsed.
+    try { return { priv: JSON.parse(priv), pub }; } catch { /* regenerate below */ }
+  }
   const pair = await subtle().generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']);
   const jwk = await subtle().exportKey('jwk', pair.privateKey);
   const raw = await subtle().exportKey('raw', pair.publicKey);

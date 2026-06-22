@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 import 'message.dart';
 import 'user.dart';
 
+/// Parse a `#rrggbb` colour string into an opaque [Color], tolerating empty /
+/// malformed values so bad server data can never crash a build.
+Color _hexColor(String? value, {Color fallback = const Color(0xFF888888)}) {
+  final hex = (value ?? '').replaceFirst('#', '').trim();
+  if (hex.length != 6) return fallback;
+  final n = int.tryParse(hex, radix: 16);
+  return n == null ? fallback : Color(0xFF000000 | n);
+}
+
 /// A conversation — either a 1:1 direct chat or a named group.
 class Chat {
   final String id;
@@ -59,10 +68,7 @@ class Chat {
   /// Title to display: the self-chat reads "Notiz an mich" instead of your name.
   String get displayTitle => self ? 'Notiz an mich' : title;
 
-  Color get color {
-    final hex = avatarColor.replaceFirst('#', '');
-    return Color(int.parse('FF$hex', radix: 16));
-  }
+  Color get color => _hexColor(avatarColor);
 
   String get initials {
     final t = title.trim();

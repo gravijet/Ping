@@ -48,8 +48,10 @@ class PingStatus {
       );
 
   Color get background {
-    final hex = (bgColor ?? '#0A84FF').replaceFirst('#', '');
-    return Color(int.parse('FF$hex', radix: 16));
+    final hex = (bgColor ?? '#0A84FF').replaceFirst('#', '').trim();
+    if (hex.length != 6) return const Color(0xFF0A84FF);
+    final n = int.tryParse(hex, radix: 16);
+    return n == null ? const Color(0xFF0A84FF) : Color(0xFF000000 | n);
   }
 
   factory PingStatus.fromJson(Map<String, dynamic> json) => PingStatus(

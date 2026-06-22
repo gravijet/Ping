@@ -3061,26 +3061,53 @@ router.post(
 // ---- 0.34.0 "Alles": GIF search (server-proxied, private) -----------------
 
 // Proxied through the server so the GIF provider never sees the client. Graceful
-// when no key is configured: { available:false }.
+// when no provider is configured: { available:false }.
+//
+// Provider note: Google is shutting down the Tenor API on 2026-06-30 (no new keys
+// since 2026-01-13). Giphy is therefore the preferred provider — set GIPHY_KEY.
+// TENOR_KEY stays supported only as a legacy fallback and will stop working after
+// the shutdown date.
+async function gifProviderSearch(q) {
+  const giphyKey = process.env.GIPHY_KEY;
+  if (giphyKey) {
+    const url = `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(giphyKey)}`
+      + `&q=${encodeURIComponent(q)}&limit=24&rating=pg-13&lang=de&bundle=messaging_non_clips`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('giphy');
+    const data = await r.json();
+    return (data.data || []).map((g) => ({
+      id: g.id,
+      url: g.images?.original?.url || g.images?.downsized?.url || '',
+      preview: g.images?.fixed_width_small?.url || g.images?.preview_gif?.url || '',
+      desc: g.title || g.alt_text || '',
+    })).filter((g) => g.url);
+  }
+  const tenorKey = process.env.TENOR_KEY; // legacy — dead after 2026-06-30
+  if (tenorKey) {
+    const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}`
+      + `&key=${encodeURIComponent(tenorKey)}&limit=24&media_filter=gif,tinygif&contentfilter=high`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!r.ok) throw new Error('tenor');
+    const data = await r.json();
+    return (data.results || []).map((g) => ({
+      id: g.id,
+      url: g.media_formats?.gif?.url || '',
+      preview: g.media_formats?.tinygif?.url || '',
+      desc: g.content_description || '',
+    })).filter((g) => g.url);
+  }
+  return null; // no provider configured
+}
+
 router.get(
   '/gifs/search',
   requireAuth,
   h(async (req, res) => {
-    const key = process.env.TENOR_KEY;
-    if (!key) return res.json({ available: false, results: [] });
-    const q = String(req.query.q || '').slice(0, 80);
+    const q = String(req.query.q || '').slice(0, 80).trim();
+    if (!q) return res.json({ available: true, results: [] });
     try {
-      const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(q)}`
-        + `&key=${key}&limit=24&media_filter=gif,tinygif&contentfilter=high`;
-      const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
-      if (!r.ok) return res.status(502).json({ error: 'GIF-Suche fehlgeschlagen.' });
-      const data = await r.json();
-      const results = (data.results || []).map((g) => ({
-        id: g.id,
-        url: g.media_formats?.gif?.url || '',
-        preview: g.media_formats?.tinygif?.url || '',
-        desc: g.content_description || '',
-      })).filter((g) => g.url);
+      const results = await gifProviderSearch(q);
+      if (results === null) return res.json({ available: false, results: [] });
       res.json({ available: true, results });
     } catch {
       res.status(502).json({ error: 'GIF-Dienst nicht erreichbar.' });
