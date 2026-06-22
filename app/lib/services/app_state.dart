@@ -2591,6 +2591,30 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 0.35.0: share a contact card (type='contact') for the account [userId].
+  Future<void> shareContact(String chatId, String userId, {String note = ''}) async {
+    final res = await _api.post('/chats/$chatId/contact',
+        {'userId': userId, if (note.trim().isNotEmpty) 'note': note.trim()});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// 0.35.0: share a code snippet (type='code').
+  Future<void> shareCode(String chatId, String code,
+      {String language = '', String filename = ''}) async {
+    final res = await _api.post('/chats/$chatId/code', {
+      'code': code,
+      if (language.trim().isNotEmpty) 'language': language.trim(),
+      if (filename.trim().isNotEmpty) 'filename': filename.trim(),
+    });
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
   /// Start an in-chat mini-game ('tictactoe' | 'connect4').
   Future<void> createGame(String chatId, String kind) async {
     final res = await _api.post('/chats/$chatId/games', {'kind': kind});
@@ -2710,6 +2734,19 @@ class AppState extends ChangeNotifier {
         !c.isGroup && c.otherUser?.id == user.id);
     if (existing.isNotEmpty) return existing.first;
     final res = await _api.post('/chats/direct', {'userId': user.id});
+    final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
+    _upsertChat(chat);
+    _cacheChatUsers(chat);
+    notifyListeners();
+    return chat;
+  }
+
+  /// Open (or reuse) a direct chat with the account behind [userId] — used when
+  /// tapping "Chat starten" on a shared contact card, where we only carry the id.
+  Future<Chat> openDirectChatById(String userId) async {
+    final existing = chats.where((c) => !c.isGroup && c.otherUser?.id == userId);
+    if (existing.isNotEmpty) return existing.first;
+    final res = await _api.post('/chats/direct', {'userId': userId});
     final chat = Chat.fromJson(res['chat'] as Map<String, dynamic>);
     _upsertChat(chat);
     _cacheChatUsers(chat);

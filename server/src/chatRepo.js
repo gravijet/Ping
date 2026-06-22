@@ -6,6 +6,8 @@ import { liveLocationView } from './liveLocationRepo.js';
 import { transcriptView } from './transcribe.js';
 import { boardView } from './boardsRepo.js';
 import { gameView } from './gamesRepo.js';
+import { contactCardView } from './contactCardRepo.js';
+import { codeView } from './codeRepo.js';
 
 const s = {
   insertChat: db.prepare(`
@@ -766,6 +768,9 @@ const TYPE_ALIASES = {
   sticker: 'sticker', aufkleber: 'sticker', board: 'board', kanban: 'board',
   game: 'game', spiel: 'game', livelocation: 'livelocation',
   livestandort: 'livelocation', echtzeitstandort: 'livelocation',
+  // 0.35.0 "Ausdruck & Werkbank"
+  contact: 'contact', kontakt: 'contact', kontaktkarte: 'contact', visitenkarte: 'contact',
+  code: 'code', snippet: 'code', codeschnipsel: 'code', quellcode: 'code',
 };
 
 // Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
@@ -1103,6 +1108,9 @@ export function messageView(msg, viewerId) {
       msg.type === 'livelocation' && !msg.deleted_at ? liveLocationView(msg) : null,
     transcript:
       msg.type === 'voice' && !msg.deleted_at ? transcriptView(msg.id) : null,
+    // 0.35.0 "Ausdruck & Werkbank": contact-card + code-snippet payloads.
+    contact: msg.type === 'contact' && !msg.deleted_at ? contactCardView(msg.id) : null,
+    code: msg.type === 'code' && !msg.deleted_at ? codeView(msg.id) : null,
     // 0.34.0: thread metadata, view-once + E2EE flags.
     threadRoot: msg.thread_root || null,
     threadCount: msg.thread_count || 0,

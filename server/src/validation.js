@@ -685,6 +685,34 @@ export const taskItemToggleSchema = z.object({
   done: z.boolean(),
 });
 
+// ---- 0.35.0 "Ausdruck & Werkbank" -----------------------------------------
+
+// Share a contact card. Normally you share a Ping account (userId); the server
+// snapshots that account's public profile. An optional note rides along.
+export const contactCardSchema = z.object({
+  userId: z.string().trim().min(1, 'Kein Kontakt ausgewählt.').max(64),
+  note: z.string().trim().max(280, 'Die Notiz ist zu lang.').optional().default(''),
+});
+
+// Share a code snippet. Language/filename are cosmetic labels; the body is the
+// source. We cap it generously — this is a chat, not a paste bin.
+export const codeSnippetSchema = z.object({
+  code: z
+    .string()
+    .min(1, 'Der Code ist leer.')
+    .max(20000, 'Das Snippet ist zu lang (max. 20.000 Zeichen).')
+    // Keep the source verbatim (indentation matters), but reject a blank snippet.
+    .refine((s) => s.trim().length > 0, 'Der Code ist leer.'),
+  language: z
+    .string()
+    .trim()
+    .max(24, 'Der Sprachname ist zu lang.')
+    .regex(/^[a-zA-Z0-9+#.\- ]*$/, 'Ungültiger Sprachname.')
+    .optional()
+    .default(''),
+  filename: z.string().trim().max(120, 'Der Dateiname ist zu lang.').optional().default(''),
+});
+
 // Disappearing-messages timer: off (0) or 1 minute … 1 year.
 export const expireTimerSchema = z.object({
   seconds: z

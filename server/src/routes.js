@@ -75,6 +75,8 @@ import {
   taskListCreateSchema,
   taskItemAddSchema,
   taskItemToggleSchema,
+  contactCardSchema,
+  codeSnippetSchema,
   expireTimerSchema,
   draftSchema,
   folderSchema,
@@ -370,6 +372,8 @@ import {
   setTaskItemDone,
   taskListView,
 } from './tasksRepo.js';
+import { createContactCard } from './contactCardRepo.js';
+import { createCodeSnippet, codeTeaser } from './codeRepo.js';
 import {
   setLiveLocation,
   updateLiveLocation,
@@ -537,6 +541,10 @@ function messagePreview(msg) {
       return '🎮 Spiel';
     case 'livelocation':
       return '📍 Live-Standort';
+    case 'contact':
+      return '👤 Kontakt';
+    case 'code':
+      return '‹/› Code-Snippet';
     default:
       return 'Neue Nachricht';
   }
@@ -2214,6 +2222,84 @@ router.post(
   })
 );
 
+// ---- 0.35.0 "Ausdruck & Werkbank": contact cards + code snippets ----------
+
+// Share a contact card (type='contact'). You share a Ping account; the server
+// snapshots that account's public profile so the card renders even if they
+// later rename, and links contact_user_id so a tap can open a chat with them.
+router.post(
+  '/chats/:id/contact',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { userId, note } = parse(contactCardSchema, req.body);
+    const contact = getUserById(userId);
+    if (!contact || contact.disabled) {
+      return res.status(404).json({ error: 'Diesen Kontakt gibt es nicht.' });
+    }
+    const pub = publicUser(contact);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'contact',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createContactCard({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      sharerId: req.user.id,
+      contactUserId: contact.id,
+      displayName: pub.displayName,
+      username: pub.username || '',
+      avatarColor: pub.avatarColor || '',
+      note,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Share a code snippet (type='code'). The source lives in message_code; the
+// message body carries only a short, push-safe teaser so previews stay tidy.
+router.post(
+  '/chats/:id/code',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const { code, language, filename } = parse(codeSnippetSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'code',
+      body: codeTeaser({ language, filename, code }),
+      expiresAt: messageExpiry(req.chat),
+    });
+    createCodeSnippet({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      authorId: req.user.id,
+      language,
+      filename,
+      code,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
 // ---- 0.34.0 "Alles": threads (Antwortketten) ------------------------------
 
 // List the replies in a message's thread (oldest-first).
@@ -3163,6 +3249,8 @@ function reminderPreviewOf(msg) {
     case 'board': return '📋 Board';
     case 'game': return '🎮 Spiel';
     case 'livelocation': return '📍 Live-Standort';
+    case 'contact': return '👤 Kontakt';
+    case 'code': return '‹/› Code-Snippet';
     default: return 'Nachricht';
   }
 }

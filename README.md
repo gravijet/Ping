@@ -30,6 +30,12 @@ Online-Status, Lesebestätigungen).
   **„Hol mich ab"**-Zusammenfassung (rein lokal) und heuristische **Smart Replies**.
   Kein Cloud-LLM, keine Datenabflüsse. Volle Oberfläche im **Web & Windows**, alle
   Server-Funktionen für **Android** per OTA.
+- **Kontaktkarten & Code-Snippets** (seit 0.35.0) – teile eine Person als
+  schicke **Kontaktkarte** (Foto, Name, `@Handle`) mit direktem **„Chat starten"**,
+  und teile Code als **Snippet-Karte** mit **Syntax-Hervorhebung**, **Kopieren**
+  per Tipp und Vollbild-Ansicht. Beides nativ auf Web, Windows und Android und
+  sofort durchsuchbar (`typ:kontakt`, `typ:code`). Schaltbar über `contactCards`
+  und `codeSnippets`.
 - **Termine & Aufgaben** (seit 0.33.0) – plane **Termine** direkt im Chat (Titel,
   Datum, Ort, Beschreibung) und lass alle mit **Zusage / Vielleicht / Absage**
   antworten – mit Live-Zählung, Teilnehmerliste und einer chat­übergreifenden

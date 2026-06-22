@@ -814,6 +814,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onTapLiveLocation: interactive && m.type == 'livelocation'
           ? () => _openLiveLocation(m)
           : null,
+      onOpenContact: interactive && m.contact?.userId != null
+          ? (userId) => _openContactChat(userId)
+          : null,
       onOpenThread: interactive && m.threadCount > 0
           ? () => _openThread(m)
           : null,
@@ -993,6 +996,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openContactChat(String userId) async {
+    final nav = Navigator.of(context);
+    try {
+      final chat = await context.read<AppState>().openDirectChatById(userId);
+      nav.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chat.id)));
+    } catch (_) {
+      _showError('Chat konnte nicht geöffnet werden.');
+    }
+  }
+
   void _openThread(Message m) {
     showModalBottomSheet<void>(
       context: context,
@@ -1089,6 +1102,107 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       await state.createBoard(widget.chatId, title.trim(),
           const ['Zu erledigen', 'In Arbeit', 'Erledigt']);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  // 0.35.0: pick one of your existing direct-chat partners and share them as a
+  // contact card. Keeps it network-light — no people search needed on mobile.
+  Future<void> _openContactComposer() async {
+    final state = context.read<AppState>();
+    final partners = state.chats
+        .where((c) => !c.isGroup && c.otherUser != null)
+        .map((c) => c.otherUser!)
+        .toList();
+    if (partners.isEmpty) {
+      _showError('Du hast noch keine Kontakte zum Teilen.');
+      return;
+    }
+    final picked = await showModalBottomSheet<PingUser>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Text('Kontakt teilen',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+            for (final u in partners)
+              ListTile(
+                leading: CircleAvatar(child: Text(u.initials)),
+                title: Text(u.displayName),
+                subtitle: u.phone.isNotEmpty ? Text(u.phone) : null,
+                onTap: () => Navigator.pop(ctx, u),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    try {
+      await state.shareContact(widget.chatId, picked.id);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  // 0.35.0: compose a code snippet — a multiline editor plus an optional
+  // language label. The card renders highlighted on every client.
+  Future<void> _openCodeComposer() async {
+    final state = context.read<AppState>();
+    final result = await showDialog<({String code, String lang})>(
+      context: context,
+      builder: (ctx) {
+        final codeCtl = TextEditingController();
+        final langCtl = TextEditingController();
+        return AlertDialog(
+          title: const Text('Code teilen'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: langCtl,
+                  decoration: const InputDecoration(
+                      labelText: 'Sprache (optional)', hintText: 'z. B. js, python'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: codeCtl,
+                  autofocus: true,
+                  minLines: 6,
+                  maxLines: 14,
+                  maxLength: 20000,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                  decoration: const InputDecoration(
+                    labelText: 'Code',
+                    alignLabelWithHint: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Abbrechen')),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                  ctx, (code: codeCtl.text, lang: langCtl.text)),
+              child: const Text('Senden'),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == null || result.code.trim().isEmpty) return;
+    try {
+      await state.shareCode(widget.chatId, result.code, language: result.lang);
     } on ApiException catch (e) {
       _showError(e.message);
     }
@@ -1615,6 +1729,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onTap: () {
                     Navigator.pop(ctx);
                     _openScheduleCall();
+                  },
+                ),
+              if (state.feature('contactCards', fallback: true))
+                _AttachOption(
+                  icon: Icons.contact_page_rounded,
+                  color: const Color(0xFF26A69A),
+                  label: 'Kontakt',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openContactComposer();
+                  },
+                ),
+              if (state.feature('codeSnippets', fallback: true))
+                _AttachOption(
+                  icon: Icons.code_rounded,
+                  color: const Color(0xFF5C6BC0),
+                  label: 'Code',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openCodeComposer();
                   },
                 ),
               _AttachOption(

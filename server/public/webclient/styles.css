@@ -2082,3 +2082,98 @@ a { color: var(--accent-ink); }
 .appr-dev { font-weight: 620; font-size: 13.5px; }
 .appr-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .appr-actions { display: flex; gap: 6px; }
+
+/* ============================================================================
+   „Ausdruck & Werkbank" (0.35.0) — contact cards, code snippets, polish
+   ========================================================================== */
+
+/* ---- Kontaktkarte ------------------------------------------------------- */
+.contact-card { min-width: 230px; max-width: 320px; animation: card-reveal .2s ease both; }
+:root[data-motion="reduce"] .contact-card { animation: none; }
+.contact-main { display: flex; align-items: center; gap: 12px; }
+.contact-meta { min-width: 0; flex: 1; }
+.contact-name { font-weight: 800; font-size: 14.5px; line-height: 1.2; word-break: break-word; }
+.contact-handle { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+.msg.out .contact-handle { color: rgba(255,255,255,.82); }
+.contact-note {
+  font-size: 12.5px; color: var(--muted); margin-top: 5px; line-height: 1.35;
+  word-break: break-word; white-space: pre-wrap;
+}
+.msg.out .contact-note { color: rgba(255,255,255,.85); }
+.contact-actions { display: flex; gap: 8px; margin-top: 11px; }
+.contact-actions .btn { flex: 1; justify-content: center; }
+.contact-picked {
+  display: flex; align-items: center; gap: 11px; padding: 10px;
+  border: 1px solid var(--accent-line); border-radius: var(--radius-sm);
+  background: var(--accent-soft); margin: 4px 0;
+}
+.contact-picked .meta { flex: 1; min-width: 0; }
+.usub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+/* ---- Code-Snippet ------------------------------------------------------- */
+.code-card {
+  min-width: 260px; max-width: min(560px, 78vw); border-radius: var(--radius-sm);
+  overflow: hidden; border: 1px solid var(--line-strong); background: #0b0d11;
+  animation: card-reveal .2s ease both;
+}
+:root[data-motion="reduce"] .code-card { animation: none; }
+.code-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  background: rgba(255,255,255,.04); border-bottom: 1px solid var(--line);
+}
+.code-head .icon { width: 15px; height: 15px; color: var(--accent); flex: 0 0 auto; }
+.code-lang {
+  font-weight: 750; font-size: 12.5px; color: var(--text); flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--mono); letter-spacing: -.01em;
+}
+.code-lines { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.code-head .iconbtn { flex: 0 0 auto; }
+.code-pre {
+  margin: 0; padding: 11px 12px; overflow-x: auto; background: #0b0d11;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  color: #cdd6e4; tab-size: 2; cursor: pointer;
+}
+.code-pre.full { max-height: 64vh; cursor: default; font-size: 13px; }
+.code-pre code { font: inherit; white-space: pre; }
+.code-more {
+  display: block; width: 100%; text-align: center; padding: 7px; border: 0;
+  border-top: 1px solid var(--line); background: rgba(255,255,255,.02);
+  color: var(--accent-ink); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer;
+}
+.code-more:hover { background: var(--accent-soft); }
+.code-viewer-body { padding: 0 !important; }
+.code-viewer-body .code-pre.full { border-radius: 0; }
+/* Composer */
+.code-compose-meta { display: flex; gap: 8px; margin-bottom: 9px; }
+.code-compose-meta .input { flex: 1; min-width: 0; }
+textarea.code-compose {
+  width: 100%; resize: vertical; min-height: 160px; font-family: var(--mono);
+  font-size: 13px; line-height: 1.5; tab-size: 2; white-space: pre;
+}
+.code-count { margin-top: 5px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Syntax-highlight token palette — readable on the dark code surface. */
+.hl-kw    { color: #c792ea; }
+.hl-str   { color: #c3e88d; }
+.hl-num   { color: #f78c6c; }
+.hl-com   { color: #5b6573; font-style: italic; }
+.hl-fn    { color: #82aaff; }
+.hl-punct { color: #89ddff; }
+
+/* ---- UX polish (0.35.0): gentler entry + skeleton shimmer -------------- */
+@keyframes ping-shimmer {
+  0% { background-position: -340px 0; }
+  100% { background-position: 340px 0; }
+}
+.skeleton, .skel {
+  background: linear-gradient(90deg,
+    var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+  background-size: 680px 100%;
+  animation: ping-shimmer 1.35s ease-in-out infinite;
+}
+:root[data-motion="reduce"] .skeleton,
+:root[data-motion="reduce"] .skel { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .skel, .contact-card, .code-card { animation: none !important; }
+}

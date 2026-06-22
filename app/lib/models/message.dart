@@ -327,6 +327,81 @@ class TranscriptData {
   Map<String, dynamic> toJson() => {'status': status, 'text': text};
 }
 
+/// 0.35.0 "Ausdruck & Werkbank": a shared contact card (rides on a 'contact'
+/// message). When [isUser] the card links a live account ([userId]); tapping it
+/// opens a chat. The other fields are a snapshot taken at share time.
+class ContactData {
+  final String? userId;
+  final bool isUser;
+  final String displayName;
+  final String? username;
+  final String avatarColor;
+  final bool hasAvatar;
+  final int avatarVersion;
+  final String note;
+  const ContactData({
+    this.userId,
+    this.isUser = false,
+    required this.displayName,
+    this.username,
+    this.avatarColor = '#888888',
+    this.hasAvatar = false,
+    this.avatarVersion = 0,
+    this.note = '',
+  });
+  factory ContactData.fromJson(Map<String, dynamic> j) => ContactData(
+        userId: j['userId'] as String?,
+        isUser: (j['isUser'] ?? false) as bool,
+        displayName: (j['displayName'] ?? 'Kontakt') as String,
+        username: j['username'] as String?,
+        avatarColor: (j['avatarColor'] ?? '#888888') as String,
+        hasAvatar: (j['hasAvatar'] ?? false) as bool,
+        avatarVersion: (j['avatarVersion'] as num?)?.toInt() ?? 0,
+        note: (j['note'] ?? '') as String,
+      );
+  Map<String, dynamic> toJson() => {
+        if (userId != null) 'userId': userId,
+        'isUser': isUser,
+        'displayName': displayName,
+        if (username != null) 'username': username,
+        'avatarColor': avatarColor,
+        'hasAvatar': hasAvatar,
+        'avatarVersion': avatarVersion,
+        'note': note,
+      };
+}
+
+/// 0.35.0: a shared code snippet (rides on a 'code' message). The full source
+/// lives here; the message body is only a short teaser.
+class CodeData {
+  final String language;
+  final String filename;
+  final String code;
+  final int lines;
+  const CodeData({
+    this.language = '',
+    this.filename = '',
+    required this.code,
+    this.lines = 0,
+  });
+  factory CodeData.fromJson(Map<String, dynamic> j) => CodeData(
+        language: (j['language'] ?? '') as String,
+        filename: (j['filename'] ?? '') as String,
+        code: (j['code'] ?? '') as String,
+        lines: (j['lines'] as num?)?.toInt() ??
+            ((j['code'] ?? '') as String).split('\n').length,
+      );
+  Map<String, dynamic> toJson() => {
+        'language': language,
+        'filename': filename,
+        'code': code,
+        'lines': lines,
+      };
+  String get label => filename.isNotEmpty
+      ? filename
+      : (language.isNotEmpty ? language : 'Code');
+}
+
 /// A media attachment carried by a message (or a status). The [url] is always a
 /// server-relative path like `/api/uploads/<id>`; the app prefixes the base URL.
 class Attachment {
@@ -411,6 +486,10 @@ class Message {
   /// On-prem transcript that rides along on a 'voice' message (may be pending).
   final TranscriptData? transcript;
 
+  // ── „Ausdruck & Werkbank" (0.35.0) payloads (null unless the type matches).
+  final ContactData? contact;
+  final CodeData? code;
+
   /// How many replies hang off this message in its thread (0 = none).
   final int threadCount;
 
@@ -459,6 +538,8 @@ class Message {
     this.game,
     this.liveLocation,
     this.transcript,
+    this.contact,
+    this.code,
     this.threadCount = 0,
     this.viewOnce = false,
     this.viewed = false,
@@ -535,6 +616,10 @@ class Message {
         return '🎮 Spiel';
       case 'livelocation':
         return '📍 Live-Standort';
+      case 'contact':
+        return '👤 ${contact?.displayName ?? 'Kontakt'}';
+      case 'code':
+        return '‹/› ${code?.label ?? 'Code-Snippet'}';
       default:
         return body;
     }
@@ -555,6 +640,8 @@ class Message {
     GameData? game,
     LiveLocationData? liveLocation,
     TranscriptData? transcript,
+    ContactData? contact,
+    CodeData? code,
     int? threadCount,
     bool? viewed,
     bool? pinned,
@@ -580,6 +667,8 @@ class Message {
         game: game ?? this.game,
         liveLocation: liveLocation ?? this.liveLocation,
         transcript: transcript ?? this.transcript,
+        contact: contact ?? this.contact,
+        code: code ?? this.code,
         threadCount: threadCount ?? this.threadCount,
         viewOnce: viewOnce,
         viewed: viewed ?? this.viewed,
@@ -612,6 +701,8 @@ class Message {
         if (game != null) 'game': game!.toJson(),
         if (liveLocation != null) 'liveLocation': liveLocation!.toJson(),
         if (transcript != null) 'transcript': transcript!.toJson(),
+        if (contact != null) 'contact': contact!.toJson(),
+        if (code != null) 'code': code!.toJson(),
         if (threadCount > 0) 'threadCount': threadCount,
         if (viewOnce) 'viewOnce': true,
         if (viewed) 'viewed': true,
@@ -669,6 +760,12 @@ class Message {
             : null,
         transcript: json['transcript'] != null
             ? TranscriptData.fromJson(json['transcript'] as Map<String, dynamic>)
+            : null,
+        contact: json['contact'] != null
+            ? ContactData.fromJson(json['contact'] as Map<String, dynamic>)
+            : null,
+        code: json['code'] != null
+            ? CodeData.fromJson(json['code'] as Map<String, dynamic>)
             : null,
         threadCount: (json['threadCount'] as num?)?.toInt() ?? 0,
         viewOnce: (json['viewOnce'] ?? false) as bool,

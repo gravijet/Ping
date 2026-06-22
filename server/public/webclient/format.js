@@ -17,6 +17,8 @@ export function messagePreview(msg) {
   if (!msg) return '';
   if (msg.deleted) return 'Diese Nachricht wurde gelöscht';
   if (msg.type === 'poll') return '📊 ' + (msg.poll?.question || 'Umfrage');
+  if (msg.type === 'contact') return '👤 ' + (msg.contact?.displayName || 'Kontakt');
+  if (msg.type === 'code') return '‹/› ' + (msg.code?.filename || msg.code?.language || 'Code-Snippet');
   if (msg.type === 'system') return msg.body || '';
   if (msg.attachment) {
     const lbl = attachmentLabel(msg.attachment);

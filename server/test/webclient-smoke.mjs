@@ -193,6 +193,9 @@ const msgs = [
   { id: 'm10', chatId: 'c1', senderId: 'u2', type: 'livelocation', liveLocation: { active: true, lat: 48.2, lng: 16.37, updatedAt: Date.now() - 30000, expiresAt: Date.now() + 3600_000 }, createdAt: Date.now() - 600 },
   { id: 'm11', chatId: 'c1', senderId: 'u2', type: 'image', viewOnce: true, viewed: false, createdAt: Date.now() - 500 },
   { id: 'm12', chatId: 'c1', senderId: 'u2', type: 'voice', attachment: { kind: 'voice', url: '/api/uploads/v1', durationMs: 4200 }, transcript: { status: 'done', text: 'Kurze Sprachnotiz', lang: 'de' }, createdAt: Date.now() - 400 },
+  // 0.35.0 "Ausdruck & Werkbank" structured-message types.
+  { id: 'm13', chatId: 'c1', senderId: 'me', type: 'contact', contact: { id: 'cc1', userId: 'u2', isUser: true, displayName: 'Anna Beispiel', username: 'anna', avatarColor: '#4d9bff', hasAvatar: false, avatarVersion: 0, note: 'Meine Kollegin' }, createdAt: Date.now() - 300, status: 'read' },
+  { id: 'm14', chatId: 'c1', senderId: 'u2', type: 'code', body: '‹/› app.js · 3 Zeilen', code: { id: 'cd1', language: 'js', filename: 'app.js', lines: 3, code: "const x = 1; // hi\nfunction add(a, b) { return a + b; }\nconsole.log(add(x, 2));" }, createdAt: Date.now() - 200 },
 ];
 
 function jsonRes(data) {
@@ -392,6 +395,24 @@ await step('0.34.0 structured cards: sticker/board/game/livelocation render', as
   if (!game || !game.querySelector('.ttt-cell')) throw new Error('game card missing cells');
   const ll = (await imp('livelocation.js')).renderLiveLocation(msgs[9]);
   if (!ll || !ll.querySelector('.ll-head')) throw new Error('live-location card missing');
+});
+await step('0.35.0 contact card: render + share modal', async () => {
+  const cc = await imp('contactcard.js');
+  const card = cc.renderCard(msgs[12]);
+  if (!card || !card.querySelector('.contact-name')) throw new Error('contact card missing name');
+  if (!card.querySelector('.contact-actions .btn')) throw new Error('contact card missing actions');
+  cc.shareContactModal('c1'); await tick();
+});
+await step('0.35.0 code snippet: highlight + render card + viewer + compose', async () => {
+  const hl = await imp('codehl.js');
+  const out = hl.highlight("const x = '<b>';\n// note", 'js');
+  if (!/hl-kw/.test(out) || /<b>/.test(out)) throw new Error('highlighter unsafe or not colouring');
+  const cd = await imp('code.js');
+  const card = cd.renderCode(msgs[13]);
+  if (!card || !card.querySelector('.code-pre')) throw new Error('code card missing pre');
+  if (!card.querySelector('.code-lang')) throw new Error('code card missing language label');
+  cd.openCodeViewer(msgs[13]); await tick();
+  cd.newCodeModal('c1'); await tick();
 });
 await step('0.34.0 create modals: board/game/scheduled-call', async () => {
   (await imp('boards.js')).newBoardModal('c1'); await tick();

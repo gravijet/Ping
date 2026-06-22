@@ -33,6 +33,8 @@ import { renderSticker } from './stickers.js';
 import { renderBoard } from './boards.js';
 import { renderGame } from './games.js';
 import { renderLiveLocation } from './livelocation.js';
+import { renderCard as renderContactCard } from './contactcard.js';
+import { renderCode } from './code.js';
 import { threadChip, openThread } from './threads.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
@@ -383,6 +385,10 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderGame(m));
   } else if (m.type === 'livelocation') {
     bubble.appendChild(renderLiveLocation(m));
+  } else if (m.type === 'contact') {
+    bubble.appendChild(renderContactCard(m));
+  } else if (m.type === 'code') {
+    bubble.appendChild(renderCode(m));
   } else if (m.viewOnce) {
     bubble.appendChild(renderViewOnce(m, mine));
   } else if (m.enc) {
@@ -901,7 +907,10 @@ function attachMenu(e) {
     { label: 'Datei', icon: 'file', onClick: () => attach('') },
     flag('stickers') ? { label: 'Sticker', icon: 'emoji', onClick: () => import('./stickers.js').then((m) => m.openStickerPicker(cur.chatId)) } : null,
     flag('gifSearch') ? { label: 'GIF', icon: 'image', onClick: () => import('./gifsearch.js').then((m) => m.openGifPicker(cur.chatId)) } : null,
-    { label: 'Kontakt', icon: 'user', onClick: () => shareContact() },
+    { label: 'Kontakt', icon: 'card', onClick: () => flag('contactCards')
+        ? import('./contactcard.js').then((mm) => mm.shareContactModal(cur.chatId))
+        : shareContact() },
+    flag('codeSnippets') ? { label: 'Code', icon: 'code', onClick: () => import('./code.js').then((mm) => mm.newCodeModal(cur.chatId)) } : null,
     { label: 'Standort', icon: 'pin', onClick: () => sendLocation() },
     flag('liveLocation') ? { label: 'Live-Standort', icon: 'compass', onClick: () => import('./livelocation.js').then((m) => m.startLiveLocation(cur.chatId)) } : null,
     { label: 'Zeichnen', icon: 'paint', onClick: () => import('./draw.js').then((m) => m.drawModal(cur.chatId)) },

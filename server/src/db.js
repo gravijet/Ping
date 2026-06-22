@@ -668,6 +668,41 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasklist_items_list
     ON tasklist_items(tasklist_id, sort);
 
+  -- ---- „Ausdruck & Werkbank" (0.35.0) — structured side-tables -------------
+
+  -- Contact cards (type='contact'). Sharing a contact creates a message whose
+  -- card payload lives here and rides along in messageView.contact. We keep a
+  -- snapshot (name/username/phone/colour) so the card renders unchanged even if
+  -- the referenced user later edits their profile or never was a Ping user;
+  -- contact_user_id links to a live account when there is one (tap → open chat).
+  CREATE TABLE IF NOT EXISTS message_contacts (
+    id              TEXT PRIMARY KEY,
+    message_id      TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id         TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    sharer_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    contact_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    display_name    TEXT NOT NULL,
+    username        TEXT NOT NULL DEFAULT '',
+    phone           TEXT NOT NULL DEFAULT '',
+    avatar_color    TEXT NOT NULL DEFAULT '',
+    note            TEXT NOT NULL DEFAULT '',
+    created_at      INTEGER NOT NULL
+  );
+
+  -- Code snippets (type='code'). A monospace block with an optional language
+  -- label + filename, rendered as a card with one-tap copy. The body lives here
+  -- (not in messages.body) so the timeline preview stays a short teaser.
+  CREATE TABLE IF NOT EXISTS message_code (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    author_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    language    TEXT NOT NULL DEFAULT '',
+    filename    TEXT NOT NULL DEFAULT '',
+    code        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+
   -- ---- „Alles" (0.34.0) — Mega-Release side-tables -------------------------
 
   -- Sticker packs + stickers. A sticker message (type='sticker') references a
@@ -1323,6 +1358,67 @@ function migrateMessageTypes034() {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 migrateMessageTypes034();
+
+// 0.35.0 "Ausdruck & Werkbank": widen the type CHECK once more to admit the
+// 'contact' (Kontaktkarte) and 'code' (Code-Snippet) message types. Same
+// FTS-aware table rebuild as migrateMessageTypes034(): dropping `messages`
+// removes the messages_fts triggers, so we drop the orphaned index and let
+// setupFts() (next) rebuild + backfill it. Idempotent — keyed on the new types
+// not yet appearing in the live CHECK clause.
+function migrateMessageTypes035() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'")
+    .get();
+  if (!row || /'contact'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist','sticker','board','game','livelocation','contact','code')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER,
+        expires_at INTEGER,
+        thread_root  TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        thread_count INTEGER NOT NULL DEFAULT 0,
+        view_once    INTEGER NOT NULL DEFAULT 0,
+        viewed_at    INTEGER,
+        enc          INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+         edited_at, deleted_at, expires_at, thread_root, thread_count,
+         view_once, viewed_at, enc)
+        SELECT id, chat_id, sender_id, type, body, attachment, reply_to,
+               created_at, edited_at, deleted_at, expires_at, thread_root,
+               thread_count, view_once, viewed_at, enc
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_expires
+        ON messages(expires_at) WHERE expires_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_messages_thread
+        ON messages(thread_root, created_at) WHERE thread_root IS NOT NULL;
+      DROP TABLE IF EXISTS messages_fts;
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateMessageTypes035();
 
 // ---- Full-text search (FTS5) ----------------------------------------------
 //

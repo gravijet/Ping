@@ -48,6 +48,10 @@ function previewOf(msg) {
       return '🎮 Spiel';
     case 'livelocation':
       return '📍 Live-Standort';
+    case 'contact':
+      return '👤 Kontakt';
+    case 'code':
+      return '‹/› Code-Snippet';
     default:
       return msg.body || 'Nachricht';
   }

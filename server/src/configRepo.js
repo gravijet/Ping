@@ -78,6 +78,10 @@ export const DEFAULT_CONFIG = {
     // Crashes only carry a stack trace + anonymous device id, never message
     // content — kill-switch here if a noisy build needs muting.
     errorReporting: true,
+    // ── „Ausdruck & Werkbank" (0.35.0) ───────────────────────────────────
+    contactCards: true,   // share a Ping account as a rich, tappable contact card
+    codeSnippets: true,   // share formatted code blocks with one-tap copy
+    labMode: true,        // power-user "Labor": live theme editor + local flag overrides
   },
   values: {
     maxStatusSeconds: 30,

@@ -95,6 +95,9 @@ class MessageBubble extends StatelessWidget {
   /// Tapped a live-location card → open it in a map.
   final VoidCallback? onTapLiveLocation;
 
+  /// Tapped "Chat starten" on a shared contact card → open a chat with them.
+  final void Function(String userId)? onOpenContact;
+
   /// Tapped the "X Antworten" thread chip → open the thread.
   final VoidCallback? onOpenThread;
 
@@ -143,6 +146,7 @@ class MessageBubble extends StatelessWidget {
     this.onToggleTask,
     this.onAddBoardCard,
     this.onTapLiveLocation,
+    this.onOpenContact,
     this.onOpenThread,
     this.fetchLinkPreview,
     this.onTapEdited,
@@ -188,7 +192,11 @@ class MessageBubble extends StatelessWidget {
     final hasBoard = message.board != null && alive;
     final hasGame = message.game != null && alive;
     final hasLiveLoc = message.type == 'livelocation' && alive;
-    final hasText = message.body.trim().isNotEmpty && !isEncrypted;
+    final hasContact = message.contact != null && alive;
+    final hasCode = message.code != null && alive;
+    // A code snippet's body is just a teaser; don't also print it as text.
+    final hasText =
+        message.body.trim().isNotEmpty && !isEncrypted && !hasCode && !hasContact;
     // The link to unfurl under this bubble (null = previews off / no link). A
     // local so the type-promotion holds when we pass it to LinkPreviewCard.
     final previewUrl = _previewUrl;
@@ -339,6 +347,11 @@ class MessageBubble extends StatelessWidget {
           if (hasLiveLoc)
             _LiveLocationContent(
                 data: message.liveLocation, fg: fg, onTap: onTapLiveLocation),
+          if (hasContact)
+            _ContactContent(
+                contact: message.contact!, fg: fg, onOpen: onOpenContact),
+          if (hasCode)
+            _CodeContent(code: message.code!, fg: fg),
           if (message.deleted)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -1826,6 +1839,254 @@ class _LiveLocationContent extends StatelessWidget {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Parse a "#rrggbb" colour into a [Color], falling back to a neutral grey.
+Color _hexColor(String hex) {
+  var h = hex.replaceAll('#', '').trim();
+  if (h.length == 6) h = 'FF$h';
+  final v = int.tryParse(h, radix: 16);
+  return v == null ? const Color(0xFF8893A4) : Color(v);
+}
+
+/// 0.35.0 "Ausdruck & Werkbank": a shared contact card. Shows the avatar
+/// (initials over the snapshot colour), name + @handle + note, and — when the
+/// contact is a live account — a "Chat starten" button.
+class _ContactContent extends StatelessWidget {
+  final ContactData contact;
+  final Color fg;
+  final void Function(String userId)? onOpen;
+  const _ContactContent({required this.contact, required this.fg, this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final initials = contact.displayName.trim().isEmpty
+        ? '?'
+        : contact.displayName
+            .trim()
+            .split(RegExp(r'\s+'))
+            .take(2)
+            .map((w) => w[0].toUpperCase())
+            .join();
+    final canOpen = contact.isUser && contact.userId != null && onOpen != null;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 210, maxWidth: 300),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: _hexColor(contact.avatarColor),
+                child: Text(initials,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(contact.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
+                    if (contact.username != null)
+                      Text('@${contact.username}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: fg.withValues(alpha: 0.7), fontSize: 12.5)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (contact.note.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(contact.note,
+                  style: TextStyle(color: fg.withValues(alpha: 0.8), fontSize: 13)),
+            ),
+          if (canOpen)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => onOpen!(contact.userId!),
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: scheme.primary,
+                    side: BorderSide(color: scheme.primary.withValues(alpha: 0.5)),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                  label: const Text('Chat starten'),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 0.35.0: a shared code snippet. A dark monospace card with a language label
+/// and line count; tap to view in full, with one-tap copy.
+class _CodeContent extends StatelessWidget {
+  final CodeData code;
+  final Color fg;
+  const _CodeContent({required this.code, required this.fg});
+
+  static const _previewLines = 12;
+
+  void _copy(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: code.code));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Code kopiert.'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  void _openFull(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF0B0D11),
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(code.label,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace')),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, color: Colors.white70),
+                    onPressed: () => _copy(ctx),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SelectableText(
+                    code.code,
+                    style: const TextStyle(
+                        color: Color(0xFFCDD6E4),
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        height: 1.5),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = code.code.split('\n');
+    final preview = lines.take(_previewLines).join('\n');
+    final extra = lines.length - _previewLines;
+    return GestureDetector(
+      onTap: () => _openFull(context),
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 220, maxWidth: 340),
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0B0D11),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              color: Colors.white.withValues(alpha: 0.04),
+              padding: const EdgeInsets.fromLTRB(10, 7, 4, 7),
+              child: Row(
+                children: [
+                  const Icon(Icons.code_rounded, size: 15, color: Color(0xFF82AAFF)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(code.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'monospace')),
+                  ),
+                  Text('${code.lines}',
+                      style: const TextStyle(color: Color(0xFF5B6573), fontSize: 11)),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
+                    icon: const Icon(Icons.copy_rounded, size: 16, color: Colors.white70),
+                    onPressed: () => _copy(context),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(11),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(
+                  preview,
+                  style: const TextStyle(
+                      color: Color(0xFFCDD6E4),
+                      fontFamily: 'monospace',
+                      fontSize: 12.5,
+                      height: 1.5),
+                ),
+              ),
+            ),
+            if (extra > 0)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                color: Colors.white.withValues(alpha: 0.02),
+                child: Text('… $extra weitere Zeilen',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFF82AAFF), fontSize: 12)),
+              ),
           ],
         ),
       ),

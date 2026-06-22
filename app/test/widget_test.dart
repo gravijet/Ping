@@ -210,4 +210,36 @@ void main() {
         MessageBubble(message: msg, isMine: false, onOpenViewOnce: () {})));
     expect(find.text('Einmal ansehen'), findsOneWidget);
   });
+
+  testWidgets('contact card bubble renders name, handle + start-chat button',
+      (tester) async {
+    final msg = Message(
+      id: 'cc1', chatId: 'c1', senderId: 'u1', type: 'contact', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      contact: const ContactData(
+        userId: 'u2', isUser: true, displayName: 'Anna Beispiel',
+        username: 'anna', avatarColor: '#4d9bff', note: 'Kollegin',
+      ),
+    );
+    await tester.pumpWidget(_wrap(
+        MessageBubble(message: msg, isMine: false, onOpenContact: (_) {})));
+    expect(find.text('Anna Beispiel'), findsOneWidget);
+    expect(find.text('@anna'), findsOneWidget);
+    expect(find.text('Chat starten'), findsOneWidget);
+  });
+
+  testWidgets('code snippet bubble renders label + line count', (tester) async {
+    final msg = Message(
+      id: 'cd1', chatId: 'c1', senderId: 'u1', type: 'code',
+      body: '‹/› add.js · 2 Zeilen',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      code: const CodeData(
+        language: 'js', filename: 'add.js', lines: 2,
+        code: 'const x = 1;\nconsole.log(x);',
+      ),
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
+    expect(find.text('add.js'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget); // line count badge
+  });
 }

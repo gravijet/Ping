@@ -75,6 +75,9 @@ const PATHS = {
   // Pläne & Aufgaben (0.33.0): a calendar for "Termine", a checklist for tasks.
   calendar: 'M7 3v3M17 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z',
   tasks: 'M4 6l1.5 1.5L8 4M4 12l1.5 1.5L8 10M4 18l1.5 1.5L8 16M11 5h9M11 11h9M11 17h9',
+  // Ausdruck & Werkbank (0.35.0): chevrons for code, a card for contacts.
+  code: 'M16 18l6-6-6-6M8 6l-6 6 6 6',
+  card: 'M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM7 10h4M7 14h7M16 9.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z',
 };
 
 export function icon(name, cls = '') {

@@ -295,6 +295,28 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Expression & workbench (0.35.0)
+Two more **structured message types** on the poll pattern (side table →
+`messageView` → realtime/offline/FTS for free), kill-switchable via `contactCards`
+/ `codeSnippets`. `migrateMessageTypes035()` widens the `messages.type` CHECK to
+admit `contact` + `code` with the same FTS-aware FK-off table swap (drops the
+orphaned `messages_fts` so `setupFts()` rebuilds + backfills).
+
+- **Contact cards (`contact`).** `contactCardRepo.js` + `message_contacts`. `POST
+  /chats/:id/contact` snapshots the shared account's public profile (name / handle
+  / colour) but `contactCardView` re-reads the *live* `publicUser` on view, so a
+  later rename/avatar change is reflected and a tap can open a DM with `userId`.
+  Web `contactcard.js` (share modal with people search + render card); Flutter
+  `ContactData` + a card with "Chat starten".
+- **Code snippets (`code`).** `codeRepo.js` + `message_code`. `POST /chats/:id/code`
+  stores the source out-of-band (the `messages.body` keeps only a short
+  `codeTeaser` so push previews stay tidy). Web `code.js` renders a card with
+  one-tap copy + a fullscreen viewer; highlighting is a **dependency-free**
+  tokenizer (`codehl.js`) that escapes every token before wrapping it — so a
+  crafted snippet can mis-colour itself but never inject markup. Flutter `CodeData`
+  + a monospace card with copy + a fullscreen dialog. `TYPE_ALIASES` learns
+  `kontakt` / `code` for the `typ:` search filter.
+
 ## "Alles" mega-release (0.34.0)
 The biggest single release: **25 features across all four pillars** plus minimal,
 strictly-private AI, **each behind its own remote flag** (so the whole thing

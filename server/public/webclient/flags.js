@@ -73,6 +73,9 @@ export const DEFAULTS = {
   catchUp: true,          // "Hol mich ab" unread summary (heuristic)
   smartReplies: true,     // heuristic suggested quick replies
   errorReporting: true,   // auto-send crash reports (Fehlerberichte) to the dev inbox
+  // ── „Ausdruck & Werkbank" (0.35.0) ──────────────────────────────────────
+  contactCards: true,     // share a Ping account as a rich, tappable contact card
+  codeSnippets: true,     // share formatted code blocks with syntax highlighting + copy
 };
 
 function localOverrides() {

@@ -369,6 +369,58 @@ void main() {
     });
   });
 
+  group('Ausdruck & Werkbank (0.35.0) structured payloads', () {
+    test('contact card parses snapshot + live link and round-trips', () {
+      final m = Message.fromJson({
+        'id': 'cc1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'contact',
+        'body': '', 'createdAt': 1,
+        'contact': {
+          'userId': 'u2', 'isUser': true, 'displayName': 'Anna Beispiel',
+          'username': 'anna', 'avatarColor': '#4d9bff', 'hasAvatar': false,
+          'avatarVersion': 0, 'note': 'Kollegin',
+        },
+      });
+      expect(m.contact, isNotNull);
+      expect(m.contact!.userId, 'u2');
+      expect(m.contact!.isUser, true);
+      expect(m.contact!.displayName, 'Anna Beispiel');
+      expect(m.contact!.username, 'anna');
+      expect(m.contact!.note, 'Kollegin');
+      expect(m.preview, '👤 Anna Beispiel');
+      final back = Message.fromJson(m.toJson());
+      expect(back.contact!.username, 'anna');
+    });
+
+    test('code snippet parses source + label and round-trips', () {
+      final m = Message.fromJson({
+        'id': 'cd1', 'chatId': 'c1', 'senderId': 'u1', 'type': 'code',
+        // Empty body so the type-based preview fallback is exercised; in
+        // production the server fills body with a short teaser instead.
+        'body': '', 'createdAt': 1,
+        'code': {
+          'language': 'js', 'filename': 'add.js', 'lines': 3,
+          'code': 'const x = 1;\nfunction add(a, b) => a + b;\nadd(x, 2);',
+        },
+      });
+      expect(m.code, isNotNull);
+      expect(m.code!.language, 'js');
+      expect(m.code!.filename, 'add.js');
+      expect(m.code!.lines, 3);
+      expect(m.code!.label, 'add.js');
+      expect(m.preview, '‹/› add.js');
+      final back = Message.fromJson(m.toJson());
+      expect(back.code!.code.contains('function add'), true);
+    });
+
+    test('code label falls back to language then a generic label', () {
+      final noFile = CodeData.fromJson({'language': 'python', 'code': 'x=1'});
+      expect(noFile.label, 'python');
+      final bare = CodeData.fromJson({'code': 'x=1'});
+      expect(bare.label, 'Code');
+      expect(bare.lines, 1);
+    });
+  });
+
   group('Disappearing messages', () {
     test('expiresAt round-trips and isExpired flips', () {
       final future = DateTime.now().millisecondsSinceEpoch + 60000;
