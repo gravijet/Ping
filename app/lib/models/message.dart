@@ -402,6 +402,147 @@ class CodeData {
       : (language.isNotEmpty ? language : 'Code');
 }
 
+/// 0.36.0: one participant's share of a shared expense.
+class ExpenseShare {
+  final String userId;
+  final String name;
+  final int shareCents;
+  const ExpenseShare(
+      {required this.userId, required this.name, required this.shareCents});
+  factory ExpenseShare.fromJson(Map<String, dynamic> j) => ExpenseShare(
+        userId: (j['userId'] ?? '') as String,
+        name: (j['name'] ?? '') as String,
+        shareCents: (j['shareCents'] as num?)?.toInt() ?? 0,
+      );
+  Map<String, dynamic> toJson() =>
+      {'userId': userId, 'name': name, 'shareCents': shareCents};
+}
+
+/// 0.36.0: shared-expense ("Geteilte Kasse") payload on an 'expense' message.
+/// A `kind` of 'settlement' means one member paid another to clear a debt.
+class ExpenseData {
+  final String id;
+  final String title;
+  final int amountCents;
+  final String currency;
+  final String kind; // expense | settlement
+  final String payerId;
+  final String payerName;
+  final List<ExpenseShare> shares;
+  final int myShare;
+  final bool iPaid;
+  const ExpenseData({
+    required this.id,
+    required this.title,
+    required this.amountCents,
+    this.currency = 'EUR',
+    this.kind = 'expense',
+    required this.payerId,
+    this.payerName = '',
+    this.shares = const [],
+    this.myShare = 0,
+    this.iPaid = false,
+  });
+  factory ExpenseData.fromJson(Map<String, dynamic> j) => ExpenseData(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? 'Ausgabe') as String,
+        amountCents: (j['amountCents'] as num?)?.toInt() ?? 0,
+        currency: (j['currency'] ?? 'EUR') as String,
+        kind: (j['kind'] ?? 'expense') as String,
+        payerId: (j['payerId'] ?? '') as String,
+        payerName: (j['payerName'] ?? '') as String,
+        shares: ((j['shares'] as List?) ?? const [])
+            .map((e) => ExpenseShare.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        myShare: (j['myShare'] as num?)?.toInt() ?? 0,
+        iPaid: (j['iPaid'] ?? false) as bool,
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'amountCents': amountCents,
+        'currency': currency,
+        'kind': kind,
+        'payerId': payerId,
+        'payerName': payerName,
+        'shares': shares.map((s) => s.toJson()).toList(),
+        'myShare': myShare,
+        'iPaid': iPaid,
+      };
+}
+
+/// 0.36.0: one candidate time slot of an availability poll.
+class AvailPollOption {
+  final String id;
+  final int startAt;
+  final Map<String, int> counts; // yes/maybe/no → n
+  final String? myVote; // yes | maybe | no | null
+  const AvailPollOption({
+    required this.id,
+    required this.startAt,
+    this.counts = const {},
+    this.myVote,
+  });
+  factory AvailPollOption.fromJson(Map<String, dynamic> j) => AvailPollOption(
+        id: (j['id'] ?? '') as String,
+        startAt: (j['startAt'] as num?)?.toInt() ?? 0,
+        counts: (j['counts'] as Map?)?.map(
+                (k, v) => MapEntry(k as String, (v as num).toInt())) ??
+            const {},
+        myVote: j['myVote'] as String?,
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'startAt': startAt,
+        'counts': counts,
+        if (myVote != null) 'myVote': myVote,
+      };
+}
+
+/// 0.36.0: availability-poll ("Terminfindung") payload on an 'availpoll' message.
+class AvailPollData {
+  final String id;
+  final String title;
+  final String location;
+  final bool closed;
+  final String? chosenOptionId;
+  final String? bestOptionId;
+  final String creatorId;
+  final List<AvailPollOption> options;
+  const AvailPollData({
+    required this.id,
+    required this.title,
+    this.location = '',
+    this.closed = false,
+    this.chosenOptionId,
+    this.bestOptionId,
+    required this.creatorId,
+    this.options = const [],
+  });
+  factory AvailPollData.fromJson(Map<String, dynamic> j) => AvailPollData(
+        id: (j['id'] ?? '') as String,
+        title: (j['title'] ?? 'Terminfindung') as String,
+        location: (j['location'] ?? '') as String,
+        closed: (j['closed'] ?? false) as bool,
+        chosenOptionId: j['chosenOptionId'] as String?,
+        bestOptionId: j['bestOptionId'] as String?,
+        creatorId: (j['creatorId'] ?? '') as String,
+        options: ((j['options'] as List?) ?? const [])
+            .map((e) => AvailPollOption.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'location': location,
+        'closed': closed,
+        if (chosenOptionId != null) 'chosenOptionId': chosenOptionId,
+        if (bestOptionId != null) 'bestOptionId': bestOptionId,
+        'creatorId': creatorId,
+        'options': options.map((o) => o.toJson()).toList(),
+      };
+}
+
 /// A media attachment carried by a message (or a status). The [url] is always a
 /// server-relative path like `/api/uploads/<id>`; the app prefixes the base URL.
 class Attachment {
@@ -490,6 +631,10 @@ class Message {
   final ContactData? contact;
   final CodeData? code;
 
+  // ── „Zusammen" (0.36.0) payloads (null unless the type matches).
+  final ExpenseData? expense;
+  final AvailPollData? availpoll;
+
   /// How many replies hang off this message in its thread (0 = none).
   final int threadCount;
 
@@ -540,6 +685,8 @@ class Message {
     this.transcript,
     this.contact,
     this.code,
+    this.expense,
+    this.availpoll,
     this.threadCount = 0,
     this.viewOnce = false,
     this.viewed = false,
@@ -642,6 +789,8 @@ class Message {
     TranscriptData? transcript,
     ContactData? contact,
     CodeData? code,
+    ExpenseData? expense,
+    AvailPollData? availpoll,
     int? threadCount,
     bool? viewed,
     bool? pinned,
@@ -669,6 +818,8 @@ class Message {
         transcript: transcript ?? this.transcript,
         contact: contact ?? this.contact,
         code: code ?? this.code,
+        expense: expense ?? this.expense,
+        availpoll: availpoll ?? this.availpoll,
         threadCount: threadCount ?? this.threadCount,
         viewOnce: viewOnce,
         viewed: viewed ?? this.viewed,
@@ -703,6 +854,8 @@ class Message {
         if (transcript != null) 'transcript': transcript!.toJson(),
         if (contact != null) 'contact': contact!.toJson(),
         if (code != null) 'code': code!.toJson(),
+        if (expense != null) 'expense': expense!.toJson(),
+        if (availpoll != null) 'availpoll': availpoll!.toJson(),
         if (threadCount > 0) 'threadCount': threadCount,
         if (viewOnce) 'viewOnce': true,
         if (viewed) 'viewed': true,
@@ -766,6 +919,12 @@ class Message {
             : null,
         code: json['code'] != null
             ? CodeData.fromJson(json['code'] as Map<String, dynamic>)
+            : null,
+        expense: json['expense'] != null
+            ? ExpenseData.fromJson(json['expense'] as Map<String, dynamic>)
+            : null,
+        availpoll: json['availpoll'] != null
+            ? AvailPollData.fromJson(json['availpoll'] as Map<String, dynamic>)
             : null,
         threadCount: (json['threadCount'] as num?)?.toInt() ?? 0,
         viewOnce: (json['viewOnce'] ?? false) as bool,

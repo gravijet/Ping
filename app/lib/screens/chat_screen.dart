@@ -817,6 +817,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onOpenContact: interactive && m.contact?.userId != null
           ? (userId) => _openContactChat(userId)
           : null,
+      onOpenLedger: interactive && m.expense != null
+          ? () => _openLedger()
+          : null,
+      onVoteAvail: interactive && m.availpoll != null && !m.availpoll!.closed
+          ? (optionId, vote) => _voteAvail(m, optionId, vote)
+          : null,
+      onLockAvail: interactive &&
+              m.availpoll != null &&
+              !m.availpoll!.closed &&
+              m.availpoll!.creatorId == state.me?.id
+          ? (optionId) => _lockAvail(m, optionId)
+          : null,
       onOpenThread: interactive && m.threadCount > 0
           ? () => _openThread(m)
           : null,
@@ -951,6 +963,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _toggleTask(Message m, String itemId, bool done) async {
     try {
       await context.read<AppState>().toggleTask(widget.chatId, m.id, itemId, done);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  // ── „Zusammen" (0.36.0) handlers ────────────────────────────────────────
+
+  Future<void> _voteAvail(Message m, String optionId, String? vote) async {
+    try {
+      await context.read<AppState>().voteAvail(widget.chatId, m.id, optionId, vote);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _lockAvail(Message m, String optionId) async {
+    try {
+      await context.read<AppState>().lockAvail(widget.chatId, m.id, optionId);
     } on ApiException catch (e) {
       _showError(e.message);
     }
@@ -1105,6 +1135,219 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } on ApiException catch (e) {
       _showError(e.message);
     }
+  }
+
+  // ── „Zusammen" (0.36.0) composers + ledger ──────────────────────────────
+
+  /// Format minor units as "24,50 €".
+  String _money(int cents, String currency) {
+    final neg = cents < 0;
+    final abs = cents.abs();
+    const symbols = {'EUR': '€', 'USD': '\$', 'GBP': '£', 'CHF': 'CHF'};
+    final body =
+        '${abs ~/ 100},${(abs % 100).toString().padLeft(2, '0')} ${symbols[currency] ?? currency}';
+    return neg ? '-$body' : body;
+  }
+
+  /// Compose a shared expense, split equally across everyone in the chat. (The
+  /// PC client offers per-person custom splits; mobile keeps it one-tap-simple.)
+  Future<void> _openExpenseComposer() async {
+    final state = context.read<AppState>();
+    final title = await _promptText('Ausgabe teilen', 'Wofür? (z. B. Pizza)');
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    final raw = await _promptText('Betrag', 'z. B. 24,50');
+    if (raw == null || !mounted) return;
+    final cents = (double.tryParse(raw.replaceAll(',', '.').trim()) ?? 0) ~/ 0.01;
+    final amountCents = cents.round();
+    if (amountCents <= 0) {
+      _showError('Bitte gib einen gültigen Betrag ein.');
+      return;
+    }
+    final chat = state.chats.firstWhere((c) => c.id == widget.chatId,
+        orElse: () => throw ApiException('Chat nicht gefunden.', 404));
+    final ids = <String>{
+      for (final m in chat.members) m.id,
+      if (state.me != null) state.me!.id,
+      if (chat.otherUser != null) chat.otherUser!.id,
+    };
+    try {
+      await state.createExpense(widget.chatId,
+          title: title.trim(),
+          amountCents: amountCents,
+          participants: ids.toList());
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  /// Compose an availability poll: collect 2–8 proposed slots.
+  Future<void> _openAvailPollComposer() async {
+    final state = context.read<AppState>();
+    final title =
+        await _promptText('Terminfindung', 'Worum geht es? (z. B. Spieleabend)');
+    if (title == null || title.trim().isEmpty || !mounted) return;
+    final options = <int>[];
+    while (options.length < 8 && mounted) {
+      final when = await _pickDateTime();
+      if (when == null) break;
+      options.add(when.millisecondsSinceEpoch);
+      if (options.length >= 2) {
+        if (!mounted) break;
+        final more = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            content: Text('${options.length} Vorschläge. Noch einen hinzufügen?'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Fertig')),
+              FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Weiterer Vorschlag')),
+            ],
+          ),
+        );
+        if (more != true) break;
+      }
+    }
+    if (options.length < 2) {
+      if (options.isNotEmpty) _showError('Mindestens zwei Zeitvorschläge.');
+      return;
+    }
+    try {
+      await state.createAvailPoll(widget.chatId,
+          title: title.trim(), options: options);
+    } on ApiException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  /// Show the per-chat ledger (net balances + one-tap settle-up) in a sheet.
+  Future<void> _openLedger() async {
+    final state = context.read<AppState>();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        Future<List<Map<String, dynamic>>> future = state.fetchLedger(widget.chatId);
+        return StatefulBuilder(
+          builder: (ctx, setSheet) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: future,
+                builder: (ctx, snap) {
+                  if (!snap.hasData) {
+                    return const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  final ledger = snap.data!;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Geteilte Kasse',
+                          style:
+                              TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 12),
+                      if (ledger.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Text('Noch keine Ausgaben. Alles im Lot. 🎉'),
+                        ),
+                      for (final g in ledger)
+                        ..._ledgerGroup(ctx, g, state, () {
+                          setSheet(() {
+                            future = state.fetchLedger(widget.chatId);
+                          });
+                        }),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  List<Widget> _ledgerGroup(BuildContext ctx, Map<String, dynamic> g,
+      AppState state, VoidCallback refresh) {
+    final scheme = Theme.of(ctx).colorScheme;
+    final cur = (g['currency'] ?? 'EUR') as String;
+    final meId = state.me?.id;
+    final balances = ((g['balances'] as List?) ?? const []).cast<Map>();
+    final settlements = ((g['settlements'] as List?) ?? const []).cast<Map>();
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 4),
+        child: Text(cur, style: const TextStyle(fontWeight: FontWeight.w700)),
+      ),
+      for (final b in balances)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(b['userId'] == meId ? 'Ich' : (b['name'] ?? '') as String),
+              Text(
+                ((b['net'] as num).toInt()) == 0
+                    ? 'ausgeglichen'
+                    : '${(b['net'] as num) > 0 ? 'bekommt' : 'schuldet'} ${_money(((b['net'] as num).toInt()).abs(), cur)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: (b['net'] as num) > 0
+                      ? const Color(0xFF2BBF6A)
+                      : (b['net'] as num) < 0
+                          ? const Color(0xFFF0506B)
+                          : scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      if (settlements.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text('Ausgleichsvorschläge',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurfaceVariant)),
+        for (final t in settlements)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                      '${t['from'] == meId ? 'Du' : (t['fromName'] ?? '')} → ${t['to'] == meId ? 'dir' : (t['toName'] ?? '')}: ${_money((t['amount'] as num).toInt(), cur)}'),
+                ),
+                if (t['from'] == meId)
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact),
+                    onPressed: () async {
+                      try {
+                        await state.settleLedger(widget.chatId,
+                            t['to'] as String, (t['amount'] as num).toInt(), cur);
+                        refresh();
+                      } on ApiException catch (e) {
+                        _showError(e.message);
+                      }
+                    },
+                    child: const Text('Begleichen'),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ];
   }
 
   // 0.35.0: pick one of your existing direct-chat partners and share them as a
@@ -1681,6 +1924,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _openPollComposer();
                 },
               ),
+              if (state.feature('splitExpenses', fallback: true))
+                _AttachOption(
+                  icon: Icons.account_balance_wallet_rounded,
+                  color: const Color(0xFF43A047),
+                  label: 'Ausgabe teilen',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openExpenseComposer();
+                  },
+                ),
+              if (state.feature('availabilityPolls', fallback: true))
+                _AttachOption(
+                  icon: Icons.event_available_rounded,
+                  color: const Color(0xFF7E57C2),
+                  label: 'Terminfindung',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openAvailPollComposer();
+                  },
+                ),
               if (state.feature('events', fallback: true))
                 _AttachOption(
                   icon: Icons.event_rounded,

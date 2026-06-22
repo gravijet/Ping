@@ -98,6 +98,15 @@ class MessageBubble extends StatelessWidget {
   /// Tapped "Chat starten" on a shared contact card → open a chat with them.
   final void Function(String userId)? onOpenContact;
 
+  /// Tapped "Kasse ansehen" on a shared-expense card → open the chat ledger.
+  final VoidCallback? onOpenLedger;
+
+  /// Voted on one availability-poll slot (yes/maybe/no, or null to withdraw).
+  final void Function(String optionId, String? vote)? onVoteAvail;
+
+  /// Organiser locked an availability-poll slot → spawn the event.
+  final void Function(String optionId)? onLockAvail;
+
   /// Tapped the "X Antworten" thread chip → open the thread.
   final VoidCallback? onOpenThread;
 
@@ -147,6 +156,9 @@ class MessageBubble extends StatelessWidget {
     this.onAddBoardCard,
     this.onTapLiveLocation,
     this.onOpenContact,
+    this.onOpenLedger,
+    this.onVoteAvail,
+    this.onLockAvail,
     this.onOpenThread,
     this.fetchLinkPreview,
     this.onTapEdited,
@@ -194,6 +206,8 @@ class MessageBubble extends StatelessWidget {
     final hasLiveLoc = message.type == 'livelocation' && alive;
     final hasContact = message.contact != null && alive;
     final hasCode = message.code != null && alive;
+    final hasExpense = message.expense != null && alive;
+    final hasAvailPoll = message.availpoll != null && alive;
     // A code snippet's body is just a teaser; don't also print it as text.
     final hasText =
         message.body.trim().isNotEmpty && !isEncrypted && !hasCode && !hasContact;
@@ -352,6 +366,15 @@ class MessageBubble extends StatelessWidget {
                 contact: message.contact!, fg: fg, onOpen: onOpenContact),
           if (hasCode)
             _CodeContent(code: message.code!, fg: fg),
+          if (hasExpense)
+            _ExpenseContent(
+                expense: message.expense!, fg: fg, onOpenLedger: onOpenLedger),
+          if (hasAvailPoll)
+            _AvailPollContent(
+                poll: message.availpoll!,
+                fg: fg,
+                onVote: onVoteAvail,
+                onLock: onLockAvail),
           if (message.deleted)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -2089,6 +2112,293 @@ class _CodeContent extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Format minor units as localised-ish currency, e.g. 2450 → "24,50 €".
+String _fmtMoney(int cents, String currency) {
+  final neg = cents < 0;
+  final abs = cents.abs();
+  final whole = (abs ~/ 100).toString();
+  final frac = (abs % 100).toString().padLeft(2, '0');
+  const symbols = {'EUR': '€', 'USD': '\$', 'GBP': '£', 'CHF': 'CHF'};
+  final sym = symbols[currency] ?? currency;
+  final body = '$whole,$frac $sym';
+  return neg ? '-$body' : body;
+}
+
+/// Shared-expense ("Geteilte Kasse") card: title, amount, payer, your stake +
+/// a "Kasse ansehen" link. Settlements render as a single quiet line.
+class _ExpenseContent extends StatelessWidget {
+  final ExpenseData expense;
+  final Color fg;
+  final VoidCallback? onOpenLedger;
+  const _ExpenseContent(
+      {required this.expense, required this.fg, this.onOpenLedger});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final money = _fmtMoney(expense.amountCents, expense.currency);
+
+    if (expense.kind == 'settlement') {
+      final to = expense.shares.isNotEmpty ? expense.shares.first.name : 'jemandem';
+      return Container(
+        constraints: const BoxConstraints(minWidth: 200),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Text('💸', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+                '${expense.iPaid ? 'Du hast' : '${expense.payerName} hat'} $to $money ausgeglichen',
+                style: TextStyle(color: fg, fontSize: 13.5)),
+          ),
+        ]),
+      );
+    }
+
+    final myShare = expense.myShare;
+    String youLine;
+    Color youColor;
+    if (expense.iPaid) {
+      final back = expense.amountCents - myShare;
+      youLine = back > 0 ? 'Dir stehen ${_fmtMoney(back, expense.currency)} zu' : 'Nur für dich';
+      youColor = back > 0 ? const Color(0xFF2BBF6A) : fg.withValues(alpha: 0.7);
+    } else if (myShare > 0) {
+      youLine = 'Du schuldest ${_fmtMoney(myShare, expense.currency)}';
+      youColor = const Color(0xFFF0506B);
+    } else {
+      youLine = 'Du bist nicht beteiligt';
+      youColor = fg.withValues(alpha: 0.7);
+    }
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 220),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Icon(Icons.account_balance_wallet_rounded, size: 18, color: scheme.primary),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(expense.title,
+                      style: TextStyle(
+                          color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text(
+                      '${expense.iPaid ? 'Du hast' : '${expense.payerName} hat'} bezahlt',
+                      style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 12)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(money,
+                style: TextStyle(
+                    color: fg, fontWeight: FontWeight.w800, fontSize: 16)),
+          ]),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+            decoration: BoxDecoration(
+              color: youColor.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(youLine,
+                style: TextStyle(
+                    color: youColor, fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          if (onOpenLedger != null) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: onOpenLedger,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.account_balance_wallet_outlined,
+                    size: 14, color: scheme.primary),
+                const SizedBox(width: 5),
+                Text('Kasse ansehen',
+                    style: TextStyle(
+                        color: scheme.primary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Availability-poll ("Terminfindung") card: each slot with yes/maybe/no chips,
+/// a favourite badge, and (for the organiser) a "festlegen" action per slot.
+class _AvailPollContent extends StatelessWidget {
+  final AvailPollData poll;
+  final Color fg;
+  final void Function(String optionId, String? vote)? onVote;
+  final void Function(String optionId)? onLock;
+  const _AvailPollContent(
+      {required this.poll, required this.fg, this.onVote, this.onLock});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isOrganiser = onLock != null;
+    return Container(
+      constraints: const BoxConstraints(minWidth: 240),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Icon(Icons.event_available_rounded, size: 18, color: scheme.primary),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(poll.title,
+                  style: TextStyle(
+                      color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
+            ),
+          ]),
+          Text(
+              poll.closed
+                  ? '✅ Termin festgelegt'
+                  : (poll.location.isNotEmpty ? '📍 ${poll.location}' : 'Wann passt es dir?'),
+              style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 12)),
+          const SizedBox(height: 6),
+          for (final opt in poll.options)
+            _slot(context, opt, isOrganiser),
+        ],
+      ),
+    );
+  }
+
+  Widget _slot(BuildContext context, AvailPollOption opt, bool isOrganiser) {
+    final scheme = Theme.of(context).colorScheme;
+    final dt = DateTime.fromMillisecondsSinceEpoch(opt.startAt);
+    final chosen = poll.chosenOptionId == opt.id;
+    final best = poll.bestOptionId == opt.id;
+    final opts = const [
+      ('yes', '✅'),
+      ('maybe', '🤔'),
+      ('no', '✖️'),
+    ];
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: chosen
+            ? const Color(0xFF2BBF6A).withValues(alpha: 0.14)
+            : fg.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(9),
+        border: best && !poll.closed
+            ? Border.all(color: scheme.primary.withValues(alpha: 0.6))
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Expanded(
+              child: Text(_fmtDateTime(dt),
+                  style: TextStyle(
+                      color: fg, fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            if (best && !poll.closed)
+              _badge('Favorit', scheme.primary),
+            if (chosen) _badge('Festgelegt', const Color(0xFF2BBF6A)),
+          ]),
+          if (!poll.closed) ...[
+            const SizedBox(height: 6),
+            Row(children: [
+              for (final (key, emoji) in opts)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: _voteBtn(context, opt, key, emoji),
+                  ),
+                ),
+            ]),
+            if (isOrganiser)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: GestureDetector(
+                  onTap: () => onLock!(opt.id),
+                  child: Text('Diesen Termin festlegen',
+                      style: TextStyle(
+                          color: scheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                  '✅ ${opt.counts['yes'] ?? 0} · 🤔 ${opt.counts['maybe'] ?? 0} · ✖️ ${opt.counts['no'] ?? 0}',
+                  style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 12)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _badge(String text, Color color) => Container(
+        margin: const EdgeInsets.only(left: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                color: color, fontSize: 10.5, fontWeight: FontWeight.w700)),
+      );
+
+  Widget _voteBtn(
+      BuildContext context, AvailPollOption opt, String key, String emoji) {
+    final scheme = Theme.of(context).colorScheme;
+    final active = opt.myVote == key;
+    final n = opt.counts[key] ?? 0;
+    return GestureDetector(
+      onTap: onVote == null ? null : () => onVote!(opt.id, active ? null : key),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        decoration: BoxDecoration(
+          color: active
+              ? scheme.primary.withValues(alpha: 0.2)
+              : fg.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(8),
+          border: active
+              ? Border.all(color: scheme.primary.withValues(alpha: 0.6))
+              : null,
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text(emoji, style: const TextStyle(fontSize: 13)),
+          const SizedBox(width: 4),
+          Text('$n',
+              style: TextStyle(
+                  color: fg, fontSize: 12, fontWeight: FontWeight.w600)),
+        ]),
       ),
     );
   }

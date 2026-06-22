@@ -295,6 +295,35 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Zusammen — money & time (0.36.0)
+Two more **structured message types** on the poll pattern, kill-switchable via
+`splitExpenses` / `availabilityPolls`. `migrateMessageTypes036()` widens the
+`messages.type` CHECK to admit `expense` + `availpoll` with the same FTS-aware
+FK-off table swap (drops the orphaned `messages_fts` so `setupFts()` rebuilds +
+backfills). `TYPE_ALIASES` learns `kasse`/`ausgabe` and `terminfindung` for the
+`typ:` search filter.
+
+- **Shared expenses (`expense`).** `expenseRepo.js` + `expenses` /
+  `expense_shares`. `POST /chats/:id/expenses` resolves the split server-side
+  (equal → even shares with the remainder cents spread over the first few; custom
+  → supplied shares, which must sum to the total) so the ledger always balances.
+  The ledger is **derived**, not stored: `net(u) = Σ(paid by u) − Σ(u's shares)`
+  over non-deleted expense rows, grouped by currency; `settleUp()` is a pure
+  greedy min-cash-flow that returns the minimal transfer set. A **settlement** is
+  the same row shape (payer pays one beneficiary the full amount), so
+  `/chats/:id/ledger/settle` just posts another `expense` and rebalances.
+  `GET /chats/:id/ledger` (per-chat) and `GET /me/ledger` (cross-chat overview,
+  parallels `/me/events`). Web `expense.js` (create modal, in-chat card, ledger
+  modal, "Kasse" nav pane); Flutter `ExpenseData` + a card + a settle-up sheet.
+- **Availability polls (`availpoll`).** `availPollRepo.js` + `availpolls` /
+  `availpoll_options` / `availpoll_votes`. `POST /chats/:id/availpolls` (2–8
+  slots); per-slot yes/maybe/no votes via `…/availpoll/vote`; `availPollView`
+  computes per-slot tallies + a front-runner (`yes×2 + maybe`, earliest wins
+  ties). `…/availpoll/lock` is **organiser-only**: it mints a real `event`
+  message via `createEvent` from the chosen slot, links it (`event_message_id`)
+  and closes the poll — so the find-a-time flow ends in a normal RSVP event +
+  reminder. Web `availpoll.js`; Flutter `AvailPollData` + a vote-chip card.
+
 ## Expression & workbench (0.35.0)
 Two more **structured message types** on the poll pattern (side table →
 `messageView` → realtime/offline/FTS for free), kill-switchable via `contactCards`

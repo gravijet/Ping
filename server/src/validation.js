@@ -713,6 +713,107 @@ export const codeSnippetSchema = z.object({
   filename: z.string().trim().max(120, 'Der Dateiname ist zu lang.').optional().default(''),
 });
 
+// ---- 0.36.0 "Zusammen" ----------------------------------------------------
+
+// A shared expense ("Geteilte Kasse"). The amount is in minor units (cents); the
+// split is either equal among the chosen participants or a list of explicit
+// shares that must add up to the total — the route enforces that sum so the
+// ledger always balances.
+export const expenseCreateSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, 'Bitte gib der Ausgabe einen Titel.')
+      .max(140, 'Der Titel ist zu lang.'),
+    // 1 cent … 100 million (1,000,000.00) — generous, but not absurd.
+    amountCents: z
+      .number()
+      .int('Ungültiger Betrag.')
+      .min(1, 'Der Betrag muss größer als 0 sein.')
+      .max(100_000_000_00, 'Der Betrag ist zu groß.'),
+    currency: z
+      .string()
+      .trim()
+      .regex(/^[A-Z]{3}$/, 'Ungültige Währung.')
+      .optional()
+      .default('EUR'),
+    // Who fronted the money. Omitted ⇒ the creator paid.
+    payerId: z.string().trim().max(64).optional().default(''),
+    // 'equal' splits the total evenly across `participants`; 'custom' uses the
+    // explicit per-user `shares`.
+    split: z.enum(['equal', 'custom']).optional().default('equal'),
+    participants: z.array(z.string().trim().min(1).max(64)).max(100).optional().default([]),
+    shares: z
+      .array(
+        z.object({
+          userId: z.string().trim().min(1).max(64),
+          shareCents: z.number().int().min(0).max(100_000_000_00),
+        })
+      )
+      .max(100)
+      .optional()
+      .default([]),
+  })
+  .refine((d) => d.split !== 'equal' || d.participants.length >= 1, {
+    message: 'Wähle mindestens eine Person zum Teilen.',
+    path: ['participants'],
+  })
+  .refine((d) => d.split !== 'custom' || d.shares.length >= 1, {
+    message: 'Gib mindestens einen Anteil an.',
+    path: ['shares'],
+  });
+
+// Record a settlement: I (or `fromUserId`) pay `toUserId` to clear a debt.
+export const settleSchema = z.object({
+  toUserId: z.string().trim().min(1, 'Kein Empfänger gewählt.').max(64),
+  amountCents: z
+    .number()
+    .int('Ungültiger Betrag.')
+    .min(1, 'Der Betrag muss größer als 0 sein.')
+    .max(100_000_000_00, 'Der Betrag ist zu groß.'),
+  currency: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{3}$/, 'Ungültige Währung.')
+    .optional()
+    .default('EUR'),
+});
+
+// An availability poll ("Terminfindung"): a title, an optional location and
+// 2–8 candidate start times (epoch-ms, all in the future).
+export const availPollCreateSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, 'Bitte gib der Terminfindung einen Titel.')
+    .max(140, 'Der Titel ist zu lang.'),
+  location: z.string().trim().max(200, 'Der Ort ist zu lang.').optional().default(''),
+  options: z
+    .array(
+      z
+        .number()
+        .int('Ungültige Zeit.')
+        .refine((t) => t > Date.now() - 60_000, 'Ein Vorschlag liegt in der Vergangenheit.')
+        .refine((t) => t < Date.now() + 5 * 365 * 86400_000, 'Ein Vorschlag liegt zu weit in der Zukunft.')
+    )
+    .min(2, 'Mindestens zwei Vorschläge.')
+    .max(8, 'Höchstens acht Vorschläge.'),
+});
+
+// Vote on one availability slot: yes / maybe / no, or null to withdraw.
+export const availVoteSchema = z.object({
+  optionId: z.string().trim().min(1).max(64),
+  vote: z.enum(['yes', 'maybe', 'no']).nullable(),
+});
+
+// Organiser locks the winning slot, spawning a real event from it.
+export const availLockSchema = z.object({
+  optionId: z.string().trim().min(1, 'Kein Termin gewählt.').max(64),
+  // Optional pre-start reminder for the spawned event (minutes), 0 = none.
+  remindMinutes: z.number().int().min(0).max(7 * 24 * 60).optional().default(0),
+});
+
 // Disappearing-messages timer: off (0) or 1 minute … 1 year.
 export const expireTimerSchema = z.object({
   seconds: z

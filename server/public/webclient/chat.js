@@ -29,6 +29,8 @@ import { firstUrl, attachLinkPreview } from './linkpreview.js';
 import * as quickreplies from './quickreplies.js';
 import { renderEvent } from './events.js';
 import { renderTaskList } from './tasks.js';
+import { renderExpense } from './expense.js';
+import { renderAvailPoll } from './availpoll.js';
 import { renderSticker } from './stickers.js';
 import { renderBoard } from './boards.js';
 import { renderGame } from './games.js';
@@ -389,6 +391,10 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderContactCard(m));
   } else if (m.type === 'code') {
     bubble.appendChild(renderCode(m));
+  } else if (m.type === 'expense') {
+    bubble.appendChild(renderExpense(m));
+  } else if (m.type === 'availpoll') {
+    bubble.appendChild(renderAvailPoll(m));
   } else if (m.viewOnce) {
     bubble.appendChild(renderViewOnce(m, mine));
   } else if (m.enc) {
@@ -915,6 +921,8 @@ function attachMenu(e) {
     flag('liveLocation') ? { label: 'Live-Standort', icon: 'compass', onClick: () => import('./livelocation.js').then((m) => m.startLiveLocation(cur.chatId)) } : null,
     { label: 'Zeichnen', icon: 'paint', onClick: () => import('./draw.js').then((m) => m.drawModal(cur.chatId)) },
     { label: 'Umfrage', icon: 'poll', onClick: () => import('./groups.js').then((m) => m.newPollModal(cur.chatId)) },
+    flag('splitExpenses') ? { label: 'Ausgabe teilen', icon: 'wallet', onClick: () => import('./expense.js').then((m) => m.newExpenseModal(cur.chatId)) } : null,
+    flag('availabilityPolls') ? { label: 'Terminfindung', icon: 'whenpoll', onClick: () => import('./availpoll.js').then((m) => m.newAvailPollModal(cur.chatId)) } : null,
     flag('events') ? { label: 'Termin', icon: 'calendar', onClick: () => import('./events.js').then((m) => m.newEventModal(cur.chatId)) } : null,
     flag('taskLists') ? { label: 'Aufgabenliste', icon: 'tasks', onClick: () => import('./tasks.js').then((m) => m.newTaskListModal(cur.chatId)) } : null,
     flag('boards') ? { label: 'Board', icon: 'tasks', onClick: () => import('./boards.js').then((m) => m.newBoardModal(cur.chatId)) } : null,

@@ -229,6 +229,8 @@ function buildNavRail(me) {
     navItem('saved', 'star', 'Gespeichert'),
     // Pläne & Aufgaben (0.33.0): the cross-chat "Termine" agenda.
     flag('events') ? navItem('agenda', 'calendar', 'Termine') : null,
+    // Zusammen (0.36.0): the cross-chat "Kasse" balance overview.
+    flag('splitExpenses') ? navItem('kasse', 'wallet', 'Kasse') : null,
     // Channels / Communities (0.31.0): the public-channel directory.
     flag('communities') ? navItem('discover', 'compass', 'Entdecken') : null,
   ].filter(Boolean));
@@ -336,6 +338,11 @@ function renderSection() {
     sideBody.append(loading());
     return import('./events.js').then((m) =>
       m.renderAgendaPane(sideHead, sideBody, openChatInShell));
+  }
+  if (currentSection === 'kasse') {
+    sideBody.append(loading());
+    return import('./expense.js').then((m) =>
+      m.renderKassePane(sideHead, sideBody, openChatInShell));
   }
 }
 
@@ -455,6 +462,7 @@ export function openCommandPalette() {
     flag('activityCenter') ? { title: 'Aktivität', icon: 'bell', keywords: 'activity benachrichtigungen feed reaktionen erwähnungen', run: () => activity.openActivityPanel(openChatInShell) } : null,
     flag('reminders') ? { title: 'Erinnerungen', icon: 'clock', keywords: 'erinnerung erinnere reminder nudge fällig', run: () => reminders.openReminders(openChatInShell) } : null,
     flag('events') ? { title: 'Termine', icon: 'calendar', keywords: 'termine events kalender agenda rsvp zusage', run: () => setSection('agenda') } : null,
+    flag('splitExpenses') ? { title: 'Kasse', icon: 'wallet', keywords: 'kasse ausgaben geld schulden split bill ledger geteilt', run: () => setSection('kasse') } : null,
     { title: 'Tastenkürzel', icon: 'bolt', hint: '?', keywords: 'shortcuts keyboard tastatur hilfe', run: () => openShortcuts() },
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },

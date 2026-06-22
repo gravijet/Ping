@@ -2615,6 +2615,92 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── „Zusammen" (0.36.0) shared-expense + availability-poll ──────────────
+
+  /// Create a shared expense (type='expense'). For an equal split pass
+  /// [participants]; for a custom split pass [shares] ([{userId, shareCents}]).
+  Future<void> createExpense(
+    String chatId, {
+    required String title,
+    required int amountCents,
+    String currency = 'EUR',
+    String payerId = '',
+    String split = 'equal',
+    List<String> participants = const [],
+    List<Map<String, dynamic>> shares = const [],
+  }) async {
+    final res = await _api.post('/chats/$chatId/expenses', {
+      'title': title,
+      'amountCents': amountCents,
+      'currency': currency,
+      if (payerId.isNotEmpty) 'payerId': payerId,
+      'split': split,
+      if (split == 'equal') 'participants': participants,
+      if (split == 'custom') 'shares': shares,
+    });
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Fetch the per-chat ledger (net balances + settle-up suggestions per
+  /// currency). Returns the raw list as the server shapes it.
+  Future<List<Map<String, dynamic>>> fetchLedger(String chatId) async {
+    final res = await _api.get('/chats/$chatId/ledger');
+    return ((res['ledger'] as List?) ?? const [])
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  /// Record a settlement: the current user pays [toUserId] to clear a debt.
+  Future<void> settleLedger(
+      String chatId, String toUserId, int amountCents, String currency) async {
+    final res = await _api.post('/chats/$chatId/ledger/settle',
+        {'toUserId': toUserId, 'amountCents': amountCents, 'currency': currency});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Create an availability poll (type='availpoll') with 2–8 [options] (epoch-ms).
+  Future<void> createAvailPoll(String chatId,
+      {required String title,
+      String location = '',
+      required List<int> options}) async {
+    final res = await _api.post('/chats/$chatId/availpolls',
+        {'title': title, 'location': location, 'options': options});
+    final msg = Message.fromJson(res['message'] as Map<String, dynamic>);
+    _appendMessage(msg);
+    _bumpChat(chatId, msg);
+    notifyListeners();
+  }
+
+  /// Vote on one availability-poll slot ('yes'/'maybe'/'no' or null to withdraw).
+  Future<void> voteAvail(
+      String chatId, String messageId, String optionId, String? vote) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/availpoll/vote',
+        {'optionId': optionId, 'vote': vote});
+    _replaceMessage(Message.fromJson(res['message'] as Map<String, dynamic>));
+    notifyListeners();
+  }
+
+  /// Organiser locks the winning slot → the server spawns an event and closes
+  /// the poll. Updates the poll message and appends the new event message.
+  Future<void> lockAvail(String chatId, String messageId, String optionId,
+      {int remindMinutes = 30}) async {
+    final res = await _api.post(
+        '/chats/$chatId/messages/$messageId/availpoll/lock',
+        {'optionId': optionId, 'remindMinutes': remindMinutes});
+    _replaceMessage(Message.fromJson(res['poll'] as Map<String, dynamic>));
+    final ev = Message.fromJson(res['event'] as Map<String, dynamic>);
+    _appendMessage(ev);
+    _bumpChat(chatId, ev);
+    notifyListeners();
+  }
+
   /// Start an in-chat mini-game ('tictactoe' | 'connect4').
   Future<void> createGame(String chatId, String kind) async {
     final res = await _api.post('/chats/$chatId/games', {'kind': kind});

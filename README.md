@@ -30,6 +30,15 @@ Online-Status, Lesebestätigungen).
   **„Hol mich ab"**-Zusammenfassung (rein lokal) und heuristische **Smart Replies**.
   Kein Cloud-LLM, keine Datenabflüsse. Volle Oberfläche im **Web & Windows**, alle
   Server-Funktionen für **Android** per OTA.
+- **Geteilte Kasse & Terminfindung** (seit 0.36.0) – teile eine **Ausgabe**
+  gleichmäßig oder mit eigenen Anteilen; jeder Chat bekommt eine **Kasse** mit
+  Salden pro Person, den kürzesten **Ausgleichsvorschlägen** und **„Begleichen"**
+  per Tipp – plus eine chatübergreifende **„Kasse"**-Ansicht. Und finde mit der
+  **Terminfindung** einen Termin: schlage mehrere Zeiten vor, alle stimmen mit
+  **✅ / 🤔 / ✖️** ab, die Organisatorin legt den Termin fest – daraus wird
+  automatisch ein echter **Termin**. Nativ auf Web, Windows und Android und
+  durchsuchbar (`typ:kasse`, `typ:terminfindung`). Schaltbar über `splitExpenses`
+  und `availabilityPolls`.
 - **Kontaktkarten & Code-Snippets** (seit 0.35.0) – teile eine Person als
   schicke **Kontaktkarte** (Foto, Name, `@Handle`) mit direktem **„Chat starten"**,
   und teile Code als **Snippet-Karte** mit **Syntax-Hervorhebung**, **Kopieren**

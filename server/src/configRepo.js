@@ -82,6 +82,9 @@ export const DEFAULT_CONFIG = {
     contactCards: true,   // share a Ping account as a rich, tappable contact card
     codeSnippets: true,   // share formatted code blocks with one-tap copy
     labMode: true,        // power-user "Labor": live theme editor + local flag overrides
+    // ── „Zusammen" (0.36.0) — coordinate money & time ─────────────────────
+    splitExpenses: true,    // shared expenses / split bills (Geteilte Kasse) + ledger
+    availabilityPolls: true, // find-a-time availability polls (Terminfindung)
   },
   values: {
     maxStatusSeconds: 30,

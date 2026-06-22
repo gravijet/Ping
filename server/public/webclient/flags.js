@@ -76,6 +76,9 @@ export const DEFAULTS = {
   // ── „Ausdruck & Werkbank" (0.35.0) ──────────────────────────────────────
   contactCards: true,     // share a Ping account as a rich, tappable contact card
   codeSnippets: true,     // share formatted code blocks with syntax highlighting + copy
+  // ── „Zusammen" (0.36.0) — coordinate money & time ───────────────────────
+  splitExpenses: true,    // shared expenses / split bills (Geteilte Kasse) + ledger + "Kasse" pane
+  availabilityPolls: true,// find-a-time availability polls (Terminfindung) → event
 };
 
 function localOverrides() {

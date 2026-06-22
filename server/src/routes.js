@@ -77,6 +77,11 @@ import {
   taskItemToggleSchema,
   contactCardSchema,
   codeSnippetSchema,
+  expenseCreateSchema,
+  settleSchema,
+  availPollCreateSchema,
+  availVoteSchema,
+  availLockSchema,
   expireTimerSchema,
   draftSchema,
   folderSchema,
@@ -374,6 +379,13 @@ import {
 } from './tasksRepo.js';
 import { createContactCard } from './contactCardRepo.js';
 import { createCodeSnippet, codeTeaser } from './codeRepo.js';
+import { createExpense, chatLedger, userLedger } from './expenseRepo.js';
+import {
+  createAvailPoll,
+  setAvailVote,
+  closeAvailPoll,
+  getAvailPollByMessage,
+} from './availPollRepo.js';
 import {
   setLiveLocation,
   updateLiveLocation,
@@ -545,6 +557,10 @@ function messagePreview(msg) {
       return '👤 Kontakt';
     case 'code':
       return '‹/› Code-Snippet';
+    case 'expense':
+      return '💶 Ausgabe';
+    case 'availpoll':
+      return '🗓️ Terminfindung';
     default:
       return 'Neue Nachricht';
   }
@@ -2222,6 +2238,257 @@ router.post(
   })
 );
 
+// ---- 0.36.0 "Zusammen": shared expenses (Geteilte Kasse) ------------------
+
+// Create a shared expense (type='expense'). Like a poll, it's a normal message
+// whose payer/amount/share payload rides along in messageView.expense. The split
+// is resolved to explicit per-user shares here so the ledger always balances:
+// 'equal' divides the total across the chosen participants (remainder cents go to
+// the first few), 'custom' uses the supplied shares (which must sum to the total).
+router.post(
+  '/chats/:id/expenses',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const data = parse(expenseCreateSchema, req.body);
+    const memberIds = new Set(getMemberIds(req.chat.id));
+    const payerId = data.payerId || req.user.id;
+    if (!memberIds.has(payerId)) {
+      return res.status(400).json({ error: 'Wer bezahlt hat, ist kein Mitglied dieses Chats.' });
+    }
+    let shares;
+    if (data.split === 'equal') {
+      const parts = [...new Set(data.participants)].filter((u) => memberIds.has(u));
+      if (!parts.length) {
+        return res.status(400).json({ error: 'Wähle mindestens eine Person zum Teilen.' });
+      }
+      const base = Math.floor(data.amountCents / parts.length);
+      const rem = data.amountCents - base * parts.length;
+      shares = parts.map((userId, i) => ({ userId, shareCents: base + (i < rem ? 1 : 0) }));
+    } else {
+      shares = data.shares.filter((sh) => memberIds.has(sh.userId));
+      const sum = shares.reduce((a, sh) => a + sh.shareCents, 0);
+      if (!shares.length || sum !== data.amountCents) {
+        return res.status(400).json({ error: 'Die Anteile ergeben nicht den Gesamtbetrag.' });
+      }
+    }
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'expense',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createExpense({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      payerId,
+      title: data.title,
+      amountCents: data.amountCents,
+      currency: data.currency,
+      kind: 'expense',
+      shares,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// The chat ledger: net balances per member + the minimal settle-up transfers,
+// grouped by currency. Read-only; any member can see who owes what.
+router.get(
+  '/chats/:id/ledger',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    res.json({ ledger: chatLedger(req.chat.id) });
+  })
+);
+
+// Record a settlement: the caller pays another member to clear a debt. It's an
+// 'expense' message with kind='settlement' (payer = caller, single full share to
+// the beneficiary), so it lands in the timeline and rebalances the ledger.
+router.post(
+  '/chats/:id/ledger/settle',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const data = parse(settleSchema, req.body);
+    if (data.toUserId === req.user.id) {
+      return res.status(400).json({ error: 'Du kannst dich nicht selbst auszahlen.' });
+    }
+    if (!new Set(getMemberIds(req.chat.id)).has(data.toUserId)) {
+      return res.status(400).json({ error: 'Der Empfänger ist kein Mitglied dieses Chats.' });
+    }
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'expense',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createExpense({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      payerId: req.user.id,
+      title: 'Ausgleich',
+      amountCents: data.amountCents,
+      currency: data.currency,
+      kind: 'settlement',
+      shares: [{ userId: data.toUserId, shareCents: data.amountCents }],
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Cross-chat "Kasse" overview: the caller's own net balance per chat+currency
+// across every chat with expense activity, biggest balance first.
+router.get(
+  '/me/ledger',
+  requireAuth,
+  h(async (req, res) => {
+    const uid = req.user.id;
+    const titleCache = new Map();
+    const titleOf = (cid) => {
+      if (titleCache.has(cid)) return titleCache.get(cid);
+      const c = getChat(cid);
+      const t = c ? chatView(c, uid).title || '' : '';
+      titleCache.set(cid, t);
+      return t;
+    };
+    res.json({ entries: userLedger(uid, titleOf) });
+  })
+);
+
+// ---- 0.36.0 "Zusammen": availability polls (Terminfindung) ----------------
+
+// Create an availability poll (type='availpoll'). Members mark yes/maybe/no per
+// slot; the payload rides along in messageView.availpoll.
+router.post(
+  '/chats/:id/availpolls',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (req.chat.locked) {
+      return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+    }
+    const data = parse(availPollCreateSchema, req.body);
+    const msg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'availpoll',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    createAvailPoll({
+      messageId: msg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title: data.title,
+      location: data.location,
+      options: data.options,
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+    }
+    pushForMessage(req.chat, msg, req.user.id);
+    res.status(201).json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Vote on one slot of an availability poll (yes/maybe/no, or null to withdraw).
+router.post(
+  '/chats/:id/messages/:msgId/availpoll/vote',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'availpoll') {
+      return res.status(404).json({ error: 'Diese Terminfindung gibt es nicht.' });
+    }
+    const { optionId, vote } = parse(availVoteSchema, req.body);
+    if (!setAvailVote(msg.id, optionId, req.user.id, vote)) {
+      return res.status(400).json({ error: 'Abstimmung nicht möglich (geschlossen?).' });
+    }
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+    }
+    res.json({ message: messageView(msg, req.user.id) });
+  })
+);
+
+// Lock the winning slot. Only the organiser can; it spawns a real 'event'
+// message from the chosen time and closes the poll (both go out live).
+router.post(
+  '/chats/:id/messages/:msgId/availpoll/lock',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== 'availpoll') {
+      return res.status(404).json({ error: 'Diese Terminfindung gibt es nicht.' });
+    }
+    const poll = getAvailPollByMessage(msg.id);
+    if (!poll) return res.status(404).json({ error: 'Diese Terminfindung gibt es nicht.' });
+    if (poll.creator_id !== req.user.id) {
+      return res.status(403).json({ error: 'Nur die Organisatorin kann den Termin festlegen.' });
+    }
+    if (poll.closed) {
+      return res.status(409).json({ error: 'Diese Terminfindung ist bereits abgeschlossen.' });
+    }
+    const { optionId, remindMinutes } = parse(availLockSchema, req.body);
+    // Spawn the event first so we can link it from the closed poll.
+    const eventMsg = createMessage({
+      chatId: req.chat.id,
+      senderId: req.user.id,
+      type: 'event',
+      body: '',
+      expiresAt: messageExpiry(req.chat),
+    });
+    const result = closeAvailPoll(msg.id, optionId, eventMsg.id);
+    if (!result) {
+      // Bad option id: roll back the orphan event message we just made.
+      deleteMessage(eventMsg.id);
+      return res.status(400).json({ error: 'Diesen Terminvorschlag gibt es nicht.' });
+    }
+    createEvent({
+      messageId: eventMsg.id,
+      chatId: req.chat.id,
+      creatorId: req.user.id,
+      title: poll.title,
+      description: '',
+      location: poll.location || '',
+      startAt: result.startAt,
+      remindMinutes,
+      recur: '',
+    });
+    for (const memberId of getMemberIds(req.chat.id)) {
+      sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+      sendToUser(memberId, 'message', { message: messageView(eventMsg, memberId) });
+    }
+    pushForMessage(req.chat, eventMsg, req.user.id);
+    res.status(201).json({
+      poll: messageView(msg, req.user.id),
+      event: messageView(eventMsg, req.user.id),
+    });
+  })
+);
+
 // ---- 0.35.0 "Ausdruck & Werkbank": contact cards + code snippets ----------
 
 // Share a contact card (type='contact'). You share a Ping account; the server
@@ -3278,6 +3545,8 @@ function reminderPreviewOf(msg) {
     case 'livelocation': return '📍 Live-Standort';
     case 'contact': return '👤 Kontakt';
     case 'code': return '‹/› Code-Snippet';
+    case 'expense': return '💶 Ausgabe';
+    case 'availpoll': return '🗓️ Terminfindung';
     default: return 'Nachricht';
   }
 }

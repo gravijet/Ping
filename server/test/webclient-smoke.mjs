@@ -69,6 +69,7 @@ class El {
   prepend(...ns) { ns.reverse().forEach((n) => { n.parentNode = this; this.children.unshift(typeof n === 'string' ? document.createTextNode(n) : n); }); }
   insertBefore(n, ref) { const i = this.children.indexOf(ref); n.parentNode = this; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }
   removeChild(n) { const i = this.children.indexOf(n); if (i >= 0) this.children.splice(i, 1); return n; }
+  contains(n) { if (n === this) return true; return this.children.some((c) => c.contains && c.contains(n)); }
   replaceChildren(...ns) { this.children.length = 0; this._text = ''; ns.forEach((n) => this.appendChild(n)); }
   remove() { if (this.parentNode) this.parentNode.removeChild(this); }
   get firstChild() { return this.children[0] || null; }
@@ -196,6 +197,9 @@ const msgs = [
   // 0.35.0 "Ausdruck & Werkbank" structured-message types.
   { id: 'm13', chatId: 'c1', senderId: 'me', type: 'contact', contact: { id: 'cc1', userId: 'u2', isUser: true, displayName: 'Anna Beispiel', username: 'anna', avatarColor: '#4d9bff', hasAvatar: false, avatarVersion: 0, note: 'Meine Kollegin' }, createdAt: Date.now() - 300, status: 'read' },
   { id: 'm14', chatId: 'c1', senderId: 'u2', type: 'code', body: '‹/› app.js · 3 Zeilen', code: { id: 'cd1', language: 'js', filename: 'app.js', lines: 3, code: "const x = 1; // hi\nfunction add(a, b) { return a + b; }\nconsole.log(add(x, 2));" }, createdAt: Date.now() - 200 },
+  // 0.36.0 "Zusammen" structured-message types.
+  { id: 'm15', chatId: 'c1', senderId: 'me', type: 'expense', expense: { id: 'ex1', title: 'Pizza', amountCents: 2400, currency: 'EUR', kind: 'expense', payerId: 'me', payerName: 'Ich', creatorId: 'me', iPaid: true, myShare: 1200, shares: [{ userId: 'me', name: 'Ich', shareCents: 1200 }, { userId: 'u2', name: 'Anna', shareCents: 1200 }] }, createdAt: Date.now() - 150, status: 'read' },
+  { id: 'm16', chatId: 'c1', senderId: 'u2', type: 'availpoll', availpoll: { id: 'ap1', title: 'Brettspielabend', location: 'bei Anna', closed: false, creatorId: 'me', chosenOptionId: null, bestOptionId: 'o1', options: [{ id: 'o1', startAt: Date.now() + 86400_000, counts: { yes: 2, maybe: 0, no: 0 }, myVote: 'yes', yesNames: ['Anna'] }, { id: 'o2', startAt: Date.now() + 172800_000, counts: { yes: 0, maybe: 1, no: 1 }, myVote: null, yesNames: [] }] }, createdAt: Date.now() - 100 },
 ];
 
 function jsonRes(data) {
@@ -210,6 +214,15 @@ async function fetchShim(url) {
     { id: 'e1', chatId: 'c1', messageId: 'm5', title: 'Team-Lunch', location: 'Kantine', startAt: Date.now() + 3600_000, counts: { going: 1, maybe: 0, declined: 0 }, myStatus: 'going', chatTitle: 'Anna', attendees: [{ userId: 'u2', status: 'going', displayName: 'Anna' }] },
   ] });
   if (/\/messages\/[^/]+\/edits$/.test(path)) return jsonRes({ versions: [{ body: 'alte Fassung' }, { body: 'neue Fassung', editedAt: Date.now(), current: true }] });
+  // 0.36.0 "Zusammen" endpoints.
+  if (/\/chats\/[^/]+\/ledger$/.test(path)) return jsonRes({ ledger: [
+    { currency: 'EUR', totalSpent: 2400, balances: [
+      { userId: 'me', name: 'Ich', net: 1200 }, { userId: 'u2', name: 'Anna', net: -1200 }],
+      settlements: [{ from: 'u2', to: 'me', amount: 1200, fromName: 'Anna', toName: 'Ich' }] },
+  ] });
+  if (path === '/me/ledger') return jsonRes({ entries: [
+    { chatId: 'c1', chatTitle: 'Anna', currency: 'EUR', net: 1200 },
+  ] });
   // 0.34.0 "Alles" endpoints.
   if (/\/messages\/[^/]+\/thread$/.test(path)) return jsonRes({ root: msgs[0], messages: [{ id: 'tr1', chatId: 'c1', senderId: 'u2', type: 'text', body: 'Antwort', createdAt: Date.now() }] });
   if (path === '/stickers/packs') return jsonRes({ packs: [{ id: 'p1', name: 'Mein Paket', stickers: [{ id: 's1', url: '/api/uploads/s1', emoji: '🎉' }] }] });
@@ -413,6 +426,26 @@ await step('0.35.0 code snippet: highlight + render card + viewer + compose', as
   if (!card.querySelector('.code-lang')) throw new Error('code card missing language label');
   cd.openCodeViewer(msgs[13]); await tick();
   cd.newCodeModal('c1'); await tick();
+});
+await step('0.36.0 expense: render card, ledger modal, Kasse pane + create modal', async () => {
+  const ex = await imp('expense.js');
+  if (ex.fmtMoney(2450, 'EUR').replace(/\s/g, '') !== '24,50€') throw new Error('fmtMoney wrong: ' + ex.fmtMoney(2450, 'EUR'));
+  const card = ex.renderExpense(msgs[14]);
+  if (!card || !card.querySelector('.expense-amount')) throw new Error('expense card missing amount');
+  if (!card.querySelector('.expense-ledger-link')) throw new Error('expense card missing ledger link');
+  await ex.openLedger('c1'); await tick();
+  const head = new El('div'), body = new El('div');
+  await ex.renderKassePane(head, body, () => {}); await tick();
+  if (!body.querySelector('.agenda-row')) throw new Error('Kasse pane rendered no rows');
+  ex.newExpenseModal('c1'); await tick();
+});
+await step('0.36.0 availpoll: render card with vote buttons + create modal', async () => {
+  const ap = await imp('availpoll.js');
+  const card = ap.renderAvailPoll(msgs[15]);
+  if (!card || !card.querySelector('.avail-vote')) throw new Error('availpoll card missing vote buttons');
+  if (!card.querySelector('.avail-slot.best')) throw new Error('availpoll card missing favourite slot');
+  if (!card.querySelector('.avail-lock')) throw new Error('availpoll card missing organiser lock button');
+  ap.newAvailPollModal('c1'); await tick();
 });
 await step('0.34.0 create modals: board/game/scheduled-call', async () => {
   (await imp('boards.js')).newBoardModal('c1'); await tick();

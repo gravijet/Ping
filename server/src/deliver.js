@@ -52,6 +52,10 @@ function previewOf(msg) {
       return '👤 Kontakt';
     case 'code':
       return '‹/› Code-Snippet';
+    case 'expense':
+      return '💶 Ausgabe';
+    case 'availpoll':
+      return '🗓️ Terminfindung';
     default:
       return msg.body || 'Nachricht';
   }

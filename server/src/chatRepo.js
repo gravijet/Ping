@@ -8,6 +8,8 @@ import { boardView } from './boardsRepo.js';
 import { gameView } from './gamesRepo.js';
 import { contactCardView } from './contactCardRepo.js';
 import { codeView } from './codeRepo.js';
+import { expenseView } from './expenseRepo.js';
+import { availPollView } from './availPollRepo.js';
 
 const s = {
   insertChat: db.prepare(`
@@ -771,6 +773,9 @@ const TYPE_ALIASES = {
   // 0.35.0 "Ausdruck & Werkbank"
   contact: 'contact', kontakt: 'contact', kontaktkarte: 'contact', visitenkarte: 'contact',
   code: 'code', snippet: 'code', codeschnipsel: 'code', quellcode: 'code',
+  // 0.36.0 "Zusammen"
+  expense: 'expense', ausgabe: 'expense', kasse: 'expense', kosten: 'expense',
+  availpoll: 'availpoll', terminfindung: 'availpoll', verfuegbarkeit: 'availpoll',
 };
 
 // Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
@@ -1111,6 +1116,10 @@ export function messageView(msg, viewerId) {
     // 0.35.0 "Ausdruck & Werkbank": contact-card + code-snippet payloads.
     contact: msg.type === 'contact' && !msg.deleted_at ? contactCardView(msg.id) : null,
     code: msg.type === 'code' && !msg.deleted_at ? codeView(msg.id) : null,
+    // 0.36.0 "Zusammen": shared-expense + availability-poll payloads.
+    expense: msg.type === 'expense' && !msg.deleted_at ? expenseView(msg.id, viewerId) : null,
+    availpoll:
+      msg.type === 'availpoll' && !msg.deleted_at ? availPollView(msg.id, viewerId) : null,
     // 0.34.0: thread metadata, view-once + E2EE flags.
     threadRoot: msg.thread_root || null,
     threadCount: msg.thread_count || 0,

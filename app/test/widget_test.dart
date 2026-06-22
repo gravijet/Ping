@@ -242,4 +242,53 @@ void main() {
     expect(find.text('add.js'), findsOneWidget);
     expect(find.text('2'), findsOneWidget); // line count badge
   });
+
+  testWidgets('expense bubble renders title, amount + ledger link',
+      (tester) async {
+    final msg = Message(
+      id: 'ex1', chatId: 'c1', senderId: 'u1', type: 'expense', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      expense: const ExpenseData(
+        id: 'e1', title: 'Pizza', amountCents: 2400, currency: 'EUR',
+        payerId: 'u1', payerName: 'Anna', iPaid: false, myShare: 1200,
+        shares: [
+          ExpenseShare(userId: 'me', name: 'Ich', shareCents: 1200),
+          ExpenseShare(userId: 'u1', name: 'Anna', shareCents: 1200),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+        _wrap(MessageBubble(message: msg, isMine: false, onOpenLedger: () {})));
+    expect(find.text('Pizza'), findsOneWidget);
+    expect(find.text('24,00 €'), findsOneWidget);
+    expect(find.text('Du schuldest 12,00 €'), findsOneWidget);
+    expect(find.text('Kasse ansehen'), findsOneWidget);
+  });
+
+  testWidgets('availability-poll bubble renders slots + vote chips',
+      (tester) async {
+    final msg = Message(
+      id: 'ap1', chatId: 'c1', senderId: 'u1', type: 'availpoll', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+      availpoll: AvailPollData(
+        id: 'p1', title: 'Spieleabend', creatorId: 'u1', bestOptionId: 'o1',
+        options: [
+          AvailPollOption(
+              id: 'o1',
+              startAt: DateTime(2024, 1, 2, 19, 0).millisecondsSinceEpoch,
+              counts: const {'yes': 2, 'maybe': 0, 'no': 0},
+              myVote: 'yes'),
+          AvailPollOption(
+              id: 'o2',
+              startAt: DateTime(2024, 1, 3, 19, 0).millisecondsSinceEpoch,
+              counts: const {'yes': 0, 'maybe': 1, 'no': 1}),
+        ],
+      ),
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(
+        message: msg, isMine: false, onVoteAvail: (_, __) {})));
+    expect(find.text('Spieleabend'), findsOneWidget);
+    expect(find.text('Favorit'), findsOneWidget);
+    expect(find.text('✅'), findsWidgets); // yes-vote chips
+  });
 }
