@@ -207,10 +207,12 @@ class NotificationService {
 
   Future<void> requestPermission() async {
     if (defaultTargetPlatform == TargetPlatform.android) {
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
+      await _guard(() async {
+        await _plugin
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.requestNotificationsPermission();
+      });
     }
   }
 
@@ -268,7 +270,7 @@ class NotificationService {
     // Group message notifications per chat (replace previous); give each
     // announcement its own slot so they stack.
     final id = (target.chatId ?? target.route ?? body).hashCode & 0x7fffffff;
-    await _plugin.show(id, title, body, details, payload: target.encode());
+    await _guard(() => _plugin.show(id, title, body, details, payload: target.encode()));
   }
 
   /// True while the Quick Settings snooze tile has muted notifications. Reads
@@ -283,15 +285,25 @@ class NotificationService {
     }
   }
 
+  /// Runs a notification-plugin call defensively. The native
+  /// flutter_local_notifications layer can throw PlatformExceptions on some
+  /// devices/ROMs (seen in the wild: "Missing type parameter" out of cancel()).
+  /// A notification failing to show or clear is never worth crashing the app.
+  Future<void> _guard(Future<void> Function() op) async {
+    try {
+      await op();
+    } catch (_) {/* best-effort: notifications never crash the app */}
+  }
+
   Future<void> cancelForChat(String chatId) async {
     if (!_ready) return;
-    await _plugin.cancel(chatId.hashCode & 0x7fffffff);
+    await _guard(() => _plugin.cancel(chatId.hashCode & 0x7fffffff));
   }
 
   /// A quiet "new status" notification on the status channel.
   Future<void> showStatus({required String name}) async {
     if (!_ready) return;
-    await _plugin.show(
+    await _guard(() => _plugin.show(
       'status:$name'.hashCode & 0x7fffffff,
       name,
       'hat einen neuen Status geteilt',
@@ -305,7 +317,7 @@ class NotificationService {
         ),
       ),
       payload: const NotificationTarget(route: 'status').encode(),
-    );
+    ));
   }
 
   /// Show the full-screen incoming-call notification (rings the device even when
@@ -339,18 +351,18 @@ class NotificationService {
         ],
       ),
     );
-    await _plugin.show(
+    await _guard(() => _plugin.show(
       _callNotificationId,
       callerName,
       video ? 'Eingehender Videoanruf' : 'Eingehender Anruf',
       details,
       payload: 'call:$callId:$callerId:${video ? '1' : '0'}',
-    );
+    ));
   }
 
   Future<void> cancelIncomingCall() async {
     if (!_ready) return;
-    await _plugin.cancel(_callNotificationId);
+    await _guard(() => _plugin.cancel(_callNotificationId));
   }
 
   /// If the app was cold-launched by tapping/accepting an incoming-call
@@ -379,7 +391,7 @@ class NotificationService {
   /// A "missed call" entry after an unanswered/cancelled incoming call.
   Future<void> showMissedCall({required String name}) async {
     if (!_ready) return;
-    await _plugin.show(
+    await _guard(() => _plugin.show(
       'missed:$name${DateTime.now().millisecondsSinceEpoch ~/ 1000}'.hashCode &
           0x7fffffff,
       'Verpasster Anruf',
@@ -395,6 +407,6 @@ class NotificationService {
         ),
       ),
       payload: const NotificationTarget(route: 'calls').encode(),
-    );
+    ));
   }
 }

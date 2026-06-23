@@ -43,6 +43,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
 
+  // AppState captured once while mounted (in initState). Reading it via
+  // context.read() inside dispose()/teardown crashes with "Null check operator
+  // used on a null value" because the element is defunct by then — so we cache
+  // the reference here and reuse it on the teardown path.
+  late final AppState _appState;
+
   bool _loadingOlder = false;
   bool _hasMore = true;
   bool _isTyping = false;
@@ -86,13 +92,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final state = context.read<AppState>();
+    _appState = context.read<AppState>();
     // Capture the unread count before setActiveChat clears it — it anchors the
     // "neue Nachrichten" divider.
     _initialUnread = _chat?.unread ?? 0;
-    state.setActiveChat(widget.chatId);
+    _appState.setActiveChat(widget.chatId);
     // Restore an unsent draft into the composer.
-    final draft = state.draftFor(widget.chatId);
+    final draft = _appState.draftFor(widget.chatId);
     if (draft.isNotEmpty) _input.text = draft;
     _scroll.addListener(_onScroll);
     _loadInitial();
@@ -100,7 +106,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
-    final state = context.read<AppState>();
+    final state = _appState;
     if (lifecycle == AppLifecycleState.resumed) {
       state.setActiveChat(widget.chatId);
     } else if (lifecycle == AppLifecycleState.paused) {
@@ -174,7 +180,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _typingTimer?.cancel();
     if (_isTyping) {
       _isTyping = false;
-      context.read<AppState>().socket.setTyping(widget.chatId, false);
+      _appState.socket.setTyping(widget.chatId, false);
     }
   }
 
@@ -282,7 +288,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Chat? get _chat {
-    final chats = context.read<AppState>().chats;
+    final chats = _appState.chats;
     final i = chats.indexWhere((c) => c.id == widget.chatId);
     return i == -1 ? null : chats[i];
   }
@@ -295,7 +301,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _recordTicker?.cancel();
     _draftTimer?.cancel();
     _recorder.dispose();
-    final state = context.read<AppState>();
+    final state = _appState;
     // Keep whatever is left in the composer as the chat's draft.
     if (_editing == null) state.setDraft(widget.chatId, _input.text);
     state.setActiveChat(null);
