@@ -1,11 +1,11 @@
 name: ping
 description: "Ping – ein schneller, moderner Messenger."
 publish_to: 'none'
-# versionCode jumps to 5000 on purpose: it must clear the highest per-ABI split
-# code ever shipped (x86_64 = 4042) so devices stuck on an inflated split code can
-# finally upgrade in place. From here on every variant shares this one code (see
-# the AGP `splits` block + comment in android/app/build.gradle.kts).
-version: 0.36.1+5000
+# versionCode lives in the flat 5000+ range (since 0.36.1): it cleared the highest
+# per-ABI split code ever shipped (x86_64 = 4042) so devices stuck on an inflated
+# split code can upgrade in place, and every variant now shares one code (see the
+# AGP `splits` block + comment in android/app/build.gradle.kts). Just increment by 1.
+version: 0.36.2+5001
 
 environment:
   sdk: ^3.12.1

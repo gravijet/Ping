@@ -236,9 +236,17 @@ class UpdateService {
     }
   }
 
-  /// Open the downloaded APK at [path] so Android shows its package installer.
+  /// Install the downloaded APK at [path]. Prefers the native PackageInstaller
+  /// session (reliable handoff + real failure reason); falls back to letting the
+  /// OS open the file if the session can't be created.
   Future<bool> install(String path) async {
     if (!supported) return false;
+    try {
+      final ok = await _native.invokeMethod<bool>('apkInstallPath', {'path': path});
+      if (ok == true) return true;
+    } catch (_) {
+      /* fall through to the OS open below */
+    }
     try {
       final result = await OpenFilex.open(
         path,
@@ -247,6 +255,19 @@ class UpdateService {
       return result.type == ResultType.done;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// The reason the most recent install attempt failed (e.g. blocked by Samsung
+  /// Auto Blocker / Play Protect, a signature conflict, or low storage), or null
+  /// if none is pending. Reading it clears it on the native side.
+  Future<String?> installError() async {
+    if (!supported) return null;
+    try {
+      final msg = await _native.invokeMethod<String>('installError');
+      return (msg != null && msg.isNotEmpty) ? msg : null;
+    } catch (_) {
+      return null;
     }
   }
 

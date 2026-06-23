@@ -40,6 +40,8 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   int? _dlId; // active/finished background-download id (install handle)
   String? _cachedPath; // legacy in-process download path (install handle)
   Timer? _poll;
+  Timer? _installPoll; // watches for the installer's real failure reason
+  String? _failReason; // actual install failure reason, when the OS reported one
   List<Map<String, dynamic>> _changelog = const [];
 
   @override
@@ -51,6 +53,7 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   @override
   void dispose() {
     _poll?.cancel();
+    _installPoll?.cancel();
     super.dispose();
   }
 
@@ -228,7 +231,15 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   Future<void> _install() async {
     final updater = _updater;
     if (updater == null) return;
-    if (mounted) setState(() => _phase = _Phase.installing);
+    if (mounted) {
+      setState(() {
+        _failReason = null;
+        _phase = _Phase.installing;
+      });
+    }
+    // Clear any stale reason from a previous attempt so the poll below only sees
+    // a fresh failure.
+    await updater.installError();
     bool ok;
     if (_dlId != null) {
       ok = await updater.installBackground(_dlId!);
@@ -240,12 +251,43 @@ class _UpdateSheetState extends State<_UpdateSheet> {
     if (!mounted) return;
     if (!ok) {
       unawaited(updater.reportEvent(_baseUrl, 'update_failed'));
-      setState(() => _phase = _Phase.error);
-    } else {
-      unawaited(updater.reportEvent(_baseUrl, 'update_install_launched'));
-      // The system installer is now in front; close the sheet.
-      Navigator.of(context).maybePop();
+      setState(() {
+        _failReason = null;
+        _phase = _Phase.error;
+      });
+      return;
     }
+    unawaited(updater.reportEvent(_baseUrl, 'update_install_launched'));
+    // The system's confirm dialog is now in front. Watch for a failure the
+    // installer reports back (e.g. blocked by Samsung Auto Blocker); a success
+    // replaces our process, so this poll simply dies with it.
+    _watchInstallResult();
+  }
+
+  void _watchInstallResult() {
+    _installPoll?.cancel();
+    var ticks = 0;
+    _installPoll = Timer.periodic(const Duration(milliseconds: 1200), (t) async {
+      ticks++;
+      final reason = await _updater?.installError();
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (reason != null) {
+        t.cancel();
+        unawaited(_updater?.reportEvent(_baseUrl, 'update_failed'));
+        setState(() {
+          _failReason = reason;
+          _phase = _Phase.error;
+        });
+      } else if (ticks >= 75) {
+        // ~90s with nothing reported: it quietly succeeded or the user is still
+        // deciding. Step out of the way.
+        t.cancel();
+        if (mounted) Navigator.of(context).maybePop();
+      }
+    });
   }
 
   @override
@@ -405,8 +447,9 @@ class _UpdateSheetState extends State<_UpdateSheet> {
                   color: scheme.error)),
           const SizedBox(height: 8),
           Text(
-            'Der Download oder die Installation hat nicht geklappt. '
-            'Prüfe deine Internetverbindung und versuche es erneut.',
+            _failReason ??
+                'Der Download oder die Installation hat nicht geklappt. '
+                    'Prüfe deine Internetverbindung und versuche es erneut.',
             textAlign: TextAlign.center,
             style: TextStyle(color: scheme.onSurfaceVariant),
           ),
@@ -414,9 +457,10 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           _infoBox(
             scheme,
             Icons.info_outline_rounded,
-            'Meldet Android „App nicht installiert"? Deinstalliere die alte '
-            'Version einmalig und installiere die neue danach – künftige Updates '
-            'laufen dann automatisch.',
+            'Bleibt es hängen? Bei Samsung kann „Auto Blocker" (Einstellungen → '
+            'Sicherheit) die Installation verhindern – kurz ausschalten. Sonst hilft, '
+            'die alte Version einmalig zu deinstallieren und neu zu installieren; '
+            'künftige Updates laufen dann automatisch.',
           ),
           const SizedBox(height: 18),
           Row(

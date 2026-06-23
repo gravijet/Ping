@@ -57,6 +57,8 @@ class UpdateService {
 
   Future<bool> installBackground(int id) async => false;
 
+  Future<String?> installError() async => null;
+
   Future<void> cancelBackground(int id) async {}
 
   Future<void> clearPending() async {}

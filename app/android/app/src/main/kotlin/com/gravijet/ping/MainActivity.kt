@@ -2,11 +2,15 @@ package com.gravijet.ping
 
 import android.app.ActivityManager
 import android.app.DownloadManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageInstaller
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
+import android.widget.Toast
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -27,6 +31,9 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
+// Internal broadcast action our PackageInstaller sessions report their status to.
+private const val INSTALL_STATUS_ACTION = "com.gravijet.ping.INSTALL_STATUS"
+
 class MainActivity : FlutterActivity() {
     // Kept so a notification/shortcut intent that arrives while the app is
     // already running can be pushed straight to Dart (see onNewIntent).
@@ -35,6 +42,14 @@ class MainActivity : FlutterActivity() {
     // A deep-link route ("chat:<id>" / "route:<name>") captured from the launch
     // intent, consumed by Dart on startup via "consumeLaunchRoute".
     private var pendingRoute: String? = null
+
+    // The human-readable reason the last in-app update install failed (set by the
+    // PackageInstaller status receiver), polled + cleared by Dart via "installError".
+    private var lastInstallError: String? = null
+
+    // Receiver for PackageInstaller session status callbacks. Registered lazily on
+    // the first install attempt, torn down in onDestroy.
+    private var installReceiver: BroadcastReceiver? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -66,10 +81,17 @@ class MainActivity : FlutterActivity() {
                         cancelApkDownload(call)
                         result.success(null)
                     }
-                    // Hand a finished download to the system package installer using
-                    // a grantable content:// URI (robust where a raw file path is
-                    // refused on newer Android).
+                    // Hand a finished download to the system package installer via
+                    // the PackageInstaller session API (far more reliable than an
+                    // ACTION_VIEW handoff on OEM ROMs, and it reports the real
+                    // failure reason). "apkInstall" installs a finished
+                    // DownloadManager download by id; "apkInstallPath" installs a
+                    // file the in-process downloader produced.
                     "apkInstall" -> result.success(installApk(call))
+                    "apkInstallPath" -> result.success(installApkPath(call))
+                    // Poll + clear the reason the last install failed (e.g. blocked
+                    // by Samsung Auto Blocker / Play Protect), so Dart can show it.
+                    "installError" -> result.success(consumeInstallError())
                     // --- Device intelligence: read-only hardware/OS diagnostics ---
                     // None of these need a runtime permission; each is wrapped so a
                     // vendor quirk degrades to a partial/empty map rather than a
@@ -308,14 +330,74 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Launch the system package installer for a finished download. Uses the
-     * grantable content:// URI DownloadManager hands out, with a read grant so
-     * the installer can read it on Android N+.
+     * Install a finished DownloadManager download (by id) via the PackageInstaller
+     * session API, falling back to the legacy ACTION_VIEW handoff if the session
+     * can't be created. Returns true once the install has been handed off.
      */
     private fun installApk(call: MethodCall): Boolean {
         val id = (call.argument<Number>("id"))?.toLong() ?: return false
+        val uri: Uri = try {
+            downloadManager().getUriForDownloadedFile(id)
+        } catch (_: Exception) {
+            null
+        } ?: return false
+        lastInstallError = null
+        if (installViaSession { contentResolver.openInputStream(uri) }) return true
+        // Last resort on a device where the session API misbehaves.
+        return installApkViaView(uri)
+    }
+
+    /**
+     * Install an APK the in-process downloader wrote to [path] via the
+     * PackageInstaller session API. Returns false (so Dart can fall back to
+     * opening the file itself) if the session can't be created.
+     */
+    private fun installApkPath(call: MethodCall): Boolean {
+        val path = call.argument<String>("path") ?: return false
+        val file = File(path)
+        if (!file.exists()) return false
+        lastInstallError = null
+        return installViaSession { file.inputStream() }
+    }
+
+    /**
+     * Stream an APK (from [openInput]) into a PackageInstaller session and commit
+     * it. The system then asks the user to confirm (our [installReceiver] forwards
+     * that prompt) and, on failure, reports the *actual* reason — unlike the
+     * generic "App nicht installiert" the old ACTION_VIEW path left users with.
+     */
+    private fun installViaSession(openInput: () -> java.io.InputStream?): Boolean {
         return try {
-            val uri: Uri = downloadManager().getUriForDownloadedFile(id) ?: return false
+            ensureInstallReceiver()
+            val installer = packageManager.packageInstaller
+            val params =
+                PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            val sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("ping-update", 0, -1).use { out ->
+                    val input = openInput() ?: throw IllegalStateException("no apk stream")
+                    input.use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                val statusIntent = Intent(INSTALL_STATUS_ACTION).setPackage(packageName)
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        PendingIntent.FLAG_MUTABLE
+                    } else {
+                        0
+                    }
+                val pi = PendingIntent.getBroadcast(this, sessionId, statusIntent, flags)
+                session.commit(pi.intentSender)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** The legacy view-intent install, kept only as a fallback. */
+    private fun installApkViaView(uri: Uri): Boolean {
+        return try {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -325,6 +407,101 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             false
         }
+    }
+
+    /** Register the PackageInstaller status receiver once (idempotent). */
+    private fun ensureInstallReceiver() {
+        if (installReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val status = intent.getIntExtra(
+                    PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE
+                )
+                when (status) {
+                    PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                        // The normal case: the system needs the user to confirm the
+                        // install. Launch the confirmation activity it handed back.
+                        val confirm = installConfirmIntent(intent)
+                        if (confirm != null) {
+                            confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            try {
+                                startActivity(confirm)
+                            } catch (_: Exception) {
+                                /* nothing else we can do */
+                            }
+                        }
+                    }
+                    PackageInstaller.STATUS_SUCCESS -> lastInstallError = null
+                    else -> {
+                        val reason = humanInstallReason(
+                            status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+                        )
+                        lastInstallError = reason
+                        runOnUiThread {
+                            try {
+                                Toast.makeText(this@MainActivity, reason, Toast.LENGTH_LONG).show()
+                            } catch (_: Exception) {
+                                /* best effort */
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        installReceiver = receiver
+        val filter = IntentFilter(INSTALL_STATUS_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, filter)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun installConfirmIntent(intent: Intent): Intent? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+        } else {
+            intent.getParcelableExtra(Intent.EXTRA_INTENT)
+        }
+
+    /** Map a PackageInstaller failure status to actionable German guidance. */
+    private fun humanInstallReason(status: Int, msg: String?): String = when (status) {
+        PackageInstaller.STATUS_FAILURE_ABORTED -> "Installation abgebrochen."
+        PackageInstaller.STATUS_FAILURE_BLOCKED ->
+            "Die Installation wurde von einer Sicherheitsfunktion blockiert " +
+                "(z. B. Samsung „Auto Blocker\" oder Play Protect). Schalte sie kurz " +
+                "aus und versuche es erneut."
+        PackageInstaller.STATUS_FAILURE_CONFLICT ->
+            "Konflikt mit der installierten Version. Deinstalliere die alte " +
+                "Ping-Version einmal und installiere danach neu."
+        PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
+            "Diese Version passt nicht zu deinem Gerät."
+        PackageInstaller.STATUS_FAILURE_INVALID ->
+            "Die Update-Datei ist beschädigt. Lade das Update erneut herunter."
+        PackageInstaller.STATUS_FAILURE_STORAGE ->
+            "Zu wenig Speicherplatz für das Update. Gib etwas Speicher frei und " +
+                "versuche es erneut."
+        else -> msg?.takeIf { it.isNotBlank() } ?: "Installation fehlgeschlagen."
+    }
+
+    private fun consumeInstallError(): String? {
+        val e = lastInstallError
+        lastInstallError = null
+        return e
+    }
+
+    override fun onDestroy() {
+        installReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {
+                /* already gone */
+            }
+        }
+        installReceiver = null
+        super.onDestroy()
     }
 
     // ---- Device intelligence -------------------------------------------------
