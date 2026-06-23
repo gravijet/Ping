@@ -40,6 +40,12 @@ import { renderCode } from './code.js';
 import { threadChip, openThread } from './threads.js';
 import { playEffect, effectMenu, startDictation, dictationSupported,
   openReactionDetails } from './feinschliff.js';
+// 0.38.0 "Universum": ten new structured/media types + gift.
+import {
+  renderWhiteboard, renderDoc, renderPlaylist, renderRecipe, renderFlashcards,
+  renderForm, renderBookmark, renderPlace, renderVideoNote, renderWatchParty,
+  renderGift, universumAttachEntries,
+} from './universum.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
 // 0.37.0 "Feinschliff": send-effects already played (dedup so a re-render of the
@@ -406,6 +412,30 @@ function renderMessage(m, chat, first) {
     bubble.appendChild(renderExpense(m));
   } else if (m.type === 'availpoll') {
     bubble.appendChild(renderAvailPoll(m));
+  } else if (m.type === 'whiteboard') {
+    bubble.appendChild(renderWhiteboard(m));
+  } else if (m.type === 'doc') {
+    bubble.appendChild(renderDoc(m));
+  } else if (m.type === 'playlist') {
+    bubble.appendChild(renderPlaylist(m));
+  } else if (m.type === 'recipe') {
+    bubble.appendChild(renderRecipe(m));
+  } else if (m.type === 'flashcards') {
+    bubble.appendChild(renderFlashcards(m));
+  } else if (m.type === 'form') {
+    bubble.appendChild(renderForm(m));
+  } else if (m.type === 'bookmark') {
+    bubble.appendChild(renderBookmark(m));
+  } else if (m.type === 'place') {
+    bubble.appendChild(renderPlace(m));
+  } else if (m.type === 'videonote') {
+    bubble.appendChild(renderVideoNote(m));
+    bubble.classList.add('sticker-bubble');
+  } else if (m.type === 'watchparty') {
+    bubble.appendChild(renderWatchParty(m));
+  } else if (m.type === 'gift') {
+    bubble.appendChild(renderGift(m));
+    bubble.classList.add('sticker-bubble');
   } else if (m.viewOnce) {
     bubble.appendChild(renderViewOnce(m, mine));
   } else if (m.enc) {
@@ -1015,6 +1045,9 @@ function attachMenu(e) {
     flag('boards') ? { label: 'Board', icon: 'tasks', onClick: () => import('./boards.js').then((m) => m.newBoardModal(cur.chatId)) } : null,
     flag('miniGames') ? { label: 'Spiel', icon: 'poll', onClick: () => import('./games.js').then((m) => m.newGameModal(cur.chatId)) } : null,
     flag('scheduledCalls') ? { label: 'Anruf planen', icon: 'phone', onClick: () => import('./scheduledcalls.js').then((m) => m.scheduleCallModal(cur.chatId)) } : null,
+    // 0.38.0 "Universum": whiteboard / doc / playlist / recipe / flashcards /
+    // form / bookmark / places / watch party / gift.
+    ...universumAttachEntries(cur.chatId, flag),
     { label: 'Geplante Nachricht', icon: 'schedule', onClick: () => scheduleModal() },
   ].filter(Boolean));
 }

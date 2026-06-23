@@ -88,6 +88,46 @@ export const DEFAULTS = {
   voiceDictation: true,     // on-device speech-to-text in the composer
   reactionDetails: true,    // "who reacted" detail sheet on a reaction
   anniversaries: true,      // birthday / anniversary hints for contacts
+  // ══ „Universum" (0.38.0) — Mega-Release ═════════════════════════════════
+  // A — new structured message types
+  whiteboard: true,       // collaborative drawing canvas (type='whiteboard')
+  collabDocs: true,       // shared collaborative mini-document (type='doc')
+  playlists: true,        // shared playlist / "Listen Together" (type='playlist')
+  recipes: true,          // structured recipe card (type='recipe')
+  flashcards: true,       // study deck with quiz/review (type='flashcards')
+  forms: true,            // multi-question form / survey (type='form')
+  bookmarks: true,        // link collection / read-later card (type='bookmark')
+  places: true,           // pinned-places map collection (type='place')
+  videoNotes: true,       // round short video notes (type='videonote')
+  watchParty: true,       // synced video watch-together (type='watchparty')
+  // B — real-time & calls
+  voiceRooms: true,       // persistent group audio rooms ("Räume")
+  screenShare: true,      // screen sharing in calls
+  callReactions: true,    // floating emoji reactions during calls
+  // C — communities & groups 2.0
+  communityHubs: true,    // parent communities grouping sub-chats + announcements
+  groupRoles: true,       // richer roles / permissions in groups
+  inviteLinks: true,      // shareable invite links with expiry + usage limits
+  slowMode: true,         // slow mode + join-approval queue
+  // D — local intelligence (on-device / self-hosted, no egress)
+  assistantBot: true,     // @ping assistant (local Ollama or heuristic)
+  smartCompose: true,     // composer sentence completion (on-device)
+  chatSummary: true,      // improved extractive catch-up summary
+  imageOcr: true,         // on-device OCR / alt-text for images
+  spamGuard: true,        // heuristic scam/spam warning badge
+  // E — social & fun
+  achievements: true,     // achievements / badges + per-chat streaks
+  profileShowcase: true,  // rich profile showcase (bio links, badges, pinned)
+  virtualGifts: true,     // animated virtual gifts (type='gift')
+  superReactions: true,   // large / animated reactions
+  // F — productivity
+  calendarView: true,     // unified agenda combining events/reminders/tasks/...
+  habits: true,           // shared habit / streak tracker
+  shoppingList: true,     // shared live shopping list
+  // G — data & account
+  accountBackup: true,    // encrypted account backup / restore
+  multiAccount: true,     // account switcher (multiple sessions)
+  panicMode: true,        // SOS / panic quick-lock
 };
 
 function localOverrides() {

@@ -291,4 +291,27 @@ void main() {
     expect(find.text('Favorit'), findsOneWidget);
     expect(find.text('✅'), findsWidgets); // yes-vote chips
   });
+
+  // 0.38.0 "Universum": the new web/desktop-first structured types render a
+  // graceful fallback card on Android instead of a blank bubble.
+  testWidgets('whiteboard bubble shows the open-in-web fallback card',
+      (tester) async {
+    final msg = Message(
+      id: 'wb1', chatId: 'c1', senderId: 'u1', type: 'whiteboard', body: '',
+      createdAt: DateTime(2024, 1, 1, 9, 0).millisecondsSinceEpoch,
+    );
+    await tester.pumpWidget(_wrap(MessageBubble(message: msg, isMine: false)));
+    expect(find.text('🎨 Whiteboard'), findsOneWidget);
+    expect(find.text('In der Web- oder Desktop-App öffnen'), findsOneWidget);
+  });
+
+  test('new structured types carry an emoji chat-list preview', () {
+    Message m(String type) => Message(
+        id: 'x', chatId: 'c', senderId: 'u', type: type, body: '',
+        createdAt: 0);
+    expect(m('recipe').preview, '🍳 Rezept');
+    expect(m('playlist').preview, '🎵 Playlist');
+    expect(m('gift').preview, '🎁 Geschenk');
+    expect(m('watchparty').preview, '🍿 Kinoabend');
+  });
 }

@@ -200,6 +200,18 @@ const msgs = [
   // 0.36.0 "Zusammen" structured-message types.
   { id: 'm15', chatId: 'c1', senderId: 'me', type: 'expense', expense: { id: 'ex1', title: 'Pizza', amountCents: 2400, currency: 'EUR', kind: 'expense', payerId: 'me', payerName: 'Ich', creatorId: 'me', iPaid: true, myShare: 1200, shares: [{ userId: 'me', name: 'Ich', shareCents: 1200 }, { userId: 'u2', name: 'Anna', shareCents: 1200 }] }, createdAt: Date.now() - 150, status: 'read' },
   { id: 'm16', chatId: 'c1', senderId: 'u2', type: 'availpoll', availpoll: { id: 'ap1', title: 'Brettspielabend', location: 'bei Anna', closed: false, creatorId: 'me', chosenOptionId: null, bestOptionId: 'o1', options: [{ id: 'o1', startAt: Date.now() + 86400_000, counts: { yes: 2, maybe: 0, no: 0 }, myVote: 'yes', yesNames: ['Anna'] }, { id: 'o2', startAt: Date.now() + 172800_000, counts: { yes: 0, maybe: 1, no: 1 }, myVote: null, yesNames: [] }] }, createdAt: Date.now() - 100 },
+  // 0.38.0 "Universum" structured/media types.
+  { id: 'm17', chatId: 'c1', senderId: 'u2', type: 'whiteboard', whiteboard: { id: 'wb1', title: 'Skizze', creatorId: 'u2', strokes: [{ color: '#e23', width: 3, points: [[10, 10], [40, 40], [80, 20]] }], updatedAt: Date.now() }, createdAt: Date.now() - 95 },
+  { id: 'm18', chatId: 'c1', senderId: 'me', type: 'doc', doc: { id: 'd1', title: 'Protokoll', body: 'Zeile 1\nZeile 2', version: 2, creatorId: 'me', updatedBy: 'me', updatedAt: Date.now() }, createdAt: Date.now() - 90, status: 'read' },
+  { id: 'm19', chatId: 'c1', senderId: 'u2', type: 'playlist', playlist: { id: 'p1', title: 'Roadtrip', creatorId: 'u2', tracks: [{ id: 't1', title: 'Song A', artist: 'X', url: 'https://x' }, { id: 't2', title: 'Song B', artist: '', url: '' }] }, createdAt: Date.now() - 85 },
+  { id: 'm20', chatId: 'c1', senderId: 'me', type: 'recipe', recipe: { id: 'r1', title: 'Pasta', servings: 2, minutes: 20, ingredients: ['Nudeln', 'Soße'], steps: ['Kochen', 'Mischen'], creatorId: 'me' }, createdAt: Date.now() - 80, status: 'read' },
+  { id: 'm21', chatId: 'c1', senderId: 'u2', type: 'flashcards', flashcards: { id: 'fc1', title: 'Vokabeln', creatorId: 'u2', cards: [{ id: 'c1', front: 'Hund', back: 'dog' }, { id: 'c2', front: 'Katze', back: 'cat' }] }, createdAt: Date.now() - 75 },
+  { id: 'm22', chatId: 'c1', senderId: 'me', type: 'form', form: { id: 'f1', title: 'Umfrage', creatorId: 'me', anonymous: false, closed: false, responseCount: 1, questions: [{ q: 'Farbe?', type: 'choice', options: ['Rot', 'Blau'] }, { q: 'Note?', type: 'rating' }], results: [{ tally: { Rot: 1, Blau: 0 } }, { avg: 4, n: 1 }], myAnswers: null }, createdAt: Date.now() - 70, status: 'read' },
+  { id: 'm23', chatId: 'c1', senderId: 'u2', type: 'bookmark', bookmark: { id: 'bm1', title: 'Lesen', creatorId: 'u2', links: [{ id: 'l1', url: 'https://a.com', title: 'A', note: 'gut' }] }, createdAt: Date.now() - 65 },
+  { id: 'm24', chatId: 'c1', senderId: 'me', type: 'place', place: { id: 'pl1', title: 'Treffpunkte', creatorId: 'me', pins: [{ id: 'pin1', name: 'Park', lat: 48.2, lng: 16.3, note: '' }] }, createdAt: Date.now() - 60, status: 'read' },
+  { id: 'm25', chatId: 'c1', senderId: 'u2', type: 'videonote', round: true, attachment: { kind: 'video', url: '/api/uploads/vn1', mime: 'video/mp4' }, createdAt: Date.now() - 55 },
+  { id: 'm26', chatId: 'c1', senderId: 'me', type: 'watchparty', watchparty: { id: 'wp1', title: 'Film', url: 'https://video', positionMs: 0, playing: false, creatorId: 'me', updatedAt: Date.now() }, createdAt: Date.now() - 50, status: 'read' },
+  { id: 'm27', chatId: 'c1', senderId: 'u2', type: 'gift', gift: { id: 'g1', kind: 'cake', note: 'Alles Gute!', senderId: 'u2' }, effect: 'confetti', createdAt: Date.now() - 45 },
 ];
 
 function jsonRes(data) {
@@ -451,6 +463,30 @@ await step('0.34.0 create modals: board/game/scheduled-call', async () => {
   (await imp('boards.js')).newBoardModal('c1'); await tick();
   (await imp('games.js')).newGameModal('c1'); await tick();
   (await imp('scheduledcalls.js')).scheduleCallModal('c1'); await tick();
+});
+await step('0.38.0 Universum: render all ten new structured/media cards', async () => {
+  const u = await imp('universum.js');
+  if (!u.renderWhiteboard(msgs[16]).querySelector('.wb-preview')) throw new Error('whiteboard card missing canvas');
+  if (!u.renderDoc(msgs[17]).querySelector('.doc-preview')) throw new Error('doc card missing preview');
+  if (!u.renderPlaylist(msgs[18]).querySelector('.pl-tracks')) throw new Error('playlist card missing track list');
+  if (!u.renderRecipe(msgs[19]).querySelector('.recipe-list')) throw new Error('recipe card missing lists');
+  if (!u.renderFlashcards(msgs[20]).querySelector('.flashcard')) throw new Error('flashcards card missing card face');
+  if (!u.renderForm(msgs[21]).querySelector('.form-q')) throw new Error('form card missing questions');
+  if (!u.renderBookmark(msgs[22]).querySelector('.bm-list')) throw new Error('bookmark card missing links');
+  if (!u.renderPlace(msgs[23]).querySelector('.place-list')) throw new Error('place card missing pins');
+  if (!u.renderVideoNote(msgs[24]).querySelector('.videonote-vid')) throw new Error('videonote missing video');
+  if (!u.renderWatchParty(msgs[25]).querySelector('.watch-link')) throw new Error('watch party missing link');
+  if (!u.renderGift(msgs[26]).querySelector('.gift-emoji')) throw new Error('gift card missing emoji');
+});
+await step('0.38.0 Universum: every create modal opens', async () => {
+  const u = await imp('universum.js');
+  for (const fn of ['newWhiteboardModal', 'newDocModal', 'newPlaylistModal', 'newRecipeModal', 'newFlashcardsModal', 'newFormModal', 'newBookmarkModal', 'newPlaceModal', 'newWatchPartyModal', 'sendGiftModal']) {
+    u[fn]('c1'); await tick();
+  }
+  // Achievements + calendar panes render against the mocked endpoints.
+  const head = new El('div'), body = new El('div');
+  await (await imp('achievements.js')).renderAchievementsPane(head, body); await tick();
+  await (await imp('calendar.js')).renderCalendarPane(new El('div'), new El('div'), () => {}); await tick();
 });
 await step('0.34.0 pickers/panels: stickers, GIFs, notes, mediahub, chat-optik, catchup, webhooks, chatlock, e2ee', async () => {
   await (await imp('stickers.js')).openStickerPicker('c1'); await tick();

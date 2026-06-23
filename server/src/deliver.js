@@ -56,6 +56,28 @@ function previewOf(msg) {
       return '💶 Ausgabe';
     case 'availpoll':
       return '🗓️ Terminfindung';
+    case 'whiteboard':
+      return '🎨 Whiteboard';
+    case 'doc':
+      return '📄 Dokument';
+    case 'playlist':
+      return '🎵 Playlist';
+    case 'recipe':
+      return '🍳 Rezept';
+    case 'flashcards':
+      return '🃏 Lernkarten';
+    case 'form':
+      return '📝 Formular';
+    case 'bookmark':
+      return '🔖 Lesezeichen';
+    case 'place':
+      return '🗺️ Orte';
+    case 'videonote':
+      return '⭕ Videonotiz';
+    case 'watchparty':
+      return '🍿 Kinoabend';
+    case 'gift':
+      return '🎁 Geschenk';
     default:
       return msg.body || 'Nachricht';
   }

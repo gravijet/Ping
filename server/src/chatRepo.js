@@ -10,6 +10,17 @@ import { contactCardView } from './contactCardRepo.js';
 import { codeView } from './codeRepo.js';
 import { expenseView } from './expenseRepo.js';
 import { availPollView } from './availPollRepo.js';
+// 0.38.0 "Universum": ten new structured/media types ride along in messageView.
+import { whiteboardView } from './whiteboardRepo.js';
+import { docView } from './docsRepo.js';
+import { playlistView } from './playlistRepo.js';
+import { recipeView } from './recipeRepo.js';
+import { deckView } from './flashcardsRepo.js';
+import { formView } from './formsRepo.js';
+import { bookmarkView } from './bookmarksRepo.js';
+import { placeView } from './placesRepo.js';
+import { watchPartyView } from './watchPartyRepo.js';
+import { giftView } from './giftRepo.js';
 
 const s = {
   insertChat: db.prepare(`
@@ -563,6 +574,13 @@ export function purgeExpiredMessages() {
 
 export const getMessage = (id) => m.byId.get(id);
 
+// 0.38.0 "Universum": flag a freshly-created message as a round video note. Kept
+// separate from createMessage's fixed insert column list (round defaults to 0).
+const setRoundStmt = db.prepare('UPDATE messages SET round = 1 WHERE id = ?');
+export function markVideoNote(messageId) {
+  setRoundStmt.run(messageId);
+}
+
 // 0.34.0 "Alles": open a view-once message. The first eligible viewer (a
 // recipient, not the sender) gets the attachment exactly once; we stamp viewed_at
 // so messageView withholds it from everyone afterwards. Returns the attachment for
@@ -778,6 +796,18 @@ const TYPE_ALIASES = {
   // 0.36.0 "Zusammen"
   expense: 'expense', ausgabe: 'expense', kasse: 'expense', kosten: 'expense',
   availpoll: 'availpoll', terminfindung: 'availpoll', verfuegbarkeit: 'availpoll',
+  // 0.38.0 "Universum"
+  whiteboard: 'whiteboard', tafel: 'whiteboard', zeichnung: 'whiteboard',
+  doc: 'doc', dokument2: 'doc', notizdoc: 'doc',
+  playlist: 'playlist', wiedergabeliste: 'playlist', musik: 'playlist',
+  recipe: 'recipe', rezept: 'recipe',
+  flashcards: 'flashcards', lernkarten: 'flashcards', karteikarten: 'flashcards',
+  form: 'form', formular: 'form', umfrage2: 'form',
+  bookmark: 'bookmark', lesezeichen: 'bookmark', links: 'bookmark',
+  place: 'place', orte: 'place', karte: 'place',
+  videonote: 'videonote', videonotiz: 'videonote',
+  watchparty: 'watchparty', kinoabend: 'watchparty',
+  gift: 'gift', geschenk: 'gift',
 };
 
 // Parse a YYYY-MM-DD (local) day into its start-of-day epoch ms, or null.
@@ -1135,6 +1165,19 @@ export function messageView(msg, viewerId) {
     expense: msg.type === 'expense' && !msg.deleted_at ? expenseView(msg.id, viewerId) : null,
     availpoll:
       msg.type === 'availpoll' && !msg.deleted_at ? availPollView(msg.id, viewerId) : null,
+    // 0.38.0 "Universum": ten new structured/media payloads.
+    whiteboard: msg.type === 'whiteboard' && !msg.deleted_at ? whiteboardView(msg.id) : null,
+    doc: msg.type === 'doc' && !msg.deleted_at ? docView(msg.id) : null,
+    playlist: msg.type === 'playlist' && !msg.deleted_at ? playlistView(msg.id) : null,
+    recipe: msg.type === 'recipe' && !msg.deleted_at ? recipeView(msg.id) : null,
+    flashcards: msg.type === 'flashcards' && !msg.deleted_at ? deckView(msg.id) : null,
+    form: msg.type === 'form' && !msg.deleted_at ? formView(msg.id, viewerId) : null,
+    bookmark: msg.type === 'bookmark' && !msg.deleted_at ? bookmarkView(msg.id) : null,
+    place: msg.type === 'place' && !msg.deleted_at ? placeView(msg.id) : null,
+    watchparty: msg.type === 'watchparty' && !msg.deleted_at ? watchPartyView(msg.id) : null,
+    gift: msg.type === 'gift' && !msg.deleted_at ? giftView(msg.id) : null,
+    // 0.38.0: round-video-note flag (a 'videonote' is a 'video' attachment drawn round).
+    round: !!msg.round,
     // 0.34.0: thread metadata, view-once + E2EE flags.
     threadRoot: msg.thread_root || null,
     threadCount: msg.thread_count || 0,

@@ -943,6 +943,257 @@ db.exec(`
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_login_approvals_user ON login_approvals(user_id, status);
+
+  -- ════════════════════════════════════════════════════════════════════════
+  -- „Universum" (0.38.0) — Mega-Release side-tables
+  -- ════════════════════════════════════════════════════════════════════════
+
+  -- Pillar A — structured message types (each backed by a normal message whose
+  -- payload lives here and rides along in messageView). The messages.type CHECK
+  -- is widened to admit them by migrateMessageTypes038() (FTS-aware) below.
+
+  -- Whiteboard (type='whiteboard'): a collaborative drawing canvas. Strokes are a
+  -- JSON array; new strokes append live over the socket ('whiteboard-stroke').
+  CREATE TABLE IF NOT EXISTS whiteboards (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    strokes     TEXT NOT NULL DEFAULT '[]',
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+
+  -- Collaborative doc (type='doc'): a shared mini-document. Last-write-wins with a
+  -- monotonic version; edits broadcast 'message-updated'.
+  CREATE TABLE IF NOT EXISTS docs (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    body        TEXT NOT NULL DEFAULT '',
+    version     INTEGER NOT NULL DEFAULT 1,
+    updated_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+
+  -- Shared playlist (type='playlist'): "Listen Together". Tracks are external
+  -- links or upload refs; anyone in the chat can append.
+  CREATE TABLE IF NOT EXISTS playlists (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS playlist_tracks (
+    id          TEXT PRIMARY KEY,
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    artist      TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    added_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_playlist_tracks_list ON playlist_tracks(playlist_id, sort);
+
+  -- Recipe card (type='recipe'): ingredients + steps as JSON arrays of strings.
+  CREATE TABLE IF NOT EXISTS recipes (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    servings    INTEGER NOT NULL DEFAULT 0,
+    minutes     INTEGER NOT NULL DEFAULT 0,
+    ingredients TEXT NOT NULL DEFAULT '[]',
+    steps       TEXT NOT NULL DEFAULT '[]',
+    created_at  INTEGER NOT NULL
+  );
+
+  -- Flashcard deck (type='flashcards'): a study deck with quiz/review modes.
+  CREATE TABLE IF NOT EXISTS decks (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS deck_cards (
+    id          TEXT PRIMARY KEY,
+    deck_id     TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+    front       TEXT NOT NULL,
+    back        TEXT NOT NULL,
+    sort        INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_deck_cards_deck ON deck_cards(deck_id, sort);
+
+  -- Form / survey (type='form'): multi-question (text|choice|rating). One response
+  -- row per (form, user); answers is a JSON array aligned to questions.
+  CREATE TABLE IF NOT EXISTS forms (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    questions   TEXT NOT NULL,
+    anonymous   INTEGER NOT NULL DEFAULT 0,
+    closed      INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS form_responses (
+    form_id     TEXT NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    answers     TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    PRIMARY KEY (form_id, user_id)
+  );
+
+  -- Bookmark / link collection (type='bookmark'): a read-later card of links.
+  CREATE TABLE IF NOT EXISTS bookmarks (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS bookmark_links (
+    id          TEXT PRIMARY KEY,
+    bookmark_id TEXT NOT NULL REFERENCES bookmarks(id) ON DELETE CASCADE,
+    url         TEXT NOT NULL,
+    title       TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    added_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    sort        INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_bookmark_links_b ON bookmark_links(bookmark_id, sort);
+
+  -- Pinned places (type='place'): a small map collection of named lat/lng pins.
+  CREATE TABLE IF NOT EXISTS places (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS place_pins (
+    id          TEXT PRIMARY KEY,
+    place_id    TEXT NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    lat         REAL NOT NULL,
+    lng         REAL NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    sort        INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_place_pins_place ON place_pins(place_id, sort);
+
+  -- Watch party (type='watchparty'): synced video playback. position_ms/playing
+  -- are pushed live ('watchparty-sync'); the row is the resumable source of truth.
+  CREATE TABLE IF NOT EXISTS watch_parties (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL,
+    position_ms INTEGER NOT NULL DEFAULT 0,
+    playing     INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL
+  );
+
+  -- Virtual gift (type='gift', Pillar E): an animated gift sent into a chat.
+  CREATE TABLE IF NOT EXISTS gifts (
+    id          TEXT PRIMARY KEY,
+    message_id  TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    sender_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL
+  );
+
+  -- Pillar B — voice rooms (persistent group audio rooms, ride on the mesh).
+  CREATE TABLE IF NOT EXISTS voice_rooms (
+    id          TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL DEFAULT '',
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  INTEGER NOT NULL,
+    ended_at    INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_voice_rooms_chat ON voice_rooms(chat_id, active);
+  CREATE TABLE IF NOT EXISTS voice_room_members (
+    room_id     TEXT NOT NULL REFERENCES voice_rooms(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL DEFAULT 'speaker',
+    hand        INTEGER NOT NULL DEFAULT 0,
+    joined_at   INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_id)
+  );
+
+  -- Pillar C — shareable invite links + a join-request queue (slow mode / approval).
+  CREATE TABLE IF NOT EXISTS invite_links (
+    code        TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    max_uses    INTEGER NOT NULL DEFAULT 0,
+    uses        INTEGER NOT NULL DEFAULT 0,
+    expires_at  INTEGER,
+    revoked_at  INTEGER,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_invite_links_chat ON invite_links(chat_id);
+  CREATE TABLE IF NOT EXISTS chat_join_requests (
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status     TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, user_id)
+  );
+
+  -- Pillar E — achievements + per-chat daily streaks (Snapstreak-style).
+  CREATE TABLE IF NOT EXISTS user_achievements (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,
+    earned_at  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, kind)
+  );
+  CREATE TABLE IF NOT EXISTS streaks (
+    chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    count      INTEGER NOT NULL DEFAULT 0,
+    last_day   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (chat_id, user_id)
+  );
+
+  -- Pillar F — shared habit / streak tracker.
+  CREATE TABLE IF NOT EXISTS habits (
+    id          TEXT PRIMARY KEY,
+    chat_id     TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    creator_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title       TEXT NOT NULL,
+    cadence     TEXT NOT NULL DEFAULT 'daily',
+    created_at  INTEGER NOT NULL,
+    archived_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_habits_chat ON habits(chat_id);
+  CREATE TABLE IF NOT EXISTS habit_logs (
+    habit_id   TEXT NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day        TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (habit_id, user_id, day)
+  );
 `);
 
 // ---- Migrations ------------------------------------------------------------
@@ -1099,6 +1350,25 @@ function ensureColumns() {
   if (!chatCols.includes('category')) {
     db.exec("ALTER TABLE chats ADD COLUMN category TEXT NOT NULL DEFAULT ''");
   }
+  // ---- „Universum" (0.38.0): communities, slow mode, join approval ----------
+  // A group that belongs to a parent "community" hub points at it here; the hub
+  // itself is just a group with kind='community'. NULL = a standalone chat.
+  if (!chatCols.includes('parent_id')) {
+    db.exec('ALTER TABLE chats ADD COLUMN parent_id TEXT REFERENCES chats(id) ON DELETE SET NULL');
+  }
+  if (!chatCols.includes('kind')) {
+    db.exec("ALTER TABLE chats ADD COLUMN kind TEXT NOT NULL DEFAULT ''");
+  }
+  // Slow mode: minimum seconds between a member's messages (0 = off).
+  if (!chatCols.includes('slow_mode_s')) {
+    db.exec('ALTER TABLE chats ADD COLUMN slow_mode_s INTEGER NOT NULL DEFAULT 0');
+  }
+  // Join approval: 1 = joining via an invite link queues a request an admin must
+  // approve instead of joining immediately.
+  if (!chatCols.includes('join_approval')) {
+    db.exec('ALTER TABLE chats ADD COLUMN join_approval INTEGER NOT NULL DEFAULT 0');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_chats_parent ON chats(parent_id) WHERE parent_id IS NOT NULL');
   // These indexes depend on the columns above, so (like the expires index) they
   // are created here rather than in the initial CREATE TABLE for old databases.
   db.exec(
@@ -1586,6 +1856,79 @@ migrateMessageTypes036();
   const cols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
   if (!cols.includes('effect')) {
     db.exec("ALTER TABLE messages ADD COLUMN effect TEXT NOT NULL DEFAULT ''");
+  }
+})();
+
+// 0.38.0 "Universum": the biggest type-CHECK widening yet — admit eleven new
+// structured/media types at once: whiteboard, doc, playlist, recipe, flashcards,
+// form, bookmark, place, videonote, watchparty, gift. Same FTS-aware table
+// rebuild as migrateMessageTypes036(): dropping `messages` removes the
+// messages_fts triggers, so we drop the orphaned index and let setupFts() (next)
+// rebuild + backfill it. Runs *after* the effect IIFE above so the rebuild keeps
+// the `effect` column. Idempotent — keyed on 'whiteboard' not yet in the CHECK.
+function migrateMessageTypes038() {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='messages'")
+    .get();
+  if (!row || /'whiteboard'/.test(row.sql)) return;
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN;');
+  try {
+    db.exec(`
+      CREATE TABLE messages_new (
+        id         TEXT PRIMARY KEY,
+        chat_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        sender_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+        type       TEXT NOT NULL DEFAULT 'text'
+          CHECK (type IN ('text','system','image','gif','video','audio','voice','file','location','poll','event','tasklist','sticker','board','game','livelocation','contact','code','expense','availpoll','whiteboard','doc','playlist','recipe','flashcards','form','bookmark','place','videonote','watchparty','gift')),
+        body       TEXT NOT NULL DEFAULT '',
+        attachment TEXT,
+        reply_to   TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        edited_at  INTEGER,
+        deleted_at INTEGER,
+        expires_at INTEGER,
+        thread_root  TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        thread_count INTEGER NOT NULL DEFAULT 0,
+        view_once    INTEGER NOT NULL DEFAULT 0,
+        viewed_at    INTEGER,
+        enc          INTEGER NOT NULL DEFAULT 0,
+        effect       TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO messages_new
+        (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
+         edited_at, deleted_at, expires_at, thread_root, thread_count,
+         view_once, viewed_at, enc, effect)
+        SELECT id, chat_id, sender_id, type, body, attachment, reply_to,
+               created_at, edited_at, deleted_at, expires_at, thread_root,
+               thread_count, view_once, viewed_at, enc, effect
+        FROM messages;
+      DROP TABLE messages;
+      ALTER TABLE messages_new RENAME TO messages;
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_expires
+        ON messages(expires_at) WHERE expires_at IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_messages_thread
+        ON messages(thread_root, created_at) WHERE thread_root IS NOT NULL;
+      DROP TABLE IF EXISTS messages_fts;
+    `);
+    db.exec('COMMIT;');
+  } catch (e) {
+    db.exec('ROLLBACK;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+migrateMessageTypes038();
+
+// 0.38.0: round-video-note flag on messages. Added *after* migrateMessageTypes038
+// (which rebuilds from a fixed column list and would drop a column added earlier).
+// Purely additive — no type-CHECK change, FTS untouched.
+(() => {
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!cols.includes('round')) {
+    db.exec('ALTER TABLE messages ADD COLUMN round INTEGER NOT NULL DEFAULT 0');
   }
 })();
 

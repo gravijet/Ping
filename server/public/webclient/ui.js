@@ -82,6 +82,11 @@ const PATHS = {
   // availability polls (Terminfindung).
   wallet: 'M3 7h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h12M16.5 12.5a1 1 0 1 0 0 .01',
   whenpoll: 'M7 3v3M17 3v3M4 8h16M5 5h14a1 1 0 0 1 1 1v6M4 6v13a1 1 0 0 0 1 1h7M16 16.5V18l1 1M21 17a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+  // 0.38.0 "Universum"
+  music: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12-2a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+  gift: 'M20 12v9H4v-9M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7Zm0 0h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7Z',
+  film: 'M3 4h18v16H3zM7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4',
+  bookmark: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
 };
 
 export function icon(name, cls = '') {

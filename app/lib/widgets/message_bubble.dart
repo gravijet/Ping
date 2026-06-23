@@ -208,6 +208,15 @@ class MessageBubble extends StatelessWidget {
     final hasCode = message.code != null && alive;
     final hasExpense = message.expense != null && alive;
     final hasAvailPoll = message.availpoll != null && alive;
+    // 0.38.0 "Universum": these structured types are web/desktop-first. The
+    // Android app renders a graceful "open in the web app" card rather than a
+    // blank bubble (videonote rides the normal media path; gift falls through to
+    // its emoji preview text).
+    const universumTypes = {
+      'whiteboard', 'doc', 'playlist', 'recipe', 'flashcards',
+      'form', 'bookmark', 'place', 'watchparty', 'gift',
+    };
+    final hasUniversumFallback = universumTypes.contains(message.type) && alive;
     // A code snippet's body is just a teaser; don't also print it as text.
     final hasText =
         message.body.trim().isNotEmpty && !isEncrypted && !hasCode && !hasContact;
@@ -375,6 +384,8 @@ class MessageBubble extends StatelessWidget {
                 fg: fg,
                 onVote: onVoteAvail,
                 onLock: onLockAvail),
+          if (hasUniversumFallback)
+            _UniversumFallback(label: message.preview, fg: fg),
           if (message.deleted)
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -1411,6 +1422,38 @@ class _ThreadChip extends StatelessWidget {
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600)),
         ]),
+      ),
+    );
+  }
+}
+
+/// 0.38.0 "Universum" fallback card for the web/desktop-first structured types
+/// (whiteboard, doc, playlist, …). Shows the emoji preview label + a hint that
+/// the full, interactive view lives in the web/desktop client.
+class _UniversumFallback extends StatelessWidget {
+  final String label;
+  final Color fg;
+  const _UniversumFallback({required this.label, required this.fg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: fg.withValues(alpha: 0.12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label.isEmpty ? 'Inhalt' : label,
+              style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 15)),
+          const SizedBox(height: 3),
+          Text('In der Web- oder Desktop-App öffnen',
+              style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 12.5)),
+        ],
       ),
     );
   }

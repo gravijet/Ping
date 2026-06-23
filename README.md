@@ -30,6 +30,15 @@ Online-Status, Lesebestätigungen).
   **„Hol mich ab"**-Zusammenfassung (rein lokal) und heuristische **Smart Replies**.
   Kein Cloud-LLM, keine Datenabflüsse. Volle Oberfläche im **Web & Windows**, alle
   Server-Funktionen für **Android** per OTA.
+- **Universum** (seit 0.38.0) – das bisher größte Update: **zehn neue strukturierte/
+  Medien-Nachrichtentypen** – **Whiteboard** (Echtzeit-Zeichnen), **Dokument**
+  (gemeinsam bearbeiten), **Playlist**, **Rezept**, **Lernkarten**, **Formular/Umfrage**,
+  **Lesezeichen**, **Orte**, **runde Videonotizen** und **Kinoabend** (synchrones
+  Schauen) – plus **virtuelle Geschenke**, **Sprach-Räume**, **Einladungslinks**, ein
+  **lokaler @ping-Assistent** (on-device, keine Cloud), **Erfolge & Streaks**, ein
+  **Gewohnheits-Tracker** und ein **vereinter Kalender**. Eine FTS-bewusste Migration
+  erweitert die `messages.type`-CHECK um elf Typen. Schwerpunkt Web & Windows; Android
+  rendert die Highlights und zeigt sonst eine „In der Web-/Desktop-App öffnen"-Karte.
 - **Feinschliff** (seit 0.37.0) – acht kuratierte Komfort-Features: **Sende-Effekte**
   (Konfetti/Ballons/Herzen), **Quiz-Umfragen** (richtige Antwort, erst nach der
   eigenen Stimme aufgedeckt), **wiederkehrende Erinnerungen** (täglich/wöchentlich),

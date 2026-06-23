@@ -1149,6 +1149,141 @@ export const approvalDecisionSchema = z.object({
   approve: z.boolean(),
 });
 
+// ════════════════════════════════════════════════════════════════════════
+// „Universum" (0.38.0) — Mega-Release schemas
+// ════════════════════════════════════════════════════════════════════════
+
+const shortTitle = z.string().trim().min(1, 'Bitte gib einen Titel an.').max(140, 'Der Titel ist zu lang.');
+
+// A — structured message types.
+
+// Whiteboard: optional title; a stroke is { color, width, points:[[x,y],...] }.
+export const whiteboardCreateSchema = z.object({
+  title: z.string().trim().max(140).optional().default(''),
+});
+const strokePoint = z.tuple([z.number(), z.number()]);
+export const whiteboardStrokeSchema = z.object({
+  color: z.string().trim().max(32).optional().default('#222'),
+  width: z.number().min(0.5).max(80).optional().default(3),
+  points: z.array(strokePoint).min(1, 'Leerer Strich.').max(2000, 'Der Strich ist zu lang.'),
+});
+
+// Collaborative doc.
+export const docCreateSchema = z.object({
+  title: z.string().trim().max(140).optional().default(''),
+  body: z.string().max(50000, 'Das Dokument ist zu lang.').optional().default(''),
+});
+export const docUpdateSchema = z.object({
+  title: z.string().trim().max(140).optional(),
+  body: z.string().max(50000, 'Das Dokument ist zu lang.').optional(),
+  baseVersion: z.number().int().nonnegative().optional(),
+});
+
+// Playlist + track.
+const trackSchema = z.object({
+  title: z.string().trim().min(1, 'Titel fehlt.').max(200),
+  artist: z.string().trim().max(160).optional().default(''),
+  url: z.string().trim().max(2000).optional().default(''),
+});
+export const playlistCreateSchema = z.object({
+  title: shortTitle,
+  tracks: z.array(trackSchema).max(200).optional().default([]),
+});
+export const playlistTrackSchema = trackSchema;
+
+// Recipe.
+export const recipeCreateSchema = z.object({
+  title: shortTitle,
+  servings: z.number().int().min(0).max(999).optional().default(0),
+  minutes: z.number().int().min(0).max(100000).optional().default(0),
+  ingredients: z.array(z.string().trim().min(1).max(200)).max(100).optional().default([]),
+  steps: z.array(z.string().trim().min(1).max(2000)).max(100).optional().default([]),
+});
+
+// Flashcard deck.
+const cardSchema = z.object({
+  front: z.string().trim().min(1, 'Vorderseite fehlt.').max(1000),
+  back: z.string().trim().min(1, 'Rückseite fehlt.').max(1000),
+});
+export const deckCreateSchema = z.object({
+  title: shortTitle,
+  cards: z.array(cardSchema).min(1, 'Mindestens eine Karte.').max(500),
+});
+
+// Form / survey.
+const questionSchema = z.object({
+  q: z.string().trim().min(1, 'Frage fehlt.').max(280),
+  type: z.enum(['text', 'choice', 'rating']),
+  options: z.array(z.string().trim().min(1).max(120)).max(12).optional().default([]),
+});
+export const formCreateSchema = z.object({
+  title: shortTitle,
+  questions: z.array(questionSchema).min(1, 'Mindestens eine Frage.').max(30),
+  anonymous: z.boolean().optional().default(false),
+});
+export const formSubmitSchema = z.object({
+  answers: z.array(z.union([z.string().max(2000), z.number(), z.null()])).max(30),
+});
+export const formCloseSchema = z.object({ closed: z.boolean().optional().default(true) });
+
+// Bookmark / link collection.
+const linkSchema = z.object({
+  url: z.string().trim().min(1, 'Link fehlt.').max(2000),
+  title: z.string().trim().max(200).optional().default(''),
+  note: z.string().trim().max(500).optional().default(''),
+});
+export const bookmarkCreateSchema = z.object({
+  title: shortTitle,
+  links: z.array(linkSchema).max(200).optional().default([]),
+});
+export const bookmarkLinkSchema = linkSchema;
+
+// Pinned places.
+const pinSchema = z.object({
+  name: z.string().trim().min(1, 'Name fehlt.').max(160),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  note: z.string().trim().max(500).optional().default(''),
+});
+export const placeCreateSchema = z.object({
+  title: shortTitle,
+  pins: z.array(pinSchema).min(1, 'Mindestens ein Ort.').max(100),
+});
+export const placePinSchema = pinSchema;
+
+// Watch party.
+export const watchPartyCreateSchema = z.object({
+  title: z.string().trim().max(200).optional().default(''),
+  url: z.string().trim().min(1, 'Video-Link fehlt.').max(2000),
+});
+export const watchPartySyncSchema = z.object({
+  positionMs: z.number().int().min(0),
+  playing: z.boolean(),
+});
+
+// Virtual gift.
+export const giftCreateSchema = z.object({
+  kind: z.enum(['cake', 'heart', 'trophy', 'flower', 'star', 'gift', 'balloon', 'rocket']),
+  note: z.string().trim().max(280).optional().default(''),
+});
+
+// C — invite links.
+export const inviteLinkCreateSchema = z.object({
+  maxUses: z.number().int().min(0).max(100000).optional().default(0),
+  expiresInHours: z.number().int().min(0).max(8760).optional().default(0),
+});
+
+// B — voice rooms.
+export const voiceRoomCreateSchema = z.object({
+  title: z.string().trim().max(140).optional().default(''),
+});
+
+// F — habits.
+export const habitCreateSchema = z.object({
+  title: shortTitle,
+  cadence: z.enum(['daily', 'weekly']).optional().default('daily'),
+});
+
 // Parse with a schema and throw a structured 400-style error on failure.
 export function parse(schema, data) {
   const result = schema.safeParse(data);

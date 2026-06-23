@@ -10,7 +10,7 @@
    Bump CACHE_VERSION on every web release; the activate handler purges old
    caches so stale assets can never linger after a deploy. */
 
-const CACHE_VERSION = 'ping-web-v0.37.0';
+const CACHE_VERSION = 'ping-web-v0.38.0';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -87,6 +87,11 @@ const SHELL_ASSETS = [
   '/expense.js',
   '/availpoll.js',
   '/feinschliff.js',
+  // ── „Universum" (0.38.0) ──────────────────────────────────────────────
+  '/universum.js',
+  '/voicerooms.js',
+  '/achievements.js',
+  '/calendar.js',
 ];
 
 self.addEventListener('install', (event) => {

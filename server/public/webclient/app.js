@@ -249,6 +249,9 @@ function buildNavRail(me) {
     flag('events') ? navItem('agenda', 'calendar', 'Termine') : null,
     // Zusammen (0.36.0): the cross-chat "Kasse" balance overview.
     flag('splitExpenses') ? navItem('kasse', 'wallet', 'Kasse') : null,
+    // Universum (0.38.0): unified calendar + achievements.
+    flag('calendarView') ? navItem('calendar', 'calendar', 'Kalender') : null,
+    flag('achievements') ? navItem('achievements', 'bolt', 'Erfolge') : null,
     // Channels / Communities (0.31.0): the public-channel directory.
     flag('communities') ? navItem('discover', 'compass', 'Entdecken') : null,
   ].filter(Boolean));
@@ -367,6 +370,17 @@ function renderSection() {
     sideBody.append(loading());
     return import('./expense.js').then((m) =>
       m.renderKassePane(sideHead, sideBody, openChatInShell));
+  }
+  // 0.38.0 "Universum": unified calendar + achievements panes.
+  if (currentSection === 'calendar') {
+    sideBody.append(loading());
+    return import('./calendar.js').then((m) =>
+      m.renderCalendarPane(sideHead, sideBody, openChatInShell));
+  }
+  if (currentSection === 'achievements') {
+    sideBody.append(loading());
+    return import('./achievements.js').then((m) =>
+      m.renderAchievementsPane(sideHead, sideBody));
   }
 }
 
@@ -487,6 +501,8 @@ export function openCommandPalette() {
     flag('reminders') ? { title: 'Erinnerungen', icon: 'clock', keywords: 'erinnerung erinnere reminder nudge fällig', run: () => reminders.openReminders(openChatInShell) } : null,
     flag('events') ? { title: 'Termine', icon: 'calendar', keywords: 'termine events kalender agenda rsvp zusage', run: () => setSection('agenda') } : null,
     flag('splitExpenses') ? { title: 'Kasse', icon: 'wallet', keywords: 'kasse ausgaben geld schulden split bill ledger geteilt', run: () => setSection('kasse') } : null,
+    flag('calendarView') ? { title: 'Kalender', icon: 'calendar', keywords: 'kalender agenda termine erinnerungen anrufe unified', run: () => setSection('calendar') } : null,
+    flag('achievements') ? { title: 'Erfolge', icon: 'bolt', keywords: 'erfolge achievements badges streak abzeichen', run: () => setSection('achievements') } : null,
     { title: 'Tastenkürzel', icon: 'bolt', hint: '?', keywords: 'shortcuts keyboard tastatur hilfe', run: () => openShortcuts() },
     { title: 'Design wechseln', icon: 'moon', keywords: 'theme dark light hell dunkel', run: () => { toggleTheme(); refreshThemeNav(); } },
     { title: 'App sperren', icon: 'lock', keywords: 'lock pin sperre privat', run: () => import('./lock.js').then((m) => m.lockNow()) },
@@ -720,6 +736,16 @@ function wireSocket() {
   });
   // Peer toggled E2EE on a DM — refresh our cached session so render decrypts.
   socket.on('e2ee', (p) => { if (p.chatId) import('./e2ee.js').then((m) => m.onE2ee(p.chatId)); });
+  // 0.38.0 "Universum": low-latency live events for the new collaborative types.
+  socket.on('whiteboard-stroke', (p) => store.emit('whiteboard-stroke', p));
+  socket.on('whiteboard-cleared', (p) => store.emit('whiteboard-cleared', p));
+  socket.on('watchparty-sync', (p) => store.emit('watchparty-sync', p));
+  socket.on('voiceroom', (p) => store.emit('voiceroom', p));
+  socket.on('habits-updated', (p) => store.emit('habits-updated', p));
+  // Achievement unlocked — a quick celebratory toast.
+  socket.on('achievement', (p) => {
+    if (p.achievement) toast(`${p.achievement.emoji || '🏆'} Erfolg freigeschaltet: ${p.achievement.title}`, 'info');
+  });
   // A new device wants to sign in and needs this (trusted) device to approve.
   socket.on('login-request', (p) => {
     toast(`🔐 Neue Anmeldung (Code ${p.code || ''}) — in Sicherheit freigeben.`, 'info');

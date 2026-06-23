@@ -295,6 +295,34 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Universum — mega-release (0.38.0)
+The project's largest release: **ten new structured/media message types** plus
+features across seven pillars. All ten types follow the established poll recipe
+(side table → `xRepo.js` `createX`/`xView` → zod schema → routes with
+`requireAuth`+`memberGuard` → `messageView` payload + three previews + FTS aliases
+→ web render module + `chat.js` case + attach menu). The new types — `whiteboard`,
+`doc`, `playlist`, `recipe`, `flashcards`, `form`, `bookmark`, `place`, `videonote`,
+`watchparty` (and `gift`) — are admitted by **one** FTS-aware migration,
+`migrateMessageTypes038()`, which widens the `messages.type` CHECK by eleven values
+in a single in-place rebuild and drops the orphaned `messages_fts` so `setupFts()`
+rebuilds it. It runs **after** the 0.37.0 `effect`-column IIFE (so the rebuild keeps
+`effect`); the new `round` flag is added in its **own** post-migration IIFE (the
+documented "column added in ensureColumns gets dropped by a type-rebuild" trap).
+Verified against a `VACUUM INTO` snapshot of the live DB (62→62 messages, FTS
+rebuilt + searchable).
+
+Beyond the types: **voice rooms** (`voiceRoomsRepo`, roster + roles, audio on the
+existing mesh), **invite links** (`inviteLinksRepo`, expiry/usage/revoke +
+`/invite/:code/join`), a strictly **on-device assistant** (`assistant.js` — local
+`OLLAMA_URL` or heuristic, never a cloud API), **achievements + per-chat streaks**
+(`achievementsRepo`, bumped idempotently from the send path), a shared **habit
+tracker** (`habitsRepo`), and a **unified calendar** web pane (`calendar.js`,
+aggregates `/me/events` + reminders + scheduled calls — no new table). Web adds
+`universum.js` (all ten cards + create modals), `voicerooms.js`, `achievements.js`
+and `calendar.js`; the SW cache is `ping-web-v0.38.0`. Flutter renders graceful
+"open in the web/desktop app" fallback cards for the web-first types (videonote
+rides the normal media path); Android is rebuilt at versionCode **5003** for parity.
+
 ## Feinschliff — curated polish (0.37.0)
 Eight small, flag-gated comfort features, deliberately built on existing infra:
 **no** `messages.type` widening, so the external-content FTS5 index is untouched

@@ -141,6 +141,28 @@ import {
   translateSchema,
   defaultTtlSchema,
   approvalDecisionSchema,
+  // 0.38.0 "Universum"
+  whiteboardCreateSchema,
+  whiteboardStrokeSchema,
+  docCreateSchema,
+  docUpdateSchema,
+  playlistCreateSchema,
+  playlistTrackSchema,
+  recipeCreateSchema,
+  deckCreateSchema,
+  formCreateSchema,
+  formSubmitSchema,
+  formCloseSchema,
+  bookmarkCreateSchema,
+  bookmarkLinkSchema,
+  placeCreateSchema,
+  placePinSchema,
+  watchPartyCreateSchema,
+  watchPartySyncSchema,
+  giftCreateSchema,
+  inviteLinkCreateSchema,
+  voiceRoomCreateSchema,
+  habitCreateSchema,
 } from './validation.js';
 import { getRemoteConfig, setRemoteConfig } from './configRepo.js';
 import { recordEvents, recordError, telemetrySummary, resolveErrors } from './telemetryRepo.js';
@@ -240,6 +262,7 @@ import {
   chatView,
   createMessage,
   getMessage,
+  markVideoNote,
   editMessage,
   deleteMessage,
   hideMessageFor,
@@ -461,6 +484,30 @@ import {
   revokeApiKey,
   API_SCOPES,
 } from './apiKeysRepo.js';
+// ── „Universum" (0.38.0) — new structured types + features ──────────────────
+import { createWhiteboard, addStroke, clearWhiteboard } from './whiteboardRepo.js';
+import { createDoc, updateDoc } from './docsRepo.js';
+import { createPlaylist, addTrack, removeTrack } from './playlistRepo.js';
+import { createRecipe } from './recipeRepo.js';
+import { createDeck } from './flashcardsRepo.js';
+import { createForm, submitFormResponse, closeForm } from './formsRepo.js';
+import { createBookmark, addBookmarkLink, removeBookmarkLink } from './bookmarksRepo.js';
+import { createPlace, addPin } from './placesRepo.js';
+import { createWatchParty, updateWatchParty } from './watchPartyRepo.js';
+import { createGift } from './giftRepo.js';
+import {
+  createInviteLink, resolveInviteLink, consumeInviteLink, listInviteLinks, revokeInviteLink,
+} from './inviteLinksRepo.js';
+import {
+  openVoiceRoom, getActiveRoom, joinVoiceRoom, leaveVoiceRoom, voiceRoomView, raiseHand,
+} from './voiceRoomsRepo.js';
+import {
+  listAchievements, streakView, grantAchievement, recordStreakActivity, ACHIEVEMENTS,
+} from './achievementsRepo.js';
+import {
+  createHabit, listHabits, toggleHabitToday, archiveHabit,
+} from './habitsRepo.js';
+import { assistantReply } from './assistant.js';
 
 export const router = Router();
 
@@ -574,6 +621,28 @@ function messagePreview(msg) {
       return '💶 Ausgabe';
     case 'availpoll':
       return '🗓️ Terminfindung';
+    case 'whiteboard':
+      return '🎨 Whiteboard';
+    case 'doc':
+      return '📄 Dokument';
+    case 'playlist':
+      return '🎵 Playlist';
+    case 'recipe':
+      return '🍳 Rezept';
+    case 'flashcards':
+      return '🃏 Lernkarten';
+    case 'form':
+      return '📝 Formular';
+    case 'bookmark':
+      return '🔖 Lesezeichen';
+    case 'place':
+      return '🗺️ Orte';
+    case 'videonote':
+      return '⭕ Videonotiz';
+    case 'watchparty':
+      return '🍿 Kinoabend';
+    case 'gift':
+      return '🎁 Geschenk';
     default:
       return 'Neue Nachricht';
   }
@@ -1658,6 +1727,13 @@ router.post(
     if (type === 'voice' && att?.url && flagOn('voiceTranscription')) {
       queueVoiceTranscription(msg, att);
     }
+    // 0.38.0 "Universum": bump this user's per-chat daily streak + unlock the
+    // first-message badge. A new streak achievement is nudged to the sender.
+    if (flagOn('achievements')) {
+      grantAchievement(req.user.id, 'first_message');
+      const { earned } = recordStreakActivity(req.chat.id, req.user.id);
+      if (earned) sendToUser(req.user.id, 'achievement', { achievement: earned });
+    }
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
     }
@@ -2505,6 +2581,370 @@ router.post(
     });
   })
 );
+
+// ════════════════════════════════════════════════════════════════════════
+// „Universum" (0.38.0) — Mega-Release routes
+// ════════════════════════════════════════════════════════════════════════
+
+// Fan a freshly-created structured message out to every member + push offline.
+function fanoutNew(chat, msg, senderId) {
+  for (const memberId of getMemberIds(chat.id)) {
+    sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
+  }
+  pushForMessage(chat, msg, senderId);
+}
+// Fan a structured-message change (votes/edits/items) out as message-updated.
+function fanoutUpdate(chatId, msg) {
+  for (const memberId of getMemberIds(chatId)) {
+    sendToUser(memberId, 'message-updated', { message: messageView(msg, memberId) });
+  }
+}
+// Resolve the structured message referenced by :msgId, guarding chat + type.
+function structuredMessage(req, type) {
+  const msg = getMessage(req.params.msgId);
+  if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at || msg.type !== type) return null;
+  return msg;
+}
+const lockedErr = (res) => res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
+
+// ---- A · Whiteboard (type='whiteboard') -----------------------------------
+router.post('/chats/:id/whiteboard', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(whiteboardCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'whiteboard', body: '', expiresAt: messageExpiry(req.chat) });
+  createWhiteboard({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title });
+  grantAchievement(req.user.id, 'artist');
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/whiteboard/stroke', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'whiteboard');
+  if (!msg) return res.status(404).json({ error: 'Dieses Whiteboard gibt es nicht.' });
+  const stroke = parse(whiteboardStrokeSchema, req.body);
+  if (!addStroke(msg.id, { ...stroke, by: req.user.id })) {
+    return res.status(409).json({ error: 'Das Whiteboard ist voll.' });
+  }
+  // Lightweight live event for low-latency drawing, plus the canonical update.
+  for (const memberId of getMemberIds(req.chat.id)) {
+    if (memberId !== req.user.id) sendToUser(memberId, 'whiteboard-stroke', { messageId: msg.id, stroke: { ...stroke, by: req.user.id } });
+  }
+  res.status(201).json({ ok: true });
+}));
+
+router.post('/chats/:id/messages/:msgId/whiteboard/clear', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'whiteboard');
+  if (!msg) return res.status(404).json({ error: 'Dieses Whiteboard gibt es nicht.' });
+  clearWhiteboard(msg.id);
+  fanoutUpdate(req.chat.id, msg);
+  for (const memberId of getMemberIds(req.chat.id)) sendToUser(memberId, 'whiteboard-cleared', { messageId: msg.id });
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Collaborative doc (type='doc') -----------------------------------
+router.post('/chats/:id/doc', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(docCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'doc', body: '', expiresAt: messageExpiry(req.chat) });
+  createDoc({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, body: data.body });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/doc', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'doc');
+  if (!msg) return res.status(404).json({ error: 'Dieses Dokument gibt es nicht.' });
+  const data = parse(docUpdateSchema, req.body);
+  const result = updateDoc(msg.id, { title: data.title, body: data.body, userId: req.user.id, baseVersion: data.baseVersion });
+  if (result === 'stale') return res.status(409).json({ error: 'Das Dokument wurde inzwischen geändert. Bitte neu laden.' });
+  if (!result) return res.status(404).json({ error: 'Dieses Dokument gibt es nicht.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Playlist (type='playlist') ---------------------------------------
+router.post('/chats/:id/playlist', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(playlistCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'playlist', body: '', expiresAt: messageExpiry(req.chat) });
+  createPlaylist({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, tracks: data.tracks });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/playlist/tracks', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'playlist');
+  if (!msg) return res.status(404).json({ error: 'Diese Playlist gibt es nicht.' });
+  const t = parse(playlistTrackSchema, req.body);
+  if (!addTrack(msg.id, { ...t, addedBy: req.user.id })) return res.status(409).json({ error: 'Die Playlist ist voll.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.delete('/chats/:id/messages/:msgId/playlist/tracks/:trackId', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'playlist');
+  if (!msg) return res.status(404).json({ error: 'Diese Playlist gibt es nicht.' });
+  if (!removeTrack(msg.id, req.params.trackId)) return res.status(404).json({ error: 'Diesen Titel gibt es nicht.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Recipe (type='recipe') -------------------------------------------
+router.post('/chats/:id/recipe', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(recipeCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'recipe', body: '', expiresAt: messageExpiry(req.chat) });
+  createRecipe({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, ...data });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Flashcards (type='flashcards') -----------------------------------
+router.post('/chats/:id/flashcards', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(deckCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'flashcards', body: '', expiresAt: messageExpiry(req.chat) });
+  createDeck({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, cards: data.cards });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Form / survey (type='form') --------------------------------------
+router.post('/chats/:id/form', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(formCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'form', body: '', expiresAt: messageExpiry(req.chat) });
+  createForm({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, questions: data.questions, anonymous: data.anonymous });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/form/respond', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'form');
+  if (!msg) return res.status(404).json({ error: 'Dieses Formular gibt es nicht.' });
+  const { answers } = parse(formSubmitSchema, req.body);
+  if (!submitFormResponse(msg.id, req.user.id, answers)) return res.status(409).json({ error: 'Dieses Formular ist geschlossen.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/form/close', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'form');
+  if (!msg) return res.status(404).json({ error: 'Dieses Formular gibt es nicht.' });
+  const { closed } = parse(formCloseSchema, req.body);
+  closeForm(msg.id, closed);
+  fanoutUpdate(req.chat.id, msg);
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Bookmark / link collection (type='bookmark') ---------------------
+router.post('/chats/:id/bookmark', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(bookmarkCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'bookmark', body: '', expiresAt: messageExpiry(req.chat) });
+  createBookmark({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, links: data.links });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/bookmark/links', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'bookmark');
+  if (!msg) return res.status(404).json({ error: 'Diese Sammlung gibt es nicht.' });
+  const l = parse(bookmarkLinkSchema, req.body);
+  if (!addBookmarkLink(msg.id, { ...l, addedBy: req.user.id })) return res.status(409).json({ error: 'Die Sammlung ist voll.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.delete('/chats/:id/messages/:msgId/bookmark/links/:linkId', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'bookmark');
+  if (!msg) return res.status(404).json({ error: 'Diese Sammlung gibt es nicht.' });
+  if (!removeBookmarkLink(msg.id, req.params.linkId)) return res.status(404).json({ error: 'Diesen Link gibt es nicht.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Pinned places (type='place') -------------------------------------
+router.post('/chats/:id/place', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(placeCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'place', body: '', expiresAt: messageExpiry(req.chat) });
+  createPlace({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, pins: data.pins });
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/place/pins', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'place');
+  if (!msg) return res.status(404).json({ error: 'Diese Orte-Sammlung gibt es nicht.' });
+  const p = parse(placePinSchema, req.body);
+  if (!addPin(msg.id, p)) return res.status(409).json({ error: 'Die Sammlung ist voll.' });
+  fanoutUpdate(req.chat.id, msg);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- A · Round video note (type='videonote') ------------------------------
+router.post('/chats/:id/videonote', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const attachment = req.body?.attachment;
+  if (!attachment || typeof attachment !== 'object' || !attachment.url) {
+    return res.status(400).json({ error: 'Kein Video angehängt.' });
+  }
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'videonote', body: '', attachment, expiresAt: messageExpiry(req.chat) });
+  markVideoNote(msg.id);
+  const fresh = getMessage(msg.id);
+  fanoutNew(req.chat, fresh, req.user.id);
+  res.status(201).json({ message: messageView(fresh, req.user.id) });
+}));
+
+// ---- A · Watch party (type='watchparty') ----------------------------------
+router.post('/chats/:id/watchparty', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(watchPartyCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'watchparty', body: '', expiresAt: messageExpiry(req.chat) });
+  createWatchParty({ messageId: msg.id, chatId: req.chat.id, creatorId: req.user.id, title: data.title, url: data.url });
+  grantAchievement(req.user.id, 'cinephile');
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+router.post('/chats/:id/messages/:msgId/watchparty/sync', requireAuth, memberGuard, h(async (req, res) => {
+  const msg = structuredMessage(req, 'watchparty');
+  if (!msg) return res.status(404).json({ error: 'Diesen Kinoabend gibt es nicht.' });
+  const data = parse(watchPartySyncSchema, req.body);
+  const view = updateWatchParty(msg.id, data);
+  // Low-latency sync to the other viewers; the persisted row is the resume point.
+  for (const memberId of getMemberIds(req.chat.id)) {
+    if (memberId !== req.user.id) sendToUser(memberId, 'watchparty-sync', { messageId: msg.id, ...data, by: req.user.id });
+  }
+  res.json({ watchparty: view });
+}));
+
+// ---- A/E · Virtual gift (type='gift') -------------------------------------
+router.post('/chats/:id/gift', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.locked) return lockedErr(res);
+  const data = parse(giftCreateSchema, req.body);
+  const msg = createMessage({ chatId: req.chat.id, senderId: req.user.id, type: 'gift', body: '', effect: 'confetti', expiresAt: messageExpiry(req.chat) });
+  createGift({ messageId: msg.id, chatId: req.chat.id, senderId: req.user.id, kind: data.kind, note: data.note });
+  grantAchievement(req.user.id, 'gifter');
+  fanoutNew(req.chat, msg, req.user.id);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- B · Voice rooms ("Räume") --------------------------------------------
+router.get('/chats/:id/voiceroom', requireAuth, memberGuard, h(async (req, res) => {
+  const room = getActiveRoom(req.chat.id);
+  res.json({ room: room ? voiceRoomView(room.id) : null });
+}));
+
+router.post('/chats/:id/voiceroom', requireAuth, memberGuard, h(async (req, res) => {
+  const data = parse(voiceRoomCreateSchema, req.body);
+  const room = openVoiceRoom({ chatId: req.chat.id, creatorId: req.user.id, title: data.title });
+  const view = voiceRoomView(room.id);
+  broadcastToChat(req.chat.id, 'voiceroom', { room: view });
+  res.status(201).json({ room: view });
+}));
+
+router.post('/chats/:id/voiceroom/:roomId/join', requireAuth, memberGuard, h(async (req, res) => {
+  if (!joinVoiceRoom(req.params.roomId, req.user.id, 'speaker')) return res.status(404).json({ error: 'Diesen Raum gibt es nicht mehr.' });
+  const view = voiceRoomView(req.params.roomId);
+  broadcastToChat(req.chat.id, 'voiceroom', { room: view });
+  res.json({ room: view });
+}));
+
+router.post('/chats/:id/voiceroom/:roomId/leave', requireAuth, memberGuard, h(async (req, res) => {
+  const { closed } = leaveVoiceRoom(req.params.roomId, req.user.id);
+  const view = closed ? null : voiceRoomView(req.params.roomId);
+  broadcastToChat(req.chat.id, 'voiceroom', { room: view, closed });
+  res.json({ room: view, closed });
+}));
+
+router.post('/chats/:id/voiceroom/:roomId/hand', requireAuth, memberGuard, h(async (req, res) => {
+  raiseHand(req.params.roomId, req.user.id, !!req.body?.hand);
+  const view = voiceRoomView(req.params.roomId);
+  broadcastToChat(req.chat.id, 'voiceroom', { room: view });
+  res.json({ room: view });
+}));
+
+// ---- C · Invite links -----------------------------------------------------
+router.post('/chats/:id/invites', requireAuth, memberGuard, h(async (req, res) => {
+  if (req.chat.type !== 'group') return res.status(400).json({ error: 'Einladungslinks gibt es nur für Gruppen.' });
+  const data = parse(inviteLinkCreateSchema, req.body);
+  const link = createInviteLink({ chatId: req.chat.id, creatorId: req.user.id, maxUses: data.maxUses, expiresInHours: data.expiresInHours });
+  res.status(201).json({ invite: { code: link.code, maxUses: link.max_uses, uses: 0, expiresAt: link.expires_at || null, active: true } });
+}));
+
+router.get('/chats/:id/invites', requireAuth, memberGuard, h(async (req, res) => {
+  res.json({ invites: listInviteLinks(req.chat.id) });
+}));
+
+router.delete('/chats/:id/invites/:code', requireAuth, memberGuard, h(async (req, res) => {
+  if (!revokeInviteLink(req.params.code, req.chat.id)) return res.status(404).json({ error: 'Diesen Link gibt es nicht.' });
+  res.json({ ok: true });
+}));
+
+// Join a group via an invite link. Public-ish (any authed user with the code).
+router.post('/invite/:code/join', requireAuth, h(async (req, res) => {
+  const link = resolveInviteLink(req.params.code);
+  if (!link) return res.status(404).json({ error: 'Dieser Einladungslink ist ungültig oder abgelaufen.' });
+  const chat = getChat(link.chat_id);
+  if (!chat) return res.status(404).json({ error: 'Diese Gruppe gibt es nicht mehr.' });
+  if (!isMember(chat.id, req.user.id)) {
+    addMember(chat.id, req.user.id);
+    consumeInviteLink(link.code);
+    for (const memberId of getMemberIds(chat.id)) {
+      sendToUser(memberId, 'chat-updated', { chat: chatView(getChat(chat.id), memberId) });
+    }
+  }
+  res.json({ chat: chatView(getChat(chat.id), req.user.id) });
+}));
+
+// ---- D · Local assistant (@ping) ------------------------------------------
+router.post('/chats/:id/assistant', requireAuth, memberGuard, h(async (req, res) => {
+  const prompt = String(req.body?.prompt || '').slice(0, 1000).trim();
+  if (!prompt) return res.status(400).json({ error: 'Leere Anfrage.' });
+  const history = getHistory(req.chat.id, { limit: 12, viewerId: req.user.id })
+    .map((m) => ({ senderId: m.sender_id, body: m.body }))
+    .filter((m) => m.body);
+  const reply = await assistantReply(prompt, history);
+  const msg = createMessage({ chatId: req.chat.id, senderId: OFFICIAL_USER_ID, type: 'text', body: reply, expiresAt: messageExpiry(req.chat) });
+  fanoutNew(req.chat, msg, OFFICIAL_USER_ID);
+  res.status(201).json({ message: messageView(msg, req.user.id) });
+}));
+
+// ---- E · Achievements + streaks -------------------------------------------
+router.get('/me/achievements', requireAuth, h(async (req, res) => {
+  res.json({ achievements: listAchievements(req.user.id), catalogue: ACHIEVEMENTS });
+}));
+
+router.get('/chats/:id/streak', requireAuth, memberGuard, h(async (req, res) => {
+  res.json({ streak: streakView(req.chat.id, req.user.id) });
+}));
+
+// ---- F · Shared habit tracker ---------------------------------------------
+router.post('/chats/:id/habits', requireAuth, memberGuard, h(async (req, res) => {
+  const data = parse(habitCreateSchema, req.body);
+  const habit = createHabit({ chatId: req.chat.id, creatorId: req.user.id, title: data.title, cadence: data.cadence });
+  broadcastToChat(req.chat.id, 'habits-updated', { chatId: req.chat.id });
+  res.status(201).json({ habit });
+}));
+
+router.get('/chats/:id/habits', requireAuth, memberGuard, h(async (req, res) => {
+  res.json({ habits: listHabits(req.chat.id, req.user.id) });
+}));
+
+router.post('/chats/:id/habits/:habitId/toggle', requireAuth, memberGuard, h(async (req, res) => {
+  const result = toggleHabitToday(req.params.habitId, req.chat.id, req.user.id);
+  if (!result) return res.status(404).json({ error: 'Diese Gewohnheit gibt es nicht.' });
+  broadcastToChat(req.chat.id, 'habits-updated', { chatId: req.chat.id });
+  res.json(result);
+}));
+
+router.delete('/chats/:id/habits/:habitId', requireAuth, memberGuard, h(async (req, res) => {
+  if (!archiveHabit(req.params.habitId, req.chat.id)) return res.status(404).json({ error: 'Diese Gewohnheit gibt es nicht.' });
+  broadcastToChat(req.chat.id, 'habits-updated', { chatId: req.chat.id });
+  res.json({ ok: true });
+}));
 
 // ---- 0.35.0 "Ausdruck & Werkbank": contact cards + code snippets ----------
 
@@ -3564,6 +4004,17 @@ function reminderPreviewOf(msg) {
     case 'code': return '‹/› Code-Snippet';
     case 'expense': return '💶 Ausgabe';
     case 'availpoll': return '🗓️ Terminfindung';
+    case 'whiteboard': return '🎨 Whiteboard';
+    case 'doc': return '📄 Dokument';
+    case 'playlist': return '🎵 Playlist';
+    case 'recipe': return '🍳 Rezept';
+    case 'flashcards': return '🃏 Lernkarten';
+    case 'form': return '📝 Formular';
+    case 'bookmark': return '🔖 Lesezeichen';
+    case 'place': return '🗺️ Orte';
+    case 'videonote': return '⭕ Videonotiz';
+    case 'watchparty': return '🍿 Kinoabend';
+    case 'gift': return '🎁 Geschenk';
     default: return 'Nachricht';
   }
 }
