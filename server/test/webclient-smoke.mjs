@@ -692,5 +692,31 @@ await step('edit-history viewer opens from the "bearbeitet" badge', async () => 
   if (!items.some((n) => n.textContent.includes('alte Fassung'))) throw new Error('prior version not shown');
 });
 
+// ---- 0.37.0 "Feinschliff": curated polish features ------------------------
+await step('feinschliff: send effects play + picker + reaction-details sheet', async () => {
+  const fs = await imp('feinschliff.js');
+  fs.playEffect('confetti');                       // must not throw; spawns an fx-layer
+  if (!document.querySelector('.fx-layer')) throw new Error('effect layer not spawned');
+  fs.effectMenu(() => {}); await tick();           // picker modal opens
+  if (!document.querySelector('.fx-pick')) throw new Error('effect picker not rendered');
+  await fs.openReactionDetails('c1', { id: 'm1' }); await tick(); await tick();
+});
+await step('feinschliff: composer shows the send-effect button', async () => {
+  app.openChatInShell('c1'); await tick();
+  if (!document.querySelector('.composer .fx-btn')) throw new Error('effect button missing from composer');
+});
+await step('feinschliff: poll create modal offers quiz mode', async () => {
+  (await imp('groups.js')).newPollModal('c1'); await tick();
+  if (!document.querySelector('.check-row')) throw new Error('quiz toggle missing');
+  if (!document.querySelector('.poll-opts .poll-opt-row input[type=radio]')) throw new Error('quiz radios missing');
+});
+await step('feinschliff: reminder dialog offers a recurrence option', async () => {
+  const rem = await imp('reminders.js');
+  rem.setReminderDialog('c1', { id: 'm1', body: 'erinnere mich' }); await tick();
+  const sels = document.querySelectorAll('select.input');
+  const hasRecur = [...sels].some((s) => /Täglich/.test(s.textContent || ''));
+  if (!hasRecur) throw new Error('recurrence select missing');
+});
+
 console.log(failures ? `\n${failures} step(s) FAILED` : '\nall smoke steps passed');
 process.exit(failures ? 1 : 0);

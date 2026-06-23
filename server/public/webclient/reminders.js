@@ -10,6 +10,7 @@
 import { api } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, modal, toast, confirmModal } from './ui.js';
+import { flag } from './flags.js';
 
 let reminders = []; // [{id, chatId, messageId, note, preview, chatTitle, remindAt, firedAt}]
 
@@ -95,6 +96,12 @@ export function setReminderDialog(chatId, message) {
     placeholder: 'Notiz (optional) — woran soll ich dich erinnern?' });
   const custom = el('input', { class: 'input', type: 'datetime-local',
     min: toLocalInput(Date.now() + 60000), value: toLocalInput(Date.now() + 60 * 60000) });
+  // 0.37.0 "Feinschliff": optional recurrence — the reminder re-arms itself.
+  const recur = el('select', { class: 'input' }, [
+    el('option', { value: '', text: 'Einmalig' }),
+    el('option', { value: 'daily', text: 'Täglich' }),
+    el('option', { value: 'weekly', text: 'Wöchentlich' }),
+  ]);
 
   const submit = async (remindAt) => {
     if (!Number.isFinite(remindAt) || remindAt < Date.now() - 60000) {
@@ -102,7 +109,8 @@ export function setReminderDialog(chatId, message) {
     }
     try {
       await api.post(`/chats/${chatId}/messages/${message.id}/remind`,
-        { remindAt: Math.round(remindAt), note: note.value.trim() });
+        { remindAt: Math.round(remindAt), note: note.value.trim(),
+          ...(flag('recurringReminders') && recur.value ? { recur: recur.value } : {}) });
       m.close();
       toast('Erinnerung gesetzt für ' + formatWhen(remindAt) + '.');
     } catch (e) { toast(e.message || 'Erinnerung fehlgeschlagen.', 'err'); }
@@ -131,6 +139,10 @@ export function setReminderDialog(chatId, message) {
             onClick: () => submit(new Date(custom.value).getTime()) }, 'Setzen'),
         ]),
       ]),
+      flag('recurringReminders')
+        ? el('div', { class: 'field', style: { marginTop: '8px' } },
+            [el('label', { text: 'Wiederholung' }), recur])
+        : null,
     ),
   });
   setTimeout(() => note.focus(), 0);

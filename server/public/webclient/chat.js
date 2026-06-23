@@ -38,8 +38,13 @@ import { renderLiveLocation } from './livelocation.js';
 import { renderCard as renderContactCard } from './contactcard.js';
 import { renderCode } from './code.js';
 import { threadChip, openThread } from './threads.js';
+import { playEffect, effectMenu, startDictation, dictationSupported,
+  openReactionDetails } from './feinschliff.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉'];
+// 0.37.0 "Feinschliff": send-effects already played (dedup so a re-render of the
+// timeline never replays confetti for a message we've already animated).
+const playedEffects = new Set();
 // Shown inline on the hover action bar so the most common reactions are one tap
 // away and visible — no need to discover the hidden picker menu first.
 const QUICK_REACTIONS = ['👍', '❤️', '😂'];
@@ -106,7 +111,13 @@ export async function openChat(slot, chatId, { onBack, focusMessageId } = {}) {
   closeChat();
   const chat = store.getChat(chatId);
   if (!chat) return;
-  cur = { chatId, slot, unsubs: [], replyTo: null, editing: null, typingOn: false, recorder: null };
+  cur = { chatId, slot, unsubs: [], replyTo: null, editing: null, typingOn: false, recorder: null,
+    pendingEffect: '', autoTranslate: '' };
+
+  // 0.37.0 "Feinschliff": load this chat's auto-translate preference (best-effort).
+  if (flag('autoTranslate')) {
+    api.get(`/chats/${chatId}/auto-translate`).then((r) => { if (cur && cur.chatId === chatId) cur.autoTranslate = r.lang || ''; }).catch(() => {});
+  }
 
   const thread = el('div', { class: 'thread', id: 'thread' });
   const composerWrap = el('div', { id: 'composer-wrap' });
@@ -452,7 +463,30 @@ function renderMessage(m, chat, first) {
       wrap.classList.toggle('show-actions');
     });
   }
+  // 0.37.0 "Feinschliff": play a send effect once, for a freshly-arrived message
+  // (within ~8s) — never on history scroll-back or a timeline re-render.
+  if (flag('sendEffects') && m.effect && !m.deleted && !playedEffects.has(m.id)) {
+    playedEffects.add(m.id);
+    if (Date.now() - (m.createdAt || timeMs(m) || 0) < 8000) playEffect(m.effect);
+  }
+  // 0.37.0 "Feinschliff": auto-translate a freshly-arrived inbound text message
+  // when this chat has auto-translate on (dedup + recency bound the backend load).
+  if (flag('autoTranslate') && cur?.autoTranslate && !mine && !m.deleted && !m.enc
+      && m.type === 'text' && (m.body || '').trim() && !autoTranslated.has(m.id)
+      && Date.now() - (timeMs(m) || 0) < 30000) {
+    autoTranslated.add(m.id);
+    import('./translate.js').then((t) => t.translateMessage(m, bubble)).catch(() => {});
+  }
   return wrap;
+}
+// Inbound messages already auto-translated this session (avoid re-hitting the
+// backend on every timeline re-render).
+const autoTranslated = new Set();
+
+// Best-effort ms timestamp for a message (createdAt may be absent on cached rows).
+function timeMs(m) {
+  const t = m.createdAt ?? m.created_at ?? m.ts;
+  return typeof t === 'number' ? t : (t ? Date.parse(t) : 0);
 }
 
 // 0.34.0 view-once: the bytes are withheld by the server until opened. The
@@ -501,9 +535,21 @@ function renderTranscript(t) {
 function renderReactions(m) {
   const entries = Object.entries(m.reactions || {}).filter(([, n]) => n > 0);
   if (!entries.length) return null;
-  return el('div', { class: 'reactions' }, entries.map(([emoji, n]) =>
-    el('button', { class: `reaction ${(m.myReactions || []).includes(emoji) ? 'mine' : ''}`,
-      onClick: () => toggleReaction(m, emoji) }, `${emoji} ${n}`)));
+  // 0.37.0 "Feinschliff": long-press / right-click a chip → "who reacted" sheet.
+  const wantDetails = flag('reactionDetails');
+  return el('div', { class: 'reactions' }, entries.map(([emoji, n]) => {
+    const chip = el('button', { class: `reaction ${(m.myReactions || []).includes(emoji) ? 'mine' : ''}`,
+      onClick: () => toggleReaction(m, emoji) }, `${emoji} ${n}`);
+    if (wantDetails) {
+      chip.addEventListener('contextmenu', (e) => { e.preventDefault(); openReactionDetails(cur.chatId, m); });
+      let t;
+      chip.addEventListener('pointerdown', () => { t = setTimeout(() => openReactionDetails(cur.chatId, m), 500); });
+      const cancel = () => clearTimeout(t);
+      chip.addEventListener('pointerup', cancel);
+      chip.addEventListener('pointerleave', cancel);
+    }
+    return chip;
+  }));
 }
 
 // The "bearbeitet" tag. When the message has tracked prior versions (and the
@@ -681,21 +727,38 @@ function scrollToMessage(id) {
 function renderPoll(m) {
   const poll = m.poll || {};
   const total = (poll.options || []).reduce((s, o) => s + (o.votes || 0), 0);
-  return el('div', { class: 'poll' }, [
-    el('div', { class: 'q', text: poll.question || 'Umfrage' }),
+  // 0.37.0 "Feinschliff": quiz mode. The server reveals `correct` only after the
+  // viewer has voted; until then we just badge it as a quiz.
+  const isQuiz = !!poll.quiz;
+  const revealed = isQuiz && poll.correct != null;
+  return el('div', { class: `poll ${isQuiz ? 'quiz' : ''}` }, [
+    el('div', { class: 'q' }, [
+      isQuiz ? el('span', { class: 'quiz-badge', text: 'Quiz' }) : null,
+      el('span', { text: poll.question || 'Umfrage' }),
+    ].filter(Boolean)),
     ...(poll.options || []).map((o, i) => {
       const pct = total ? Math.round((o.votes || 0) / total * 100) : 0;
       const voted = (poll.myVotes || []).includes(i);
-      return el('div', { class: `poll-opt ${voted ? 'voted' : ''}`, onClick: () => votePoll(m, i) }, [
-        el('div', { class: 'row' }, [el('span', { text: o.text }), el('span', { text: `${o.votes || 0}` })]),
+      const right = revealed && i === poll.correct;
+      const wrong = revealed && voted && i !== poll.correct;
+      return el('div', { class: `poll-opt ${voted ? 'voted' : ''} ${right ? 'correct' : ''} ${wrong ? 'wrong' : ''}`,
+        onClick: () => votePoll(m, i) }, [
+        el('div', { class: 'row' }, [
+          el('span', { text: (right ? '✓ ' : wrong ? '✗ ' : '') + o.text }),
+          el('span', { text: `${o.votes || 0}` }),
+        ]),
         el('div', { class: 'bar' }, el('i', { style: { width: pct + '%' } })),
       ]);
     }),
-    el('div', { class: 'hint', text: `${total} Stimmen` }),
+    el('div', { class: 'hint', text: isQuiz && !revealed
+      ? `${total} Stimmen · stimme ab, um die Lösung zu sehen`
+      : `${total} Stimmen` }),
   ]);
 }
 async function votePoll(m, optionIndex) {
-  try { await api.post(`/chats/${cur.chatId}/messages/${m.id}/vote`, { optionIndex }); }
+  // The server's vote schema expects `option` (not `optionIndex`); posting the
+  // wrong key silently 400'd every web poll vote until 0.37.0.
+  try { await api.post(`/chats/${cur.chatId}/messages/${m.id}/vote`, { option: optionIndex }); }
   catch (e) { toast(e.message, 'err'); }
 }
 
@@ -751,14 +814,35 @@ function renderComposer() {
   });
   ta.addEventListener('paste', (e) => onPaste(e));
 
-  const emojiBtn = el('button', { class: 'iconbtn', title: 'Emoji',
+  const emojiBtn = el('button', { class: 'iconbtn', title: 'Emoji', 'aria-label': 'Emoji',
     onClick: () => openEmojiPicker(emojiBtn, (em) => insertAtCursor(ta, em)) }, icon('emoji'));
 
+  // 0.37.0 "Feinschliff": a one-shot send effect (confetti/balloons/hearts).
+  const effectBtn = flag('sendEffects')
+    ? el('button', { class: `iconbtn fx-btn ${cur.pendingEffect ? 'on' : ''}`,
+        title: 'Effekt beim Senden', 'aria-label': 'Sendeeffekt wählen',
+        onClick: () => effectMenu((name) => {
+          cur.pendingEffect = name || '';
+          effectBtn.classList.toggle('on', !!cur.pendingEffect);
+        }, cur.pendingEffect || '') }, icon('bolt'))
+    : null;
+  // 0.37.0 "Feinschliff": on-device dictation (speech → text) into the composer.
+  let stopDictation = null;
+  const dictateBtn = (flag('voiceDictation') && dictationSupported())
+    ? el('button', { class: 'iconbtn dictate-btn', title: 'Diktieren', 'aria-label': 'Diktieren',
+        onClick: () => {
+          if (stopDictation) { stopDictation(); stopDictation = null; dictateBtn.classList.remove('rec'); }
+          else stopDictation = startDictation(ta, dictateBtn);
+        } }, icon('mic'))
+    : null;
+
   const composer = el('div', { class: 'composer' }, [
-    el('button', { class: 'iconbtn', title: 'Anhängen', onClick: (e) => attachMenu(e) }, icon('attach')),
+    el('button', { class: 'iconbtn', title: 'Anhängen', 'aria-label': 'Anhängen', onClick: (e) => attachMenu(e) }, icon('attach')),
     flag('quickReplies')
-      ? el('button', { class: 'iconbtn', title: 'Schnellantwort', onClick: (e) => quickReplyMenu(e, ta) }, icon('bolt'))
+      ? el('button', { class: 'iconbtn', title: 'Schnellantwort', 'aria-label': 'Schnellantwort', onClick: (e) => quickReplyMenu(e, ta) }, icon('bolt'))
       : null,
+    effectBtn,
+    dictateBtn,
     el('div', { class: 'grow' }, [emojiBtn, ta]),
     right,
   ].filter(Boolean));
@@ -800,6 +884,9 @@ function renderComposer() {
     }
     const chatId = cur.chatId;
     const replyTo = cur.replyTo?.id || null;
+    // 0.37.0: a chosen send effect rides along once, then resets.
+    const effect = flag('sendEffects') ? (cur.pendingEffect || '') : '';
+    cur.pendingEffect = '';
     cur.replyTo = null;
     drafts.clear(chatId);          // the draft has been committed
     renderComposer();
@@ -814,7 +901,7 @@ function renderComposer() {
           if (ct) { body = ct; enc = true; }
         }
       }
-      const r = await api.post(`/chats/${chatId}/messages`, { body, ...(enc ? { enc: true } : {}), ...(replyTo ? { replyTo } : {}) });
+      const r = await api.post(`/chats/${chatId}/messages`, { body, ...(enc ? { enc: true } : {}), ...(replyTo ? { replyTo } : {}), ...(effect ? { effect } : {}) });
       store.addMessage(chatId, r.message);
       recordSent(chatId);          // device-local insights tally
     } catch (e) {
@@ -887,7 +974,7 @@ function contextBar(kind, m, onClose) {
       el('div', { class: 'qname', text: kind === 'edit' ? 'Nachricht bearbeiten' : `Antwort an ${name}` }),
       el('div', { class: 'qbody', text: messagePreview(m) }),
     ]),
-    el('button', { class: 'iconbtn', onClick: onClose }, icon('close')),
+    el('button', { class: 'iconbtn', title: 'Schließen', 'aria-label': 'Schließen', onClick: onClose }, icon('close')),
   ]);
 }
 
@@ -1237,10 +1324,24 @@ function chatMenu(e, chat) {
     !isChannel || isOwner ? { label: 'Verschwindende Nachrichten', icon: 'clock', onClick: () => expireModal(chat) } : null,
     !isChannel || isOwner ? { label: 'Geplante Nachrichten', icon: 'schedule', onClick: () => listScheduled() } : null,
     { label: chat.archived ? 'Aus Archiv' : 'Archivieren', icon: 'archive', onClick: () => toggleArchive(chat) },
+    flag('autoTranslate') ? { label: cur?.autoTranslate ? 'Auto-Übersetzung aus' : 'Auto-Übersetzung an',
+      icon: 'compass', onClick: () => toggleAutoTranslate(chat) } : null,
     { label: 'Chat exportieren', icon: 'download', onClick: () => exportChat(chat) },
     chat.type === 'group' ? { label: isChannel ? 'Nicht mehr folgen' : 'Gruppe verlassen', icon: 'logout', danger: true,
       onClick: () => import('./groups.js').then((m) => m.leaveGroup(chat.id)) } : null,
   ].filter(Boolean));
+}
+
+// 0.37.0 "Feinschliff": toggle per-chat auto-translation of incoming messages.
+// Stores the device language as the target (or '' to turn it off), synced via the
+// server so the preference follows the user across devices.
+async function toggleAutoTranslate(chat) {
+  const next = cur?.autoTranslate ? '' : (navigator.language || 'de').slice(0, 2);
+  try {
+    const r = await api.post(`/chats/${chat.id}/auto-translate`, { lang: next });
+    if (cur && cur.chatId === chat.id) cur.autoTranslate = r.lang || '';
+    toast(r.lang ? 'Auto-Übersetzung aktiviert.' : 'Auto-Übersetzung deaktiviert.', 'ok');
+  } catch (e) { toast(e.message || 'Konnte nicht ändern.', 'err'); }
 }
 
 // Copy a shareable /?c=<handle> link for a channel.

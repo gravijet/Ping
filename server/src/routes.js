@@ -86,6 +86,8 @@ import {
   draftSchema,
   folderSchema,
   folderChatsSchema,
+  folderRuleSchema,
+  autoTranslateSchema,
   adminCreateSchema,
   adminUpdateSchema,
   adminBroadcastSchema,
@@ -282,6 +284,17 @@ import {
   pruneFolders,
   MAX_FOLDERS,
 } from './foldersRepo.js';
+// 0.37.0 "Feinschliff": reactor lists, anniversaries, per-chat auto-translate
+// preference and keyword folder rules (smart folders).
+import {
+  reactorsFor,
+  upcomingAnniversaries,
+  getAutoTranslate,
+  setAutoTranslate,
+  getFolderRule,
+  setFolderRule,
+  matchChatsForKeyword,
+} from './feinschliffRepo.js';
 import {
   saveUpload,
   getUploadMeta,
@@ -1593,7 +1606,7 @@ router.post(
         .status(403)
         .json({ error: 'In diesem Kanal können nur die Betreiber posten.' });
     }
-    const { body, type = 'text', attachment, replyTo: replyRaw, viewOnce, enc } = parse(
+    const { body, type = 'text', attachment, replyTo: replyRaw, viewOnce, enc, effect } = parse(
       messageSendSchema,
       req.body || {}
     );
@@ -1638,6 +1651,8 @@ router.post(
       expiresAt: messageExpiry(req.chat),
       viewOnce: !!viewOnce && (type === 'image' || type === 'video'),
       enc: !!enc,
+      // 0.37.0 "Feinschliff": one-shot send effect (flag-gated client-side).
+      effect: flagOn('sendEffects') ? (effect || '') : '',
     });
     // 0.34.0: queue on-prem transcription for voice notes (no-op if unconfigured).
     if (type === 'voice' && att?.url && flagOn('voiceTranscription')) {
@@ -2033,7 +2048,7 @@ router.post(
     if (req.chat.locked) {
       return res.status(403).json({ error: 'Dieser Kanal ist schreibgeschützt.' });
     }
-    const { question, options, multi = false } = parse(pollCreateSchema, req.body);
+    const { question, options, multi = false, correct = null } = parse(pollCreateSchema, req.body);
     const msg = createMessage({
       chatId: req.chat.id,
       senderId: req.user.id,
@@ -2047,6 +2062,8 @@ router.post(
       question,
       options,
       multi,
+      // 0.37.0: quiz mode is flag-gated; off → correct is ignored (plain poll).
+      correct: flagOn('pollQuiz') ? correct : null,
     });
     for (const memberId of getMemberIds(req.chat.id)) {
       sendToUser(memberId, 'message', { message: messageView(msg, memberId) });
@@ -3562,7 +3579,7 @@ router.post(
     if (!msg || msg.chat_id !== req.chat.id || msg.deleted_at) {
       return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
     }
-    const { remindAt, note } = parse(reminderCreateSchema, req.body);
+    const { remindAt, note, recur } = parse(reminderCreateSchema, req.body);
     if (pendingReminderCount(req.user.id) >= 200) {
       return res.status(409).json({ error: 'Du hast zu viele offene Erinnerungen.' });
     }
@@ -3574,6 +3591,8 @@ router.post(
       note,
       preview: reminderPreviewOf(msg),
       chatTitle: chatView(req.chat, req.user.id).title || '',
+      // 0.37.0: recurring reminders re-arm on fire (gated; off → one-shot).
+      recur: flagOn('recurringReminders') ? (recur || '') : '',
     });
     const reminder = reminderView(row);
     sendToUser(req.user.id, 'reminder-created', { reminder });
@@ -3763,8 +3782,22 @@ router.put(
 
 // ---- 0.27.0: chat folders -------------------------------------------------
 
+// 0.37.0 "Feinschliff": attach each folder's smart-rule (if any) and union the
+// keyword-matched chats into its chatIds, so a smart folder auto-collects
+// matching conversations without manual membership. Flag-gated; off → plain list.
+function foldersWithRules(userId) {
+  const folders = listFolders(userId);
+  if (!flagOn('smartFolders')) return folders;
+  return folders.map((f) => {
+    const rule = getFolderRule(f.id);
+    if (!rule) return { ...f, rule: null };
+    const matched = matchChatsForKeyword(userId, rule.keyword);
+    return { ...f, rule, chatIds: [...new Set([...f.chatIds, ...matched])] };
+  });
+}
+
 function broadcastFolders(userId) {
-  sendToUser(userId, 'folders-updated', { folders: listFolders(userId) });
+  sendToUser(userId, 'folders-updated', { folders: foldersWithRules(userId) });
 }
 
 router.get(
@@ -3772,7 +3805,7 @@ router.get(
   requireAuth,
   h(async (req, res) => {
     pruneFolders(req.user.id);
-    res.json({ folders: listFolders(req.user.id) });
+    res.json({ folders: foldersWithRules(req.user.id) });
   })
 );
 
@@ -3825,6 +3858,75 @@ router.put(
     if (!folder) return res.status(404).json({ error: 'Diesen Ordner gibt es nicht.' });
     broadcastFolders(req.user.id);
     res.json({ folder });
+  })
+);
+
+// 0.37.0 "Feinschliff": smartFolders — set/clear a folder's keyword auto-sort
+// rule. An empty keyword (or kind 'all') clears the rule. The response carries
+// the rule + the freshly-matched chat set so the UI updates immediately.
+router.put(
+  '/me/folders/:id/rule',
+  requireAuth,
+  h(async (req, res) => {
+    if (!flagOn('smartFolders')) return res.status(404).json({ error: 'Nicht verfügbar.' });
+    const folder = getFolder(req.user.id, req.params.id);
+    if (!folder) return res.status(404).json({ error: 'Diesen Ordner gibt es nicht.' });
+    const { kind, keyword } = parse(folderRuleSchema, req.body);
+    setFolderRule(req.params.id, req.user.id, { kind, keyword });
+    broadcastFolders(req.user.id);
+    res.json({ folders: foldersWithRules(req.user.id) });
+  })
+);
+
+// ---- 0.37.0 "Feinschliff": reactionDetails — who reacted -------------------
+// List a message's reactions grouped by emoji, each with its public reactors.
+router.get(
+  '/chats/:id/messages/:msgId/reactions',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    const msg = getMessage(req.params.msgId);
+    if (!msg || msg.chat_id !== req.chat.id) {
+      return res.status(404).json({ error: 'Diese Nachricht gibt es nicht.' });
+    }
+    res.json({ reactions: reactorsFor(msg.id) });
+  })
+);
+
+// ---- 0.37.0 "Feinschliff": anniversaries — upcoming birthdays --------------
+// Birthdays/anniversaries of the people the signed-in user has a direct chat
+// with, within the next [days] (default 30). Flag-gated.
+router.get(
+  '/me/anniversaries',
+  requireAuth,
+  h(async (req, res) => {
+    if (!flagOn('anniversaries')) return res.json({ anniversaries: [] });
+    const days = Math.min(366, Math.max(1, Number(req.query.days) || 30));
+    res.json({ anniversaries: upcomingAnniversaries(req.user.id, days) });
+  })
+);
+
+// ---- 0.37.0 "Feinschliff": autoTranslate — per-chat target language --------
+// The member's preferred auto-translation target for incoming messages in this
+// chat ('' = off). Synced across the member's devices; translation itself runs
+// client-side against /translate.
+router.get(
+  '/chats/:id/auto-translate',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    res.json({ lang: getAutoTranslate(req.chat.id, req.user.id) });
+  })
+);
+router.post(
+  '/chats/:id/auto-translate',
+  requireAuth,
+  memberGuard,
+  h(async (req, res) => {
+    if (!flagOn('autoTranslate')) return res.status(404).json({ error: 'Nicht verfügbar.' });
+    const { lang } = parse(autoTranslateSchema, req.body);
+    const saved = setAutoTranslate(req.chat.id, req.user.id, lang);
+    res.json({ lang: saved });
   })
 );
 

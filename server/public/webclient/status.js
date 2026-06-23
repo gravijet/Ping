@@ -84,13 +84,13 @@ function view(items, start, mine) {
     display: 'flex', gap: '8px', zIndex: '4' } });
   if (mine) {
     topBtns.append(
-      el('button', { class: 'call-btn', style: { width: '42px', height: '42px' },
+      el('button', { class: 'call-btn', title: 'Betrachter', 'aria-label': 'Betrachter anzeigen', style: { width: '42px', height: '42px' },
         onClick: (e) => { e.stopPropagation(); showViewers(items[i]); } }, icon('eye')),
-      el('button', { class: 'call-btn', style: { width: '42px', height: '42px' },
+      el('button', { class: 'call-btn', title: 'Löschen', 'aria-label': 'Status löschen', style: { width: '42px', height: '42px' },
         onClick: (e) => { e.stopPropagation(); delItem(items[i]); } }, icon('trash')),
     );
   }
-  topBtns.append(el('button', { class: 'call-btn', style: { width: '42px', height: '42px' }, onClick: close }, icon('close')));
+  topBtns.append(el('button', { class: 'call-btn', title: 'Schließen', 'aria-label': 'Schließen', style: { width: '42px', height: '42px' }, onClick: close }, icon('close')));
   overlay.append(content);
   content.append(bars);
   overlay.append(topBtns);

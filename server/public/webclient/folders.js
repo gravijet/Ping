@@ -9,6 +9,7 @@
 import { api } from './api.js';
 import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, confirmModal } from './ui.js';
+import { flag } from './flags.js';
 
 const MAX = 20;
 
@@ -39,22 +40,29 @@ function paint(body) {
       text: 'Noch keine Ordner. Lege einen an, um deine Chats zu gruppieren.' }));
   }
   for (const f of folders) {
+    const sub = f.rule
+      ? `Auto: „${f.rule.keyword}" · ${f.chatIds.length} ${f.chatIds.length === 1 ? 'Chat' : 'Chats'}`
+      : `${f.chatIds.length} ${f.chatIds.length === 1 ? 'Chat' : 'Chats'}`;
     list.appendChild(el('div', { class: 'folder-row' }, [
       el('div', { class: 'folder-meta' }, [
         el('span', { class: 'folder-emoji', text: f.emoji || '🗂️' }),
         el('div', {}, [
           el('div', { class: 'folder-name', text: f.name }),
-          el('div', { class: 'folder-sub', text: `${f.chatIds.length} ${f.chatIds.length === 1 ? 'Chat' : 'Chats'}` }),
+          el('div', { class: 'folder-sub', text: sub }),
         ]),
       ]),
       el('div', { class: 'folder-actions' }, [
         el('button', { class: 'iconbtn', title: 'Chats zuordnen', 'aria-label': 'Chats zuordnen',
           onClick: () => assignChats(f, body) }, icon('check')),
+        flag('smartFolders')
+          ? el('button', { class: `iconbtn ${f.rule ? 'on' : ''}`, title: 'Auto-Regel', 'aria-label': 'Auto-Regel',
+              onClick: () => ruleForm(f, body) }, icon('bolt'))
+          : null,
         el('button', { class: 'iconbtn', title: 'Umbenennen', 'aria-label': 'Umbenennen',
           onClick: () => folderForm(f).then((d) => d && saveEdit(f.id, d, body)) }, icon('edit')),
         el('button', { class: 'iconbtn', title: 'Löschen', 'aria-label': 'Löschen',
           onClick: () => removeFolder(f, body) }, icon('trash')),
-      ]),
+      ].filter(Boolean)),
     ]));
   }
   body.append(list);
@@ -92,6 +100,40 @@ function folderForm(initial) {
     });
     setTimeout(() => nameInput.focus(), 0);
   });
+}
+
+// 0.37.0 "Feinschliff": smartFolders — a keyword auto-sort rule. Chats whose
+// title contains the keyword are pulled into the folder automatically (on top of
+// any manually-assigned chats). An empty keyword clears the rule.
+function ruleForm(f, body) {
+  const kw = el('input', { class: 'input', maxlength: '60',
+    placeholder: 'z. B. „Arbeit" oder ein Name', value: f.rule?.keyword || '' });
+  const m = modal({
+    title: `Auto-Regel · „${f.name}"`,
+    width: '420px',
+    body: el('div', { class: 'folder-form' }, [
+      el('div', { class: 'hint', text: 'Chats, deren Titel dieses Stichwort enthält, landen automatisch in diesem Ordner.' }),
+      el('label', { class: 'field' }, [el('span', { text: 'Stichwort' }), kw]),
+    ]),
+    foot: [
+      f.rule
+        ? el('button', { class: 'btn ghost', onClick: () => save('') }, 'Regel entfernen')
+        : null,
+      el('button', { class: 'btn primary', onClick: () => save(kw.value.trim()) }, 'Speichern'),
+    ].filter(Boolean),
+  });
+  setTimeout(() => kw.focus(), 0);
+  async function save(keyword) {
+    try {
+      const payload = keyword ? { kind: 'keyword', keyword } : { kind: 'all' };
+      const r = await api.put(`/me/folders/${f.id}/rule`, payload);
+      if (Array.isArray(r.folders)) store.state.folders = r.folders;
+      m.close();
+      store.emit('folders'); store.emit('chats');
+      if (body) paint(body);
+      toast(keyword ? 'Auto-Regel gespeichert.' : 'Auto-Regel entfernt.', 'ok');
+    } catch (e) { toast(e.message || 'Speichern fehlgeschlagen.', 'err'); }
+  }
 }
 
 async function createFolder(data, body) {

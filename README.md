@@ -30,6 +30,15 @@ Online-Status, Lesebestätigungen).
   **„Hol mich ab"**-Zusammenfassung (rein lokal) und heuristische **Smart Replies**.
   Kein Cloud-LLM, keine Datenabflüsse. Volle Oberfläche im **Web & Windows**, alle
   Server-Funktionen für **Android** per OTA.
+- **Feinschliff** (seit 0.37.0) – acht kuratierte Komfort-Features: **Sende-Effekte**
+  (Konfetti/Ballons/Herzen), **Quiz-Umfragen** (richtige Antwort, erst nach der
+  eigenen Stimme aufgedeckt), **wiederkehrende Erinnerungen** (täglich/wöchentlich),
+  **Smart-Ordner** (Stichwort-Regel sortiert Chats automatisch ein), **Diktat** im
+  Composer, **„Wer hat reagiert"**, **Auto-Übersetzung pro Chat** und ein dezenter
+  **Geburtstags-Hinweis**. Schwerpunkt Web & Windows; flag-gegated (`sendEffects`,
+  `pollQuiz`, `recurringReminders`, `smartFolders`, `voiceDictation`,
+  `reactionDetails`, `autoTranslate`, `anniversaries`). Dazu ein Barrierefreiheits-
+  Durchgang und ein reparierter Umfrage-Abstimmungs-Bug im PC-Client.
 - **Geteilte Kasse & Terminfindung** (seit 0.36.0) – teile eine **Ausgabe**
   gleichmäßig oder mit eigenen Anteilen; jeder Chat bekommt eine **Kasse** mit
   Salden pro Person, den kürzesten **Ausgleichsvorschlägen** und **„Begleichen"**

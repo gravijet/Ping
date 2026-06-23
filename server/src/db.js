@@ -1224,6 +1224,37 @@ function ensureColumns() {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_client_errors_status ON client_errors(status, last_seen)'
   );
+
+  // ---- „Feinschliff" (0.37.0): small additive columns + one side table ------
+  // All flag-gated, all purely additive (no messages.type widening → the
+  // external-content FTS5 index is left untouched, no rebuild).
+  const cm037 = db.prepare('PRAGMA table_info(chat_members)').all().map((c) => c.name);
+  // autoTranslate: per-member target language for incoming messages ('' = off).
+  if (!cm037.includes('auto_translate')) {
+    db.exec("ALTER TABLE chat_members ADD COLUMN auto_translate TEXT NOT NULL DEFAULT ''");
+  }
+  // pollQuiz: the correct option index turns a poll into a quiz (NULL = plain poll).
+  const pollCols = db.prepare('PRAGMA table_info(polls)').all().map((c) => c.name);
+  if (!pollCols.includes('correct_option')) {
+    db.exec('ALTER TABLE polls ADD COLUMN correct_option INTEGER');
+  }
+  // recurringReminders: '', 'daily' or 'weekly' — the sweep re-schedules on fire.
+  const remCols = db.prepare('PRAGMA table_info(message_reminders)').all().map((c) => c.name);
+  if (!remCols.includes('recur')) {
+    db.exec("ALTER TABLE message_reminders ADD COLUMN recur TEXT NOT NULL DEFAULT ''");
+  }
+  // sendEffects (messages.effect) is added *after* the message-type migrations
+  // below — they rebuild `messages` and would otherwise drop a column added here.
+  // smartFolders: declarative auto-sort rules attached to an existing chat_folder.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS folder_rules (
+      folder_id  TEXT PRIMARY KEY REFERENCES chat_folders(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind       TEXT NOT NULL DEFAULT 'all',
+      keyword    TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_folder_rules_user ON folder_rules(user_id)');
 }
 ensureColumns();
 
@@ -1546,6 +1577,17 @@ function migrateMessageTypes036() {
   db.exec('PRAGMA foreign_keys = ON;');
 }
 migrateMessageTypes036();
+
+// 0.37.0 "Feinschliff": sendEffects column on messages. Added *after* the
+// message-type migrations above (each rebuilds `messages` from a fixed column
+// list, which would drop a column added in ensureColumns). Purely additive — no
+// type-CHECK change, so the external-content FTS5 index is untouched.
+(() => {
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!cols.includes('effect')) {
+    db.exec("ALTER TABLE messages ADD COLUMN effect TEXT NOT NULL DEFAULT ''");
+  }
+})();
 
 // ---- Full-text search (FTS5) ----------------------------------------------
 //

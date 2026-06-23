@@ -475,8 +475,8 @@ const m = {
   insert: db.prepare(`
     INSERT INTO messages
       (id, chat_id, sender_id, type, body, attachment, reply_to, created_at,
-       expires_at, thread_root, view_once, enc)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+       expires_at, thread_root, view_once, enc, effect)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   // Bump the running thread-reply counter on a thread's root message.
   bumpThread: db.prepare(
     'UPDATE messages SET thread_count = thread_count + 1 WHERE id = ?'
@@ -520,6 +520,8 @@ export function createMessage({
   threadRoot = null,
   viewOnce = false,
   enc = false,
+  // 0.37.0: optional one-shot send effect ('' | 'confetti' | 'balloons' | 'hearts').
+  effect = '',
 }) {
   const id = uid();
   const ts = now();
@@ -529,7 +531,7 @@ export function createMessage({
   tx(() => {
     m.insert.run(
       id, chatId, senderId, type, body, att, replyTo, ts, expiresAt,
-      threadRoot, viewOnce ? 1 : 0, enc ? 1 : 0
+      threadRoot, viewOnce ? 1 : 0, enc ? 1 : 0, effect || ''
     );
     // A thread reply bumps the running count on its root message.
     if (threadRoot) m.bumpThread.run(threadRoot);
@@ -1003,8 +1005,8 @@ function myReactions(messageId, viewerId) {
 
 const p = {
   insert: db.prepare(`
-    INSERT INTO polls (id, message_id, chat_id, question, options, multi, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO polls (id, message_id, chat_id, question, options, multi, created_at, correct_option)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   byMessage: db.prepare('SELECT * FROM polls WHERE message_id = ?'),
   votes: db.prepare(
     'SELECT option_index, COUNT(*) AS n FROM poll_votes WHERE poll_id = ? GROUP BY option_index'
@@ -1024,10 +1026,15 @@ const p = {
   clearVotes: db.prepare('DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?'),
 };
 
-/// Create the poll row backing a freshly-created 'poll' message.
-export function createPoll({ messageId, chatId, question, options, multi = false }) {
+/// Create the poll row backing a freshly-created 'poll' message. A non-null
+/// `correct` index turns it into a quiz (always single-choice; multi is ignored).
+export function createPoll({ messageId, chatId, question, options, multi = false, correct = null }) {
   const id = uid();
-  p.insert.run(id, messageId, chatId, question, JSON.stringify(options), multi ? 1 : 0, now());
+  const isQuiz = Number.isInteger(correct) && correct >= 0 && correct < options.length;
+  p.insert.run(
+    id, messageId, chatId, question, JSON.stringify(options),
+    isQuiz ? 0 : (multi ? 1 : 0), now(), isQuiz ? correct : null
+  );
   return p.byMessage.get(messageId);
 }
 
@@ -1062,12 +1069,20 @@ export function pollView(messageId, viewerId) {
   if (!poll) return null;
   const texts = JSON.parse(poll.options);
   const counts = new Map(p.votes.all(poll.id).map((r) => [r.option_index, r.n]));
+  const myVotes = p.myVotes.all(poll.id, viewerId).map((r) => r.option_index);
+  // 0.37.0 "Feinschliff": quiz mode. The correct answer is only revealed once the
+  // viewer has cast their vote (so it isn't spoiled) — undefined until then.
+  const isQuiz = poll.correct_option != null;
+  const revealed = isQuiz && myVotes.length > 0;
   return {
     question: poll.question,
     multi: !!poll.multi,
     options: texts.map((text, i) => ({ text, votes: counts.get(i) || 0 })),
-    myVotes: p.myVotes.all(poll.id, viewerId).map((r) => r.option_index),
+    myVotes,
     totalVoters: p.voters.get(poll.id).n,
+    quiz: isQuiz,
+    // Revealed answer index, or null until the viewer has voted.
+    correct: revealed ? poll.correct_option : null,
   };
 }
 
@@ -1126,6 +1141,8 @@ export function messageView(msg, viewerId) {
     viewOnce: !!msg.view_once,
     viewed: !!msg.viewed_at,
     enc: !!msg.enc,
+    // 0.37.0 "Feinschliff": one-shot send effect (confetti/balloons/hearts).
+    effect: msg.effect || '',
     // 0.27.0: chat-wide pin state + this viewer's personal bookmark.
     pinned: msg.deleted_at ? false : isMessagePinned(msg.id),
     starred: msg.deleted_at ? false : isMessageStarred(viewerId, msg.id),

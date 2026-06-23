@@ -295,6 +295,43 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Feinschliff — curated polish (0.37.0)
+Eight small, flag-gated comfort features, deliberately built on existing infra:
+**no** `messages.type` widening, so the external-content FTS5 index is untouched
+(no rebuild). All new state is **additive** — columns via `ensureColumns()` plus one
+side table — and the work is **web/desktop-first** (Windows inherits via WebView2).
+
+- **Schema.** `ensureColumns()` adds `chat_members.auto_translate`,
+  `polls.correct_option`, `message_reminders.recur` and one side table
+  `folder_rules`. `messages.effect` is added in a tiny IIFE **after** the
+  `migrateMessageTypes*()` rebuilds (each recreates `messages` from a fixed column
+  list, so a column added in `ensureColumns()` would be dropped). Verified on a
+  `VACUUM INTO` prod snapshot (62→62 messages, FTS intact, CHECK unchanged).
+- **sendEffects.** `messages.effect` ('' | confetti | balloons | hearts) threads
+  through `createMessage` + `messageView`; the send route gates it on the flag.
+  Web `feinschliff.js` `playEffect()` spawns a reduced-motion-aware particle layer;
+  the bubble renderer plays it once per id within an ~8 s recency window.
+- **pollQuiz.** `polls.correct_option` (NULL = plain poll). `pollView` reveals
+  `correct` **only after the viewer has voted**; a quiz is forced single-choice.
+- **recurringReminders.** `message_reminders.recur`; `rescheduleRecurring()` re-arms
+  a fired reminder one period out (skipping missed periods) inside the maintenance
+  sweep, then pushes a `reminder-updated`.
+- **smartFolders.** `folder_rules` (one keyword rule per folder). `foldersWithRules()`
+  unions `matchChatsForKeyword()` (group name / direct-partner name LIKE) into a
+  folder's `chatIds` at list time; `PUT /me/folders/:id/rule`.
+- **reactionDetails.** `GET /chats/:id/messages/:msgId/reactions` → reactors grouped
+  by emoji (`reactorsFor`); web long-press/right-click opens a detail sheet.
+- **autoTranslate.** `chat_members.auto_translate` (per-member target lang, '' = off,
+  synced); `GET`/`POST /chats/:id/auto-translate`. Translation itself runs client-side
+  against the existing `/translate` proxy for fresh inbound text.
+- **anniversaries.** `GET /me/anniversaries` derives upcoming birthdays of direct-chat
+  contacts from the existing `users.birthday`; web shows a once-per-day toast.
+- **voiceDictation.** Client-only Web Speech API dictation into the composer (no
+  server). New server module: `feinschliffRepo.js`; web module: `feinschliff.js`.
+- **Fixed.** Web poll voting posted `optionIndex` while the server reads `option` —
+  every web poll vote had silently 400'd; now corrected. Plus a web a11y pass
+  (`aria-label`s on icon-only buttons, keyboard-reachable nav avatar).
+
 ## Zusammen — money & time (0.36.0)
 Two more **structured message types** on the poll pattern, kill-switchable via
 `splitExpenses` / `availabilityPolls`. `migrateMessageTypes036()` widens the

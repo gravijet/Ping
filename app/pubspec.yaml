@@ -5,7 +5,7 @@ publish_to: 'none'
 # per-ABI split code ever shipped (x86_64 = 4042) so devices stuck on an inflated
 # split code can upgrade in place, and every variant now shares one code (see the
 # AGP `splits` block + comment in android/app/build.gradle.kts). Just increment by 1.
-version: 0.36.2+5001
+version: 0.37.0+5002
 
 environment:
   sdk: ^3.12.1

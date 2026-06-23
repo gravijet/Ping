@@ -228,7 +228,7 @@ export function modal({ title, body, foot = [], width, onClose } = {}) {
   const close = () => { back.remove(); onClose && onClose(); };
   const head = el('div', { class: 'modal-head' }, [
     el('h3', { text: title || '' }),
-    el('button', { class: 'iconbtn', onClick: close }, icon('close')),
+    el('button', { class: 'iconbtn', title: 'Schließen', 'aria-label': 'Schließen', onClick: close }, icon('close')),
   ]);
   const bodyNode = el('div', { class: 'modal-body' });
   if (typeof body === 'function') body(bodyNode); else if (body) bodyNode.append(body);

@@ -85,6 +85,15 @@ export const DEFAULT_CONFIG = {
     // ── „Zusammen" (0.36.0) — coordinate money & time ─────────────────────
     splitExpenses: true,    // shared expenses / split bills (Geteilte Kasse) + ledger
     availabilityPolls: true, // find-a-time availability polls (Terminfindung)
+    // ── „Feinschliff" (0.37.0) — curated polish features ──────────────────
+    autoTranslate: true,      // per-chat auto-translation of incoming messages
+    pollQuiz: true,           // quiz mode for polls (a correct answer + reveal)
+    recurringReminders: true, // daily/weekly recurring message reminders
+    smartFolders: true,       // keyword auto-sort rules for chat folders
+    sendEffects: true,        // one-shot confetti/balloon/heart effect on send
+    voiceDictation: true,     // on-device speech-to-text in the composer
+    reactionDetails: true,    // "who reacted" detail sheet on a reaction
+    anniversaries: true,      // birthday / anniversary hints for contacts
   },
   values: {
     maxStatusSeconds: 30,

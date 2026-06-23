@@ -164,6 +164,8 @@ export const messageSendSchema = z
     // text-needs-body rule (the body is opaque ciphertext).
     viewOnce: z.boolean().optional(),
     enc: z.boolean().optional(),
+    // 0.37.0: one-shot send effect played on arrival.
+    effect: z.enum(['confetti', 'balloons', 'hearts']).optional(),
   })
   .refine(
     (d) => {
@@ -619,6 +621,9 @@ export const pollCreateSchema = z.object({
     .min(2, 'Eine Umfrage braucht mindestens 2 Antworten.')
     .max(12, 'Höchstens 12 Antworten pro Umfrage.'),
   multi: z.boolean().optional(),
+  // 0.37.0 "Feinschliff": quiz mode — the index of the single correct answer.
+  // null/omitted = a plain poll. A quiz is always single-choice.
+  correct: z.number().int().min(0).max(11).nullable().optional(),
 });
 
 // Voting toggles one option by its index.
@@ -917,6 +922,26 @@ export const reminderCreateSchema = z.object({
     .refine((t) => t > Date.now() - 60_000, 'Der Zeitpunkt liegt in der Vergangenheit.')
     .refine((t) => t < Date.now() + 366 * 86400_000, 'Höchstens 1 Jahr im Voraus.'),
   note: z.string().trim().max(500, 'Die Notiz ist zu lang.').optional().default(''),
+  // 0.37.0 "Feinschliff": a recurring reminder re-schedules itself when it fires.
+  recur: z.enum(['', 'daily', 'weekly']).optional().default(''),
+});
+
+// 0.37.0 "Feinschliff": a folder's keyword auto-sort rule. kind 'all' clears it.
+export const folderRuleSchema = z.object({
+  kind: z.enum(['all', 'keyword']),
+  keyword: z.string().trim().max(60, 'Das Stichwort ist zu lang.').optional().default(''),
+});
+
+// 0.37.0 "Feinschliff": per-chat auto-translation target ('' = off). A short
+// ISO-639-1-ish language code, or empty to disable.
+export const autoTranslateSchema = z.object({
+  lang: z
+    .string()
+    .trim()
+    .max(8, 'Ungültiger Sprachcode.')
+    .regex(/^[a-zA-Z-]*$/, 'Ungültiger Sprachcode.')
+    .optional()
+    .default(''),
 });
 
 // A quick reply (canned response): required body, optional short "/shortcut".

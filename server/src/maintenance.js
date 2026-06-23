@@ -32,6 +32,8 @@ import {
   markReminderFired,
   purgeFiredReminders,
   reminderView,
+  rescheduleRecurring,
+  getReminder,
 } from './remindersRepo.js';
 import {
   dueScheduledBroadcasts,
@@ -121,6 +123,12 @@ export function runMaintenance() {
           messageId: reminder.messageId,
         },
       }).catch(() => {});
+      // 0.37.0 "Feinschliff": a recurring reminder re-arms for the next occurrence
+      // instead of staying fired. The owner's pane gets the updated remindAt.
+      if (row.recur) {
+        rescheduleRecurring(row);
+        sendToUser(row.user_id, 'reminder-updated', { reminder: reminderView(getReminder(row.id)) });
+      }
       firedReminders++;
     } catch (e) {
       console.error('[maintenance] Erinnerung fehlgeschlagen:', e.message);

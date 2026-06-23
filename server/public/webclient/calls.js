@@ -271,7 +271,7 @@ function renderCall() {
 }
 
 function callBtn(ic, cls, onClick, title) {
-  return el('button', { class: `call-btn ${cls}`, title, onClick }, icon(ic));
+  return el('button', { class: `call-btn ${cls}`, title, 'aria-label': title, onClick }, icon(ic));
 }
 
 function duration() {

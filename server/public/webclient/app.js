@@ -172,6 +172,8 @@ async function enterApp() {
   if (flag('quickReplies')) quickreplies.sync();
   // Focus mode / quiet hours: load current state so the nav indicator is right.
   if (flag('focusMode')) focus.sync().then(refreshFocusNav);
+  // 0.37.0 "Feinschliff": a gentle once-per-day birthday/anniversary hint.
+  if (flag('anniversaries')) maybeShowAnniversaries();
   refreshBadges();
   refreshActivityBadge();
   updateConnectionBanner();
@@ -181,6 +183,22 @@ async function enterApp() {
   syncWebPush(prefs.get('webPush')).catch(() => {});
   telemetry.track('app_ready', { chats: store.state.chats.size });
   prefetchModules();
+}
+
+// 0.37.0 "Feinschliff": show today's birthdays among the user's contacts as a
+// single gentle toast, at most once per calendar day (tracked in localStorage).
+async function maybeShowAnniversaries() {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem('ping.anniv.seen') === today) return;
+    const fs = await import('./feinschliff.js');
+    const list = await fs.loadAnniversaries();
+    const due = (list || []).filter((a) => a.inDays === 0);
+    if (!due.length) return;
+    localStorage.setItem('ping.anniv.seen', today);
+    toast(due.length === 1 ? fs.anniversaryText(due[0])
+      : `🎂 ${due.length} Kontakte haben heute Geburtstag!`, 'ok');
+  } catch { /* best-effort */ }
 }
 
 // Once interactive, warm the lazily-imported section modules during idle time so
@@ -235,29 +253,34 @@ function buildNavRail(me) {
     flag('communities') ? navItem('discover', 'compass', 'Entdecken') : null,
   ].filter(Boolean));
   const themeBtn = el('button', { class: 'nav-item', id: 'nav-theme', 'data-label': 'Design',
-    title: 'Hell/Dunkel', onClick: () => { toggleTheme(); refreshThemeNav(); } },
+    title: 'Hell/Dunkel', 'aria-label': 'Design wechseln (hell/dunkel)',
+    onClick: () => { toggleTheme(); refreshThemeNav(); } },
     icon(prefs.isLight() ? 'moon' : 'sun'));
 
   // Activity / notifications bell — opens the feed; carries an unseen-count badge.
   const activityBtn = flag('activityCenter')
     ? el('button', { class: 'nav-item', id: 'nav-activity', 'data-label': 'Aktivität',
-        title: 'Aktivität', onClick: () => activity.openActivityPanel(openChatInShell) }, icon('bell'))
+        title: 'Aktivität', 'aria-label': 'Aktivität', onClick: () => activity.openActivityPanel(openChatInShell) }, icon('bell'))
     : null;
 
   // Global full-text search — opens the dedicated search surface.
   const searchBtn = flag('messageSearch')
     ? el('button', { class: 'nav-item', id: 'nav-search', 'data-label': 'Suche',
-        title: 'Suche (Strg/⌘ K)', onClick: () => openSearch(openChatInShell) }, icon('search'))
+        title: 'Suche (Strg/⌘ K)', 'aria-label': 'Suche', onClick: () => openSearch(openChatInShell) }, icon('search'))
     : null;
 
   // Focus / quiet-hours toggle — lights up while push is being held back.
   const focusBtn = flag('focusMode')
     ? el('button', { class: 'nav-item', id: 'nav-focus', 'data-label': 'Fokus',
-        title: 'Fokus & Ruhezeiten', onClick: () => focus.openFocus() }, icon('moon'))
+        title: 'Fokus & Ruhezeiten', 'aria-label': 'Fokus & Ruhezeiten', onClick: () => focus.openFocus() }, icon('moon'))
     : null;
 
+  // The avatar opens settings — keep it keyboard-reachable (role=button + Enter/Space).
   const navAvatar = el('div', { class: 'nav-avatar', id: 'nav-avatar', title: 'Profil & Einstellungen',
-    onClick: openSettings }, avatar(me, 42, { kind: 'user' }));
+    role: 'button', tabindex: '0', 'aria-label': 'Profil & Einstellungen',
+    onClick: openSettings,
+    onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSettings(); } },
+  }, avatar(me, 42, { kind: 'user' }));
 
   return el('aside', { class: 'navrail' }, [
     el('div', { class: 'nav-logo', text: 'P' }),
@@ -296,7 +319,8 @@ function refreshFocusNav() {
 
 function navItem(section, iconName, label) {
   const b = el('button', { class: `nav-item ${currentSection === section ? 'active' : ''}`,
-    'data-label': label, title: label, onClick: () => setSection(section) }, icon(iconName));
+    'data-label': label, title: label, 'aria-label': label,
+    onClick: () => setSection(section) }, icon(iconName));
   b.dataset.section = section;
   return b;
 }
@@ -425,7 +449,7 @@ function openChatInShell(chatId, messageId) {
 export { openChatInShell };
 
 function iconBtn(name, title, onClick) {
-  return el('button', { class: 'iconbtn', title, onClick }, icon(name));
+  return el('button', { class: 'iconbtn', title, 'aria-label': title, onClick }, icon(name));
 }
 
 // Mark every chat as read (clears unread counts + the manual "unread" flag).

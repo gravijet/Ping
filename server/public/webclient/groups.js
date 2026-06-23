@@ -7,6 +7,7 @@ import * as store from './store.js';
 import { el, clear, icon, avatar, modal, toast, confirmModal } from './ui.js';
 import { pickFile } from './media.js';
 import { lookup, userRow, openProfile } from './contacts.js';
+import { flag } from './flags.js';
 
 // ---- create group ---------------------------------------------------------
 export function newGroupModal() {
@@ -225,25 +226,55 @@ export async function leaveGroup(chatId) {
 // ---- poll -----------------------------------------------------------------
 export function newPollModal(chatId) {
   const q = el('input', { class: 'input', placeholder: 'Frage' });
-  const optsBox = el('div');
+  const optsBox = el('div', { class: 'poll-opts' });
   const err = el('div', { class: 'formerr' });
+  // 0.37.0 "Feinschliff": optional quiz mode — mark the one correct answer.
+  const quizAvailable = flag('pollQuiz');
+  let quiz = false;
+  // Each option row is [optional correct-radio] + [text input].
   const addOpt = (val = '') => {
-    const i = el('input', { class: 'input', placeholder: 'Option', value: val, style: { marginBottom: '8px' } });
-    optsBox.appendChild(i);
-    i.addEventListener('input', () => { if (i === optsBox.lastChild && i.value.trim()) addOpt(); });
+    const i = el('input', { class: 'input', placeholder: 'Option', value: val });
+    const radio = el('input', { type: 'radio', name: 'poll-correct', title: 'Richtige Antwort',
+      'aria-label': 'Als richtig markieren' });
+    const row = el('div', { class: `poll-opt-row ${quiz ? 'quiz' : ''}` }, [radio, i]);
+    optsBox.appendChild(row);
+    i.addEventListener('input', () => { if (row === optsBox.lastChild && i.value.trim()) addOpt(); });
   };
   addOpt(); addOpt();
+  const quizToggle = quizAvailable
+    ? el('label', { class: 'check-row' }, [
+        el('input', { type: 'checkbox', onChange: (e) => {
+          quiz = e.target.checked;
+          optsBox.classList.toggle('quiz', quiz);
+          optsBox.querySelectorAll('.poll-opt-row').forEach((r) => r.classList.toggle('quiz', quiz));
+        } }),
+        el('span', { text: 'Quiz-Modus (eine richtige Antwort)' }),
+      ])
+    : null;
   const m = modal({
     title: 'Umfrage erstellen',
-    body: (b) => b.append(el('div', { class: 'field' }, [el('label', { text: 'Frage' }), q]),
-      el('label', { class: 'hint', text: 'Optionen' }), optsBox, err),
+    body: (b) => b.append(
+      el('div', { class: 'field' }, [el('label', { text: 'Frage' }), q]),
+      el('label', { class: 'hint', text: 'Optionen' }), optsBox,
+      quizToggle, err),
     foot: [el('button', { class: 'btn primary', onClick: create }, 'Erstellen')],
   });
   async function create() {
     err.textContent = '';
-    const options = [...optsBox.querySelectorAll('input')].map((i) => i.value.trim()).filter(Boolean);
-    if (!q.value.trim() || options.length < 2) { err.textContent = 'Frage und mind. 2 Optionen.'; return; }
-    try { await api.post(`/chats/${chatId}/polls`, { question: q.value.trim(), options }); m.close(); }
+    const rows = [...optsBox.querySelectorAll('.poll-opt-row')];
+    const options = rows.map((r) => r.querySelector('input.input').value.trim());
+    const filled = options.filter(Boolean);
+    if (!q.value.trim() || filled.length < 2) { err.textContent = 'Frage und mind. 2 Optionen.'; return; }
+    let correct = null;
+    if (quiz) {
+      // Index of the checked radio, counted among non-empty options.
+      const checkedRow = rows.findIndex((r) => r.querySelector('input[type=radio]').checked);
+      if (checkedRow < 0 || !options[checkedRow]) { err.textContent = 'Bitte die richtige Antwort markieren.'; return; }
+      correct = options.slice(0, checkedRow + 1).filter(Boolean).length - 1;
+    }
+    const payload = { question: q.value.trim(), options: filled };
+    if (quiz) payload.correct = correct;
+    try { await api.post(`/chats/${chatId}/polls`, payload); m.close(); }
     catch (e) { err.textContent = e.message; }
   }
 }
