@@ -258,6 +258,29 @@ class UpdateService {
     }
   }
 
+  /// Whether the app is allowed to install APKs at all. Android 8+ gates
+  /// sideloading behind a per-app "Install unknown apps" consent; without it
+  /// every update install fails. Defaults to true so a failure here never blocks
+  /// the flow (the install itself would still surface a real error).
+  Future<bool> canInstall() async {
+    if (!supported) return true;
+    try {
+      return await _native.invokeMethod<bool>('canInstallPackages') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Open the system screen where the user grants this app the install consent.
+  Future<void> requestInstallPermission() async {
+    if (!supported) return;
+    try {
+      await _native.invokeMethod('requestInstallPermission');
+    } catch (_) {
+      /* best effort */
+    }
+  }
+
   /// The reason the most recent install attempt failed (e.g. blocked by Samsung
   /// Auto Blocker / Play Protect, a signature conflict, or low storage), or null
   /// if none is pending. Reading it clears it on the native side.

@@ -24,6 +24,7 @@ import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -92,6 +93,15 @@ class MainActivity : FlutterActivity() {
                     // Poll + clear the reason the last install failed (e.g. blocked
                     // by Samsung Auto Blocker / Play Protect), so Dart can show it.
                     "installError" -> result.success(consumeInstallError())
+                    // Pre-flight: whether this app is allowed to install APKs at all
+                    // (the per-source "Install unknown apps" consent on Android 8+).
+                    // Without it every update install silently fails — so the sheet
+                    // checks this first and, if false, routes the user to grant it.
+                    "canInstallPackages" -> result.success(canInstallPackages())
+                    "requestInstallPermission" -> {
+                        requestInstallPermission()
+                        result.success(null)
+                    }
                     // --- Device intelligence: read-only hardware/OS diagnostics ---
                     // None of these need a runtime permission; each is wrapped so a
                     // vendor quirk degrades to a partial/empty map rather than a
@@ -490,6 +500,39 @@ class MainActivity : FlutterActivity() {
         val e = lastInstallError
         lastInstallError = null
         return e
+    }
+
+    /**
+     * Whether this app may install packages. Android 8+ gates sideloading behind a
+     * per-app "Install unknown apps" consent; without it every update install
+     * fails. Older versions allow it outright (manifest permission suffices).
+     */
+    private fun canInstallPackages(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            packageManager.canRequestPackageInstalls()
+        } else {
+            true
+        }
+
+    /** Open the system screen where the user grants this app the install consent. */
+    private fun requestInstallPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val withPkg = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+            .setData(Uri.parse("package:$packageName"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            startActivity(withPkg)
+        } catch (_: Exception) {
+            // Some ROMs reject the package-scoped form; fall back to the list screen.
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+                /* nothing else we can do */
+            }
+        }
     }
 
     override fun onDestroy() {

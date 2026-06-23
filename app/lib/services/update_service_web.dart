@@ -57,6 +57,10 @@ class UpdateService {
 
   Future<bool> installBackground(int id) async => false;
 
+  Future<bool> canInstall() async => true;
+
+  Future<void> requestInstallPermission() async {}
+
   Future<String?> installError() async => null;
 
   Future<void> cancelBackground(int id) async {}

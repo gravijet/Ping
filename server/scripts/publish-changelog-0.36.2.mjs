@@ -18,6 +18,8 @@ angehören.
 - Die App installiert das Update jetzt über das **moderne Installations-Verfahren**
   von Android, statt die Datei nur an das System zu „übergeben". Das ist deutlich
   zuverlässiger – besonders auf Samsung-Geräten.
+- **Vorab-Check:** Fehlt die Erlaubnis „Unbekannte Apps installieren", bringt dich
+  ein Knopf direkt zur richtigen Einstellung – statt in einen stillen Fehlschlag.
 - **Wenn doch mal etwas blockiert**, sagt dir die App jetzt **warum** und was zu tun
   ist – z. B. dass **Samsung „Auto Blocker"** (Einstellungen → Sicherheit) die
   Installation verhindert und kurz ausgeschaltet werden muss.

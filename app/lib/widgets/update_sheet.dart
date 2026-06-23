@@ -27,7 +27,15 @@ class _UpdateSheet extends StatefulWidget {
   State<_UpdateSheet> createState() => _UpdateSheetState();
 }
 
-enum _Phase { checking, available, upToDate, downloading, installing, error }
+enum _Phase {
+  checking,
+  available,
+  upToDate,
+  downloading,
+  installing,
+  permission, // app isn't allowed to install apps yet → guide the user to grant it
+  error,
+}
 
 class _UpdateSheetState extends State<_UpdateSheet> {
   _Phase _phase = _Phase.checking;
@@ -231,6 +239,13 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   Future<void> _install() async {
     final updater = _updater;
     if (updater == null) return;
+    // Pre-flight: an update can only install if the app holds the "Install unknown
+    // apps" consent. Without it the install would silently fail — so route the
+    // user to grant it first instead of letting them hit a dead end.
+    if (!await updater.canInstall()) {
+      if (mounted) setState(() => _phase = _Phase.permission);
+      return;
+    }
     if (mounted) {
       setState(() {
         _failReason = null;
@@ -437,6 +452,39 @@ class _UpdateSheetState extends State<_UpdateSheet> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           SizedBox(height: 18),
           LinearProgressIndicator(),
+        ];
+      case _Phase.permission:
+        return [
+          const Text('Installation erlauben',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text(
+            'Damit Ping das Update installieren kann, musst du es einmalig '
+            'erlauben. Android öffnet die Einstellung — aktiviere dort '
+            '„Aus dieser Quelle zulassen" und komm zurück.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () async {
+                await _updater?.requestInstallPermission();
+              },
+              icon: const Icon(Icons.settings_rounded),
+              label: const Text('Einstellung öffnen'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              // Back from settings → try the install again; if granted it proceeds.
+              onPressed: _install,
+              child: const Text('Erlaubt — weiter'),
+            ),
+          ),
         ];
       case _Phase.error:
         return [
