@@ -233,16 +233,38 @@ export function toast(msg, kind = '') {
 // modal({ title, body(node), foot:[buttons], onClose }) → { close }
 export function modal({ title, body, foot = [], width, onClose } = {}) {
   const root = document.getElementById('modal-root');
+  // a11y: remember what had focus so we can hand it back when the dialog closes.
+  const prevFocus = document.activeElement;
+  // The tabbable elements inside the dialog (for the focus trap + initial focus).
+  const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), ' +
+    'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const focusable = () => {
+    try { return [...box.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null); }
+    catch { return []; }
+  };
   // close() must be idempotent and always unbind the keydown listener — otherwise
   // closing via the X / backdrop / a footer button (anything but Escape) leaks the
   // listener on `document` and re-fires onClose on Escape for already-closed modals.
   let closed = false;
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key !== 'Tab') return;
+    // Focus trap: keep Tab cycling inside the dialog instead of escaping to the
+    // (inert) page behind it.
+    const items = focusable();
+    if (!items.length) { e.preventDefault(); box.focus?.(); return; }
+    const first = items[0], last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !box.contains(active))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (active === last || !box.contains(active))) { e.preventDefault(); first.focus(); }
+  };
   const close = () => {
     if (closed) return;
     closed = true;
     document.removeEventListener('keydown', onKey);
     back.remove();
+    // a11y: return focus to wherever it was before the dialog opened.
+    try { prevFocus?.focus?.(); } catch { /* element gone */ }
     onClose && onClose();
   };
   const head = el('div', { class: 'modal-head' }, [
@@ -251,14 +273,19 @@ export function modal({ title, body, foot = [], width, onClose } = {}) {
   ]);
   const bodyNode = el('div', { class: 'modal-body' });
   if (typeof body === 'function') body(bodyNode); else if (body) bodyNode.append(body);
-  const box = el('div', { class: 'modal', style: width ? { maxWidth: width } : {} },
-    [head, bodyNode]);
+  const box = el('div', {
+    class: 'modal', role: 'dialog', 'aria-modal': 'true',
+    'aria-label': title || 'Dialog', tabindex: '-1',
+    style: width ? { maxWidth: width } : {},
+  }, [head, bodyNode]);
   if (foot.length) box.appendChild(el('div', { class: 'modal-foot' }, foot));
   const back = el('div', { class: 'modal-back', onClick: (e) => {
     if (e.target === back) close();
   } }, box);
   document.addEventListener('keydown', onKey);
   root.appendChild(back);
+  // Move focus into the dialog (first focusable control, else the dialog itself).
+  (focusable()[0] || box).focus?.();
   return { close, body: bodyNode };
 }
 
