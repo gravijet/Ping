@@ -528,7 +528,7 @@ const m = {
 const DEDUP_TTL_MS = 10 * 60 * 1000;
 const DEDUP_MAX = 5000;
 const recentSends = new Map(); // key -> { id, exp }
-const dedupKey = (chatId, senderId, clientId) => `${chatId} ${senderId} ${clientId}`;
+const dedupKey = (chatId, senderId, clientId) => JSON.stringify([chatId, senderId, clientId]);
 
 /// If [clientId] was already used for a send in this chat by this sender (within
 /// the TTL), return that existing message row — else null. Lets the send route
