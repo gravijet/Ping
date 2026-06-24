@@ -8,11 +8,15 @@ import * as store from './store.js';
 import * as prefs from './prefs.js';
 import { el, clear, icon, avatar, chatTime, toast } from './ui.js';
 
+let prefsUnsub = null;
+
 export async function renderSavedPane(head, body, openChat) {
   clear(head).append(el('div', { class: 'pane-title', text: 'Gespeichert' }));
   paint(body, openChat);
-  // Re-render when stars change elsewhere.
-  store.on('prefs', () => { if (document.body.contains(body)) paint(body, openChat); });
+  // Re-render when stars change elsewhere. Drop the previous render's listener so
+  // re-entering the pane doesn't pile up stale closures pinning old containers.
+  prefsUnsub?.();
+  prefsUnsub = store.on('prefs', () => { if (document.body.contains(body)) paint(body, openChat); });
 }
 
 function paint(body, openChat) {

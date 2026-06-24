@@ -13,16 +13,22 @@ import { flag } from './flags.js';
 import * as drafts from './drafts.js';
 
 let archiveOpen = false;
+let listSubs = [];
 
 export function renderChatList(container, onSelect) {
+  // renderChatsSection() re-runs every time the user navigates back to the Chats
+  // tab, so each render must drop the previous render's subscriptions. Otherwise
+  // a fresh `draw` closure is added to the store on every visit and never removed
+  // — the stale closures pin dead containers and re-fire on every presence/typing
+  // emit (a growing memory + CPU leak).
+  listSubs.forEach((u) => u());
+  listSubs = [];
   const draw = () => paint(container, onSelect);
-  // Subscribe once per container; the store keeps a Set so re-subscribing on a
-  // fresh render is cheap and the old closures are GC'd with the old container.
-  store.on('chats', draw);
-  store.on('presence', draw);
-  store.on('typing', draw);
-  store.on('prefs', draw);
-  drafts.onChange(draw); // a saved/cleared draft updates the row indicator live
+  listSubs.push(store.on('chats', draw));
+  listSubs.push(store.on('presence', draw));
+  listSubs.push(store.on('typing', draw));
+  listSubs.push(store.on('prefs', draw));
+  listSubs.push(drafts.onChange(draw)); // a saved/cleared draft updates the row indicator live
   draw();
 }
 

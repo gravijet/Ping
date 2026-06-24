@@ -233,7 +233,18 @@ export function toast(msg, kind = '') {
 // modal({ title, body(node), foot:[buttons], onClose }) → { close }
 export function modal({ title, body, foot = [], width, onClose } = {}) {
   const root = document.getElementById('modal-root');
-  const close = () => { back.remove(); onClose && onClose(); };
+  // close() must be idempotent and always unbind the keydown listener — otherwise
+  // closing via the X / backdrop / a footer button (anything but Escape) leaks the
+  // listener on `document` and re-fires onClose on Escape for already-closed modals.
+  let closed = false;
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('keydown', onKey);
+    back.remove();
+    onClose && onClose();
+  };
   const head = el('div', { class: 'modal-head' }, [
     el('h3', { text: title || '' }),
     el('button', { class: 'iconbtn', title: 'Schließen', 'aria-label': 'Schließen', onClick: close }, icon('close')),
@@ -246,9 +257,7 @@ export function modal({ title, body, foot = [], width, onClose } = {}) {
   const back = el('div', { class: 'modal-back', onClick: (e) => {
     if (e.target === back) close();
   } }, box);
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-  });
+  document.addEventListener('keydown', onKey);
   root.appendChild(back);
   return { close, body: bodyNode };
 }

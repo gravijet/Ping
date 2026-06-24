@@ -101,6 +101,9 @@ function openDrawBoard(m) {
     body: (b) => b.append(el('div', { class: 'wb-tools' }, [el('label', { text: 'Farbe' }), color,
       el('button', { class: 'btn small', onClick: async () => { try { await api.post(`/chats/${chatId}/messages/${m.id}/whiteboard/clear`, {}); wb.strokes = []; repaint(); } catch {} } }, 'Leeren')]), canvas),
     foot: [el('button', { class: 'btn primary', onClick: () => store.emit('close-modals') }, 'Fertig')],
+    // The canvas-bound listeners die with the node, but the global mouseup does
+    // not — drop it on close so it can't pile up (and pin the old canvas) per open.
+    onClose: () => window.removeEventListener('mouseup', end),
   });
 }
 
