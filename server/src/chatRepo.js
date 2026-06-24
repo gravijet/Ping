@@ -1,4 +1,4 @@
-import { db, now, tx, ftsAvailable } from './db.js';
+import { db, now, tx, ftsAvailable, safeJson } from './db.js';
 import { uid, pickAvatarColor, getUserById, publicUser } from './repo.js';
 import { eventView } from './eventsRepo.js';
 import { taskListView } from './tasksRepo.js';
@@ -591,11 +591,11 @@ export function openViewOnce(messageId, viewerId) {
   if (!msg || !msg.view_once || msg.deleted_at) return { ok: false };
   if (msg.sender_id === viewerId) {
     // The sender can re-check their own; just hand back the attachment.
-    return { ok: true, attachment: msg.attachment ? JSON.parse(msg.attachment) : null };
+    return { ok: true, attachment: safeJson(msg.attachment) };
   }
   if (msg.viewed_at) return { ok: false, spent: true };
   markViewedStmt.run(now(), messageId);
-  return { ok: true, attachment: msg.attachment ? JSON.parse(msg.attachment) : null };
+  return { ok: true, attachment: safeJson(msg.attachment) };
 }
 
 // ---- Pins / stars / drafts (0.27.0 "Ordnung & Ausdruck") -------------------
@@ -1076,7 +1076,7 @@ export const getPollByMessage = (messageId) => p.byMessage.get(messageId);
 export function votePoll(messageId, userId, optionIndex) {
   const poll = p.byMessage.get(messageId);
   if (!poll) return false;
-  const options = JSON.parse(poll.options);
+  const options = safeJson(poll.options, []);
   if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= options.length) {
     return false;
   }
@@ -1097,7 +1097,7 @@ export function votePoll(messageId, userId, optionIndex) {
 export function pollView(messageId, viewerId) {
   const poll = p.byMessage.get(messageId);
   if (!poll) return null;
-  const texts = JSON.parse(poll.options);
+  const texts = safeJson(poll.options, []);
   const counts = new Map(p.votes.all(poll.id).map((r) => [r.option_index, r.n]));
   const myVotes = p.myVotes.all(poll.id, viewerId).map((r) => r.option_index);
   // 0.37.0 "Feinschliff": quiz mode. The correct answer is only revealed once the
@@ -1130,7 +1130,7 @@ export function messageView(msg, viewerId) {
     attachment:
       msg.deleted_at || !msg.attachment || viewOnceSpent
         ? null
-        : JSON.parse(msg.attachment),
+        : safeJson(msg.attachment),
     replyTo: msg.reply_to,
     // Inline snapshot of the quoted message (null when this isn't a reply).
     quoted: msg.reply_to ? quotedView(msg.reply_to) : null,

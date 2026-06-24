@@ -1985,6 +1985,20 @@ export function now() {
   return Date.now();
 }
 
+/// Parse a JSON column defensively. The server writes these columns itself, so
+/// they are normally well-formed — but a single corrupt/legacy/truncated row
+/// must never 500 a whole list endpoint (e.g. one bad `messages.attachment`
+/// taking down an entire chat fetch). Returns [fallback] on null/garbage.
+export function safeJson(raw, fallback = null) {
+  if (raw == null || raw === '') return fallback;
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 /// Run [fn] inside a single SQLite transaction (BEGIN/COMMIT, ROLLBACK on
 /// throw). Used for multi-row writes (e.g. seeding receipt rows for a group
 /// message) so they hit the disk as one atomic unit instead of N autocommits.

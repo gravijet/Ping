@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { config } from './config.js';
 import { uid, publicUser, getUserById } from './repo.js';
 
@@ -67,7 +67,7 @@ export function adminListStatuses() {
     authorColor: row.author_color,
     type: row.type,
     body: row.body,
-    attachment: row.attachment ? JSON.parse(row.attachment) : null,
+    attachment: safeJson(row.attachment, null),
     bgColor: row.bg_color,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
@@ -89,7 +89,7 @@ export function statusView(row, viewerId) {
     userId: row.user_id,
     type: row.type,
     body: row.body,
-    attachment: row.attachment ? JSON.parse(row.attachment) : null,
+    attachment: safeJson(row.attachment, null),
     bgColor: row.bg_color,
     createdAt: row.created_at,
     expiresAt: row.expires_at,

@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
 
 // Form / survey (type='form'): a multi-question survey that goes beyond a single
@@ -48,8 +48,8 @@ export function closeForm(messageId, closed = true) {
 export function formView(messageId, viewerId) {
   const f = s.byMessage.get(messageId);
   if (!f) return null;
-  const questions = JSON.parse(f.questions);
-  const responses = s.responses.all(f.id).map((r) => JSON.parse(r.answers));
+  const questions = safeJson(f.questions, []);
+  const responses = s.responses.all(f.id).map((r) => safeJson(r.answers, []));
   // Aggregate per question.
   const results = questions.map((q, qi) => {
     const vals = responses.map((a) => a[qi]).filter((v) => v != null && v !== '');
@@ -75,8 +75,6 @@ export function formView(messageId, viewerId) {
     creatorId: f.creator_id,
     responseCount: s.count.get(f.id).n,
     results,
-    myAnswers: s.myResponse.get(f.id, viewerId)?.answers
-      ? JSON.parse(s.myResponse.get(f.id, viewerId).answers)
-      : null,
+    myAnswers: safeJson(s.myResponse.get(f.id, viewerId)?.answers, null),
   };
 }

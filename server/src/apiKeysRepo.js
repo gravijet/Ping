@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
 
 // ---- Developer API keys ----------------------------------------------------
@@ -60,7 +60,7 @@ export function apiKeyView(row) {
     name: row.name || '',
     // e.g. "ping_sk_a1b2…" — enough to recognise the key, useless on its own.
     prefix: row.prefix,
-    scopes: JSON.parse(row.scopes || '[]'),
+    scopes: safeJson(row.scopes, []),
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at || null,
   };
@@ -100,5 +100,5 @@ export function lookupApiKey(secret) {
     s.touch.run(ts, row.id);
     row.last_used_at = ts;
   }
-  return { ...row, scopeList: JSON.parse(row.scopes || '[]') };
+  return { ...row, scopeList: safeJson(row.scopes, []) };
 }

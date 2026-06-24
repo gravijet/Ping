@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
 
 // Whiteboard (type='whiteboard'): a collaborative drawing canvas backed by a
@@ -34,7 +34,7 @@ export function createWhiteboard({ messageId, chatId, creatorId, title = '', str
 export function addStroke(messageId, stroke) {
   const wb = s.byMessage.get(messageId);
   if (!wb) return false;
-  const strokes = JSON.parse(wb.strokes);
+  const strokes = safeJson(wb.strokes, []);
   if (strokes.length >= MAX_STROKES) return false;
   strokes.push(stroke);
   s.setStrokes.run(JSON.stringify(strokes), now(), messageId);
@@ -55,7 +55,7 @@ export function whiteboardView(messageId) {
     id: wb.id,
     title: wb.title || '',
     creatorId: wb.creator_id,
-    strokes: JSON.parse(wb.strokes),
+    strokes: safeJson(wb.strokes, []),
     updatedAt: wb.updated_at,
   };
 }

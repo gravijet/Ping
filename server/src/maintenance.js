@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import {
   purgeExpiredMessages,
   getChat,
@@ -81,7 +81,7 @@ export function runMaintenance() {
           senderId: row.sender_id,
           type: row.type,
           body: row.body,
-          attachment: row.attachment ? JSON.parse(row.attachment) : null,
+          attachment: safeJson(row.attachment, null),
           replyTo: row.reply_to,
         });
         delivered++;

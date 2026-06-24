@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
 
 // Recipe card (type='recipe'): ingredients + steps as JSON arrays of strings,
@@ -29,8 +29,8 @@ export function recipeView(messageId) {
     title: r.title,
     servings: r.servings || 0,
     minutes: r.minutes || 0,
-    ingredients: JSON.parse(r.ingredients),
-    steps: JSON.parse(r.steps),
+    ingredients: safeJson(r.ingredients, []),
+    steps: safeJson(r.steps, []),
     creatorId: r.creator_id,
   };
 }

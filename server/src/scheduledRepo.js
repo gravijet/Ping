@@ -1,4 +1,4 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
 
 // Storage for "send later" messages. They live here until their send_at passes,
@@ -52,7 +52,7 @@ export function scheduledView(row) {
     chatId: row.chat_id,
     type: row.type,
     body: row.body,
-    attachment: row.attachment ? JSON.parse(row.attachment) : null,
+    attachment: safeJson(row.attachment, null),
     replyTo: row.reply_to,
     sendAt: row.send_at,
     createdAt: row.created_at,

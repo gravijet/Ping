@@ -1,5 +1,9 @@
-import { db, now } from './db.js';
+import { db, now, safeJson } from './db.js';
 import { uid } from './repo.js';
+
+// Fallback for a corrupt/legacy state row: a fully-shaped empty board so neither
+// gameView (in the chat list) nor applyMove dereferences `undefined` and 500s.
+const EMPTY_STATE = { cells: [], players: [], mark: {}, last: null };
 
 // In-chat mini-games (0.34.0). A game is backed by a normal message (type='game')
 // whose live state lives here and rides along in messageView.game. Moves come in
@@ -42,7 +46,12 @@ export function applyMove(messageId, userId, cell) {
   if (!row) return { ok: false, error: 'not_found' };
   if (row.winner) return { ok: false, error: 'over' };
   const meta = KINDS[row.kind];
-  const st = JSON.parse(row.state);
+  // Defensive: a corrupt state row must not be mutated/dereferenced — reject the
+  // move rather than 500. (The server writes this column, so this is rare.)
+  const st = safeJson(row.state, null);
+  if (!st || !Array.isArray(st.cells) || !Array.isArray(st.players) || !st.mark) {
+    return { ok: false, error: 'bad_move' };
+  }
   // Turn enforcement: when the opponent is known, only the player whose turn it
   // is may move. Before the second player has joined, `turn` is open — but the
   // last mover still can't go twice in a row (you'd be playing against yourself).
@@ -78,7 +87,7 @@ export function applyMove(messageId, userId, cell) {
 export function gameView(messageId) {
   const row = s.byMessage.get(messageId);
   if (!row) return null;
-  const st = JSON.parse(row.state);
+  const st = safeJson(row.state, EMPTY_STATE);
   return {
     kind: row.kind,
     cells: st.cells,
