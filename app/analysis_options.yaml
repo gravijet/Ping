@@ -24,6 +24,10 @@ linter:
     # Conditional map entries (`if (x != null) 'k': x`) read more clearly than
     # the very new null-aware element syntax, so we keep using them.
     use_null_aware_elements: false
+    # Bug-catching lints beyond the base flutter_lints set: a leaked stream
+    # subscription or an unclosed sink/controller is a real resource leak.
+    cancel_subscriptions: true
+    close_sinks: true
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
