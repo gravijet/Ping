@@ -32,7 +32,7 @@ const CATS = [
   ...(flag('deviceDiagnostics') ? [['Gerät', 'bolt']] : []),
   ['Mehr', 'info'],
 ];
-export const WEB_CLIENT_VERSION = '0.38.0';
+export const WEB_CLIENT_VERSION = '0.39.0';
 
 // A no-op placeholder for `node.append(...)` (native append would turn a bare
 // null into the literal text "null") when a row is feature-flagged off.

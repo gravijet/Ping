@@ -295,6 +295,28 @@ and `privacyControls`. Four pillars, all server-enforced.
   username claimer, 2FA wizard + recovery-code export, disable/rotate, "überall
   abmelden" and the audit feed; the **Datenschutz** tab gains the reach selectors.
 
+## Stabilität — hardening release (0.39.0)
+A maintenance/bug-fix release: **no new features, no schema migration** (the
+FTS-indexed `messages` table is untouched). The substantive fixes are web/server
+(Windows inherits them via WebView2); Flutter has **no runtime change** and is
+rebuilt only for version parity (versionCode **5004**).
+- **Static-analysis net:** ESLint (flat config) + Prettier for `server/` and the
+  web client, wired into `ci.yml` (`npm run lint`, fails on errors not legacy
+  warnings); `eslint-plugin-no-unsanitized` guards the one sanctioned `innerHTML`
+  sink in `ui.js`. Flutter adds `cancel_subscriptions`/`close_sinks` lints.
+- **`safeJson(raw, fallback)`** (in `db.js`): every hot-path/view-repo JSON-column
+  parse (notably `messageView`'s `attachment`) degrades a corrupt row instead of
+  500-ing the whole list endpoint.
+- **Send idempotency:** an optional `clientId` on `messageSendSchema` + a short-lived
+  in-memory `(chat,sender,clientId)→messageId` map in `chatRepo.js` collapses a
+  retried send (offline outbox re-flush) onto one message. No column added.
+- **SSRF:** `assertSafeUrlSync` (in `linkPreview.js`) guards the Web-Push subscribe
+  endpoint; the link-preview guard's IPv6-literal handling is fixed.
+- **Web-client lifecycle:** the shared `modal()` cleans up its keydown listener and
+  manages focus (trap + restore, `role="dialog"`); `chats.js`/`saved.js` drop their
+  per-render store subscriptions; the whiteboard drops its global `mouseup`.
+- The SW cache is `ping-web-v0.39.0`.
+
 ## Universum — mega-release (0.38.0)
 The project's largest release: **ten new structured/media message types** plus
 features across seven pillars. All ten types follow the established poll recipe
