@@ -216,6 +216,7 @@ async function prefetchModules() {
     } catch { /* device.js unavailable — prefetch as usual */ }
   }
   const mods = ['./status.js', './calls-view.js', './saved.js', './groups.js', './devices.js'];
+  // eslint-disable-next-line no-unsanitized/method -- `mods` is a hardcoded literal list (code-split prefetch), not user input.
   const run = () => { for (const m of mods) import(m).catch(() => {}); };
   if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 4000 });
   else setTimeout(run, 2500);

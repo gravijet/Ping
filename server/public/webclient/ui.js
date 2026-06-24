@@ -108,6 +108,9 @@ export function el(tag, attrs = {}, children = []) {
     if (v == null || v === false) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
+    // The single sanctioned innerHTML sink: callers MUST pass escaped/trusted
+    // markup (escapeHtml / richText / highlight). Untrusted text goes via 'text'.
+    // eslint-disable-next-line no-unsanitized/property
     else if (k === 'html') node.innerHTML = v;
     else if (k === 'dataset') Object.assign(node.dataset, v);
     else if (k === 'style') Object.assign(node.style, v);

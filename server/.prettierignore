@@ -1,0 +1,7 @@
+node_modules
+public/webclient/vendor
+coverage
+package-lock.json
+*.db
+*.db-*
+downloads

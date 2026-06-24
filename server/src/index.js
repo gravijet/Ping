@@ -170,8 +170,9 @@ export function createApp() {
   // 404 for unknown API routes.
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Diese Ressource gibt es nicht.' }));
 
-  // Central error handler — never leak stack traces to clients.
-  // eslint-disable-next-line no-unused-vars
+  // Central error handler — never leak stack traces to clients. The 4-arg
+  // signature is what marks this as Express error middleware; `_next` is unused
+  // on purpose (the `^_` argsIgnorePattern covers it).
   app.use((err, _req, res, _next) => {
     const status = err.status || 500;
     if (status >= 500) console.error('[error]', err);

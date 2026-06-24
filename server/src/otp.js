@@ -32,10 +32,12 @@ function hashCode(phone, code) {
 function randomCode(len) {
   // Uniformly-random numeric code (no modulo bias), zero-padded.
   const max = 10 ** len;
-  let n;
-  do {
-    n = crypto.randomInt(0, max);
-  } while (n < max / 10 && len > 1); // avoid leading-zero-heavy codes occasionally
+  let n = crypto.randomInt(0, max);
+  // For multi-digit codes, re-roll the (rare) leading-zero-heavy draws so the
+  // code reliably fills its width.
+  if (len > 1) {
+    while (n < max / 10) n = crypto.randomInt(0, max);
+  }
   return String(n).padStart(len, '0');
 }
 

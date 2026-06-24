@@ -9,6 +9,9 @@
    already re-applies the visuals live, so the preview is instant. encode/decode
    are pure + side-effect-free for easy unit testing. */
 
+/* global Buffer -- used only as a non-browser base64 fallback (Node/test); in
+   the browser btoa/atob always exist, so the Buffer branch is dead there. */
+
 import * as prefs from './prefs.js';
 import { el, icon, toast, modal } from './ui.js';
 
