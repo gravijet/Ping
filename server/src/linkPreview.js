@@ -75,7 +75,10 @@ export async function assertSafeUrl(rawUrl) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     throw badUrl('Nur http- und https-Links werden unterstützt.');
   }
-  const host = u.hostname;
+  // new URL keeps IPv6 literals bracketed ("[::1]"); strip them so net.isIP /
+  // dns.lookup see a bare address (otherwise a public IPv6 literal would fail the
+  // IP check, fall through to a failed DNS lookup, and be wrongly rejected).
+  const host = u.hostname.replace(/^\[|\]$/g, '');
   if (!host || isBlockedHostname(host)) throw badUrl('Dieser Host ist nicht erreichbar.');
 
   // A bare IP literal: check it directly. Otherwise resolve and check every
@@ -100,6 +103,31 @@ function badUrl(message) {
   const err = new Error(message);
   err.status = 400;
   return err;
+}
+
+/// Synchronous, DNS-free subset of assertSafeUrl: scheme + blocked-hostname +
+/// private IP-literal check. For callers where a DNS round-trip per call is too
+/// costly or undesirable (e.g. validating a stored Web-Push endpoint at
+/// subscribe time). Catches the realistic SSRF vectors — the cloud-metadata IP,
+/// localhost, RFC1918/ULA literals — without a network dependency. The residual
+/// (a public name that *resolves* to a private IP) is acceptable for a blind,
+/// POST-only, encrypted-payload channel. Throws a 400 Error; returns the URL.
+export function assertSafeUrlSync(rawUrl) {
+  let u;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    throw badUrl('Diese Adresse ist ungültig.');
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    throw badUrl('Nur http- und https-Links werden unterstützt.');
+  }
+  // new URL keeps IPv6 literals bracketed ("[::1]"); strip them so net.isIP /
+  // isPrivateIp see a bare address.
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (!host || isBlockedHostname(host)) throw badUrl('Dieser Host ist nicht erreichbar.');
+  if (net.isIP(host) && isPrivateIp(host)) throw badUrl('Dieser Host ist nicht erreichbar.');
+  return u;
 }
 
 // ---- HTML metadata parsing -------------------------------------------------

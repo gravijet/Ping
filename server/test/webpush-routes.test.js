@@ -109,6 +109,30 @@ test('subscribe rejects a malformed subscription', async () => {
   assert.equal(r.status, 400);
 });
 
+test('subscribe blocks an SSRF endpoint (private/metadata/loopback host)', async () => {
+  const token = await register('+431000006');
+  const { webSubscriptionsForUsers } = await import('../src/webPushRepo.js');
+  const { getUserByPhone } = await import('../src/repo.js');
+  const uid = getUserByPhone('+431000006').id;
+  for (const endpoint of [
+    'http://169.254.169.254/latest/meta-data/', // cloud metadata
+    'http://localhost/internal',
+    'http://127.0.0.1/internal',
+    'http://10.0.0.5/x',
+    'http://[::1]/x',
+    'ftp://example.com/x', // non-http scheme
+  ]) {
+    const r = await api('/api/push/web/subscribe', {
+      method: 'POST',
+      token,
+      body: { endpoint, keys: { p256dh: 'x', auth: 'y' } },
+    });
+    assert.equal(r.status, 400, `must reject ${endpoint}`);
+  }
+  // None of the malicious endpoints were stored.
+  assert.equal(webSubscriptionsForUsers([uid]).length, 0);
+});
+
 test("a user cannot remove another user's subscription", async () => {
   const a = await register('+431000004');
   const b = await register('+431000005');

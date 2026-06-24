@@ -296,6 +296,7 @@ import {
   MAX_PINS_PER_CHAT,
 } from './chatRepo.js';
 import { getLinkPreview } from './linkPreviewRepo.js';
+import { assertSafeUrlSync } from './linkPreview.js';
 import {
   listFolders,
   getFolder,
@@ -5371,6 +5372,10 @@ router.post(
   requireAuth,
   h(async (req, res) => {
     const sub = parse(webPushSubscriptionSchema, req.body);
+    // SSRF guard: the server later POSTs to this endpoint to deliver pushes, so a
+    // private/loopback/metadata host must never be stored. Reuses the link-preview
+    // defence (http(s)-only + private IP-literal/blocked-hostname block).
+    assertSafeUrlSync(sub.endpoint);
     saveWebPushSubscription(req.user.id, {
       endpoint: sub.endpoint,
       p256dh: sub.keys.p256dh,

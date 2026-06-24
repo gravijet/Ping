@@ -23,7 +23,12 @@ const s = {
   findCode: db.prepare(
     'SELECT * FROM recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL'
   ),
-  useCode: db.prepare('UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ?'),
+  // The `used_at IS NULL` guard makes the UPDATE itself the atomic single-use
+  // consume — `changes > 0` then can't double-count a code even if two requests
+  // ever raced (today node:sqlite runs find+use in one synchronous tick).
+  useCode: db.prepare(
+    'UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL'
+  ),
   countUnused: db.prepare(
     'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ? AND used_at IS NULL'
   ),
