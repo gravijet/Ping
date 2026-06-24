@@ -519,6 +519,44 @@ const m = {
   ),
 };
 
+// ---- Send idempotency ------------------------------------------------------
+// A short-lived in-memory map of (chat, sender, client-supplied id) -> message
+// id. The web outbox re-flushes a queued send after a lost response; without a
+// dedup key the server would create a second copy. Kept in memory (no schema
+// change, no FTS impact): retries happen within seconds/minutes, far inside the
+// TTL. A server restart drops the map — acceptable for this rare edge.
+const DEDUP_TTL_MS = 10 * 60 * 1000;
+const DEDUP_MAX = 5000;
+const recentSends = new Map(); // key -> { id, exp }
+const dedupKey = (chatId, senderId, clientId) => `${chatId} ${senderId} ${clientId}`;
+
+/// If [clientId] was already used for a send in this chat by this sender (within
+/// the TTL), return that existing message row — else null. Lets the send route
+/// short-circuit a retried delivery without re-broadcasting / re-pushing it.
+export function dedupLookupMessage(chatId, senderId, clientId) {
+  if (!clientId) return null;
+  const hit = recentSends.get(dedupKey(chatId, senderId, clientId));
+  if (!hit) return null;
+  if (hit.exp <= now()) {
+    recentSends.delete(dedupKey(chatId, senderId, clientId));
+    return null;
+  }
+  return m.byId.get(hit.id) || null;
+}
+
+/// Remember that [clientId] produced [messageId], so an immediate retry collapses
+/// onto the same message.
+export function rememberClientId(chatId, senderId, clientId, messageId) {
+  if (!clientId) return;
+  if (recentSends.size >= DEDUP_MAX) {
+    const cutoff = now();
+    for (const [k, v] of recentSends) if (v.exp <= cutoff) recentSends.delete(k);
+    // Still full of live entries? Drop the oldest-inserted to bound memory.
+    if (recentSends.size >= DEDUP_MAX) recentSends.delete(recentSends.keys().next().value);
+  }
+  recentSends.set(dedupKey(chatId, senderId, clientId), { id: messageId, exp: now() + DEDUP_TTL_MS });
+}
+
 export function createMessage({
   chatId,
   senderId,

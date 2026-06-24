@@ -35,10 +35,12 @@ export function count() { return load().length; }
 
 /** Queue a text message for (re)delivery. Returns the queued item (incl. its
     clientId + tempId for the optimistic bubble). */
-export function enqueue({ chatId, body, replyTo = null }) {
+export function enqueue({ chatId, body, replyTo = null, clientId = null }) {
   const items = load();
   const item = {
-    clientId: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    // Reuse the id the initial (failed) send already used, so the server dedupes
+    // the retry onto the same message instead of creating a duplicate.
+    clientId: clientId || crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     chatId, body, replyTo,
     ts: Date.now(),
     attempts: 0,
@@ -68,7 +70,7 @@ export async function flush() {
     for (const item of items) {
       try {
         const r = await api.post(`/chats/${item.chatId}/messages`,
-          { body: item.body, ...(item.replyTo ? { replyTo: item.replyTo } : {}) });
+          { body: item.body, clientId: item.clientId, ...(item.replyTo ? { replyTo: item.replyTo } : {}) });
         removeByClientId(item.clientId);
         store.emit('outbox-sent', { clientId: item.clientId, tempId: item.tempId,
           chatId: item.chatId, message: r.message });

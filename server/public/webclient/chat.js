@@ -920,6 +920,9 @@ function renderComposer() {
     cur.replyTo = null;
     drafts.clear(chatId);          // the draft has been committed
     renderComposer();
+    // One idempotency id for this send, shared by the direct POST and any outbox
+    // retry, so a lost response can't turn into a duplicate message on the server.
+    const clientId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
       // 0.34.0 E2EE: when the DM's session is active, encrypt on-device and post
       // opaque ciphertext (enc:true). Falls back to plaintext if encryption fails.
@@ -931,7 +934,7 @@ function renderComposer() {
           if (ct) { body = ct; enc = true; }
         }
       }
-      const r = await api.post(`/chats/${chatId}/messages`, { body, ...(enc ? { enc: true } : {}), ...(replyTo ? { replyTo } : {}), ...(effect ? { effect } : {}) });
+      const r = await api.post(`/chats/${chatId}/messages`, { body, clientId, ...(enc ? { enc: true } : {}), ...(replyTo ? { replyTo } : {}), ...(effect ? { effect } : {}) });
       store.addMessage(chatId, r.message);
       recordSent(chatId);          // device-local insights tally
     } catch (e) {
@@ -939,7 +942,7 @@ function renderComposer() {
       // an optimistic "pending" bubble instead of losing what the user typed.
       const offline = e.status === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false);
       if (flag('outbox') && offline) {
-        const item = outbox.enqueue({ chatId, body: text, replyTo });
+        const item = outbox.enqueue({ chatId, body: text, replyTo, clientId });
         store.addMessage(chatId, pendingMessage(item));
         recordSent(chatId);
         toast('Offline – wird gesendet, sobald du wieder verbunden bist.');

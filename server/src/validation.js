@@ -166,6 +166,10 @@ export const messageSendSchema = z
     enc: z.boolean().optional(),
     // 0.37.0: one-shot send effect played on arrival.
     effect: z.enum(['confetti', 'balloons', 'hearts']).optional(),
+    // Idempotency key (client-generated): lets the server collapse a retried send
+    // — e.g. the outbox re-flushing after a response was lost — into one message
+    // instead of creating a duplicate.
+    clientId: z.string().trim().min(1).max(80).optional(),
   })
   .refine(
     (d) => {

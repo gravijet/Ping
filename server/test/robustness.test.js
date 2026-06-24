@@ -91,6 +91,36 @@ test('corrupt polls.options does not crash the chat history fetch', async () => 
   assert.deepEqual(m.poll.options, [], 'corrupt options degrade to an empty list');
 });
 
+test('a retried send with the same clientId is deduped, not duplicated', async () => {
+  const { a, chatId } = await fixture(4);
+  const send = () =>
+    api(`/api/chats/${chatId}/messages`, {
+      method: 'POST', token: a.token, body: { body: 'nur einmal', clientId: 'fixed-key-1' },
+    });
+  const first = await send();
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  const second = await send(); // same clientId — a retry
+  assert.equal(second.status, 201);
+  // Same canonical message id both times → the server collapsed the retry.
+  assert.equal(second.json.message.id, first.json.message.id, 'retry must reuse the message');
+
+  // And the chat really holds only one copy.
+  const list = await api(`/api/chats/${chatId}/messages`, { token: a.token });
+  const copies = list.json.messages.filter((m) => m.body === 'nur einmal');
+  assert.equal(copies.length, 1, 'exactly one message stored');
+});
+
+test('different clientIds create distinct messages', async () => {
+  const { a, chatId } = await fixture(5);
+  const r1 = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'A', clientId: 'k-a' },
+  });
+  const r2 = await api(`/api/chats/${chatId}/messages`, {
+    method: 'POST', token: a.token, body: { body: 'B', clientId: 'k-b' },
+  });
+  assert.notEqual(r2.json.message.id, r1.json.message.id);
+});
+
 test('voting on a poll with corrupt options is rejected, not a crash', async () => {
   const { a, chatId } = await fixture(3);
   const poll = await api(`/api/chats/${chatId}/polls`, {

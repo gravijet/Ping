@@ -261,6 +261,8 @@ import {
   getUserChats,
   chatView,
   createMessage,
+  dedupLookupMessage,
+  rememberClientId,
   getMessage,
   markVideoNote,
   editMessage,
@@ -1676,10 +1678,19 @@ router.post(
         .status(403)
         .json({ error: 'In diesem Kanal können nur die Betreiber posten.' });
     }
-    const { body, type = 'text', attachment, replyTo: replyRaw, viewOnce, enc, effect } = parse(
+    const { body, type = 'text', attachment, replyTo: replyRaw, viewOnce, enc, effect, clientId } = parse(
       messageSendSchema,
       req.body || {}
     );
+    // Idempotency: a retried send (e.g. the offline outbox re-flushing after a
+    // lost response) carries the same clientId — collapse it onto the original
+    // message instead of creating a duplicate, and skip the broadcast/push again.
+    if (clientId) {
+      const existing = dedupLookupMessage(req.chat.id, req.user.id, clientId);
+      if (existing) {
+        return res.status(201).json({ message: messageView(existing, req.user.id) });
+      }
+    }
     const replyTo = replyRaw ? replyRaw.toString() : null;
     if (replyTo) {
       const target = getMessage(replyTo);
@@ -1724,6 +1735,7 @@ router.post(
       // 0.37.0 "Feinschliff": one-shot send effect (flag-gated client-side).
       effect: flagOn('sendEffects') ? (effect || '') : '',
     });
+    if (clientId) rememberClientId(req.chat.id, req.user.id, clientId, msg.id);
     // 0.34.0: queue on-prem transcription for voice notes (no-op if unconfigured).
     if (type === 'voice' && att?.url && flagOn('voiceTranscription')) {
       queueVoiceTranscription(msg, att);
