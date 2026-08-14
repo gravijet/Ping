@@ -4,25 +4,24 @@ name: Windows Desktop Build
 # This Linux production host can't compile a Windows .exe (Flutter Windows needs
 # Windows + Visual Studio), so this runs on a windows-latest runner.
 #
-# The installer is uploaded as a downloadable workflow artifact only — Ping
-# hosts the .exe itself (drop it into server/public/downloads/ and the website's
-# /download/windows serves it). No GitHub Release is created.
+# Ping hosts the .exe itself (drop it into server/public/downloads/ and the
+# website's /download/windows serves it) — this build only has to hand the file
+# over. It does that via a prerelease tagged `build-<version>`, shared with the
+# android-build workflow; the repo is private, so that release is private too:
+#   gh release download build-<version> -p 'Ping-Setup-*.exe' -D /tmp/…
+# The asset is already named Ping-Setup-<version>.exe, so it can be copied
+# straight into server/public/downloads/.
 #
-# Run it manually from the Actions tab (workflow_dispatch), download the
-# "Ping-Windows-Setup" artifact, rename it to e.g. Ping-Setup-0.13.0.exe and copy
-# it into the server's downloads folder.
-#
-# Storage: the artifact is transport, not an archive — it gets pulled minutes later
-# and then lives on the server. Artifact storage is billed *account-wide*, so old
-# builds piling up here break every other repo's builds too. Hence: keep the newest
-# installer only, with retention-days as the backstop.
+# Why a release and not a workflow artifact: artifact storage is billed
+# *account-wide*, and old builds piling up there took down every repo on the
+# account with "Artifact storage quota has been hit". Release assets don't count
+# against that quota.
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  actions: write   # needed to delete the older artifacts
+  contents: write   # create the build release + upload assets
 
 jobs:
   build:
@@ -82,27 +81,27 @@ jobs:
         run: |
           "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.version.outputs.version }} installer.iss
 
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          # Download this from the run, rename to Ping-Setup-<version>.exe and
-          # drop it into server/public/downloads/ on the server.
-          name: Ping-Setup-${{ steps.version.outputs.version }}
-          path: app/windows/dist/Ping-Windows-Setup.exe
-          if-no-files-found: error
-          retention-days: 7
-
-      # Keep only the installer this run just produced (see header). Runs after the
-      # upload, so the fresh one is the one that survives.
-      - name: Drop older installer artifacts
+      # The android and windows workflows are usually dispatched together and share
+      # one `build-<version>` release, so create it only if it isn't there yet — and
+      # tolerate losing that race to the other job.
+      - name: Publish installer to the build release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: build-${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
-            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("Ping-Setup-")))]
-                  | sort_by(.created_at) | reverse | .[1:] | .[] | "\(.id)\t\(.name)"' \
-          | while IFS="$(printf '\t')" read -r id name; do
-              echo "deleting $name ($id)"
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" || true
-            done
+          # Named for its destination right away — server/public/downloads/ wants
+          # Ping-Setup-<version>.exe, so no renaming by hand afterwards.
+          cp app/windows/dist/Ping-Windows-Setup.exe "Ping-Setup-${VERSION}.exe"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Ping $VERSION — CI build" \
+              --prerelease \
+              --notes "Build output, not a public release: the APKs go through server/scripts/publish-apk.sh and the installer into server/public/downloads/." \
+            || true
+          fi
+          gh release upload "$TAG" "Ping-Setup-${VERSION}.exe" --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'

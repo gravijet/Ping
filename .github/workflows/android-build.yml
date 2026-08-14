@@ -14,22 +14,23 @@ name: Android Build
 #   ANDROID_KEY_PASSWORD     – key password
 #   ANDROID_STORE_PASSWORD   – keystore password
 #
-# After a signed run, download the artifact, then on the server publish with:
+# The APKs land as assets on a prerelease tagged `build-<version>` (the repo is
+# private, so that release is private too). Grab them with:
+#   gh release download build-<version> -D /tmp/…
+# then on the server publish with:
 #   server/scripts/publish-apk.sh   (verifies each APK's version with aapt)
 #
-# Storage: the artifact is transport, not an archive — the release procedure pulls
-# it minutes later (CLAUDE.md step 6) and the APKs then live on the server. Artifact
-# storage is billed *account-wide*, so a pile of old 116 MB APK sets here takes down
-# the builds of every other repo too ("Artifact storage quota has been hit" — that
-# already happened once, 51 sets ≈ 3.9 GB). Hence: keep the newest set only, with
-# retention-days as the backstop if the prune step is ever skipped.
+# Why a release and not a workflow artifact: artifact storage is billed
+# *account-wide* and one APK set is ~116 MB. 51 of them piled up here (≈3.9 GB),
+# blew the quota, and every repo on the account then failed with "Artifact storage
+# quota has been hit" — including this one. Release assets are not counted against
+# that quota, so this path cannot starve anything.
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  actions: write   # needed to delete the older artifacts
+  contents: write   # create the build release + upload assets
 
 jobs:
   build:
@@ -118,25 +119,22 @@ jobs:
           done
           ls -la dist
 
-      - name: Upload APK artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ping-Android-${{ steps.version.outputs.version }}
-          path: dist/*.apk
-          if-no-files-found: error
-          retention-days: 7
-
-      # Keep only the set this run just produced; every older Ping-Android-* set is
-      # already published on the server and only burns shared quota. Runs after the
-      # upload, so the fresh set is the one that survives.
-      - name: Drop older APK artifacts
+      # The android and windows workflows are usually dispatched together and share
+      # one `build-<version>` release, so create it only if it isn't there yet — and
+      # tolerate losing that race to the other job.
+      - name: Publish APKs to the build release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: build-${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
-            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("Ping-Android-")))]
-                  | sort_by(.created_at) | reverse | .[1:] | .[] | "\(.id)\t\(.name)"' \
-          | while IFS="$(printf '\t')" read -r id name; do
-              echo "deleting $name ($id)"
-              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" || true
-            done
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Ping $VERSION — CI build" \
+              --prerelease \
+              --notes "Build output, not a public release: the APKs go through server/scripts/publish-apk.sh and the installer into server/public/downloads/." \
+            || true
+          fi
+          gh release upload "$TAG" dist/*.apk --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name'
