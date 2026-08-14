@@ -16,9 +16,20 @@ name: Android Build
 #
 # After a signed run, download the artifact, then on the server publish with:
 #   server/scripts/publish-apk.sh   (verifies each APK's version with aapt)
+#
+# Storage: the artifact is transport, not an archive — the release procedure pulls
+# it minutes later (CLAUDE.md step 6) and the APKs then live on the server. Artifact
+# storage is billed *account-wide*, so a pile of old 116 MB APK sets here takes down
+# the builds of every other repo too ("Artifact storage quota has been hit" — that
+# already happened once, 51 sets ≈ 3.9 GB). Hence: keep the newest set only, with
+# retention-days as the backstop if the prune step is ever skipped.
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write   # needed to delete the older artifacts
 
 jobs:
   build:
@@ -113,3 +124,19 @@ jobs:
           name: Ping-Android-${{ steps.version.outputs.version }}
           path: dist/*.apk
           if-no-files-found: error
+          retention-days: 7
+
+      # Keep only the set this run just produced; every older Ping-Android-* set is
+      # already published on the server and only burns shared quota. Runs after the
+      # upload, so the fresh set is the one that survives.
+      - name: Drop older APK artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and (.name | startswith("Ping-Android-")))]
+                  | sort_by(.created_at) | reverse | .[1:] | .[] | "\(.id)\t\(.name)"' \
+          | while IFS="$(printf '\t')" read -r id name; do
+              echo "deleting $name ($id)"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" || true
+            done
