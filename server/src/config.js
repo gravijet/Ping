@@ -92,7 +92,7 @@ export const config = {
 
   // ---- Firebase phone verification -----------------------------------------
   // The Firebase project whose ID tokens we accept as proof of phone ownership.
-  firebaseProjectId: process.env.FIREBASE_PROJECT_ID || 'ping-gj',
+  firebaseProjectId: process.env.FIREBASE_PROJECT_ID || '',
   // When true, /auth/register refuses accounts without a valid Firebase phone
   // token. Keep it off until the verifying app build is rolled out, then flip
   // REQUIRE_PHONE_VERIFICATION=1 to enforce it.

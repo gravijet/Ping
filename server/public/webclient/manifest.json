@@ -15,9 +15,9 @@
   "categories": ["social", "communication", "productivity"],
   "shortcuts": [
     { "name": "Neuer Chat", "short_name": "Neu", "url": "/?compose=1",
-      "description": "Eine neue Unterhaltung starten" },
+      "description": "Start a conversation" },
     { "name": "Aktivität", "short_name": "Aktivität", "url": "/?view=activity",
-      "description": "Reaktionen, Erwähnungen und verpasste Anrufe" }
+      "description": "Reactions, mentions and missed calls" }
   ],
   "icons": [
     { "src": "/favicon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
