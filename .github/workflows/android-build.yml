@@ -1,30 +1,8 @@
 name: Android Build
 
-# Builds the Ping Android app: per-ABI split APKs (smaller, used by the in-app
-# updater) plus a universal APK (the default download + fallback). Uploaded as
-# workflow artifacts.
-#
-# Signing: to produce OTA-grade builds that install *over* an existing Ping
-# install, the same stable release keystore must be used. Provide it as repo
-# secrets and this workflow signs with it; without them it falls back to the
-# debug keystore (fine for fresh installs / testing, but NOT a drop-in update —
-# the signatures won't match). Required secrets for release signing:
-#   ANDROID_KEYSTORE_BASE64  – base64 of app/android/ping-release.jks
-#   ANDROID_KEY_ALIAS        – key alias
-#   ANDROID_KEY_PASSWORD     – key password
-#   ANDROID_STORE_PASSWORD   – keystore password
-#
-# The APKs land as assets on a prerelease tagged `build-<version>` (the repo is
-# private, so that release is private too). Grab them with:
-#   gh release download build-<version> -D /tmp/…
-# then on the server publish with:
-#   server/scripts/publish-apk.sh   (verifies each APK's version with aapt)
-#
-# Why a release and not a workflow artifact: artifact storage is billed
-# *account-wide* and one APK set is ~116 MB. 51 of them piled up here (≈3.9 GB),
-# blew the quota, and every repo on the account then failed with "Artifact storage
-# quota has been hit" — including this one. Release assets are not counted against
-# that quota, so this path cannot starve anything.
+# Builds universal and per-ABI APKs and uploads them to a prerelease.
+# Configure the ANDROID_* repository secrets for stable release signing.
+# Builds without those secrets use the debug keystore.
 
 on:
   workflow_dispatch:
@@ -133,7 +111,7 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "Ping $VERSION — CI build" \
               --prerelease \
-              --notes "Build output, not a public release: the APKs go through server/scripts/publish-apk.sh and the installer into server/public/downloads/." \
+              --notes "Android and Windows build artifacts for Ping $VERSION." \
             || true
           fi
           gh release upload "$TAG" dist/*.apk --clobber

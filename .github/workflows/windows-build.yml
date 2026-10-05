@@ -1,21 +1,6 @@
 name: Windows Desktop Build
 
-# Builds the Ping Windows desktop app and packages it as an installer.
-# This Linux production host can't compile a Windows .exe (Flutter Windows needs
-# Windows + Visual Studio), so this runs on a windows-latest runner.
-#
-# Ping hosts the .exe itself (drop it into server/public/downloads/ and the
-# website's /download/windows serves it) — this build only has to hand the file
-# over. It does that via a prerelease tagged `build-<version>`, shared with the
-# android-build workflow; the repo is private, so that release is private too:
-#   gh release download build-<version> -p 'Ping-Setup-*.exe' -D /tmp/…
-# The asset is already named Ping-Setup-<version>.exe, so it can be copied
-# straight into server/public/downloads/.
-#
-# Why a release and not a workflow artifact: artifact storage is billed
-# *account-wide*, and old builds piling up there took down every repo on the
-# account with "Artifact storage quota has been hit". Release assets don't count
-# against that quota.
+# Builds the Windows installer and uploads it to a prerelease.
 
 on:
   workflow_dispatch:
@@ -100,7 +85,7 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "Ping $VERSION — CI build" \
               --prerelease \
-              --notes "Build output, not a public release: the APKs go through server/scripts/publish-apk.sh and the installer into server/public/downloads/." \
+              --notes "Android and Windows build artifacts for Ping $VERSION." \
             || true
           fi
           gh release upload "$TAG" "Ping-Setup-${VERSION}.exe" --clobber
