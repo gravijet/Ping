@@ -2,7 +2,7 @@
 
 Experimental Flutter messenger with a Node.js realtime backend. Includes accounts, direct and group chats, media, contact matching and WebRTC calls.
 
-The application is still under development. Android is the primary target; desktop support and calls need testing on the target devices and networks.
+Android is the primary target. Desktop support and calls still need testing on the target devices and networks.
 
 ## Backend
 
@@ -16,7 +16,7 @@ npm start
 npm test
 ```
 
-Set session and administration secrets locally. Databases, uploaded files, Firebase credentials and signing material are excluded from Git.
+Set session and administration secrets locally.
 
 ## App
 
