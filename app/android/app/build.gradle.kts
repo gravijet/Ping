@@ -6,7 +6,7 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     // Applies the Firebase configuration from android/app/google-services.json.
-    id("com.google.gms.google-services")
+    if (file("google-services.json").exists()) id("com.google.gms.google-services")
 }
 
 // Load the release signing credentials from android/key.properties when present.
